@@ -5,6 +5,7 @@ import {
   DndContext,
   DragEndEvent,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
   closestCorners,
@@ -94,7 +95,9 @@ export default function OrdersPage() {
 
     // If moving to confirmed, ask about payment
     if (newStage === "confirmed" && order.stage !== "confirmed") {
-      setPayModal({ ...order, stage: newStage });
+      // Eski stage qiymatini saqlab qolamiz. Aks holda API buyurtma avvaldan
+      // "confirmed" bo'lgan deb o'ylab, kirim/arxiv avtomatizatsiyasini o'tkazmaydi.
+      setPayModal(order);
       return;
     }
 
@@ -152,7 +155,7 @@ export default function OrdersPage() {
 
   async function confirmPayment(paymentType: string) {
     if (!payModal) return;
-    await updateStage(payModal, payModal.stage, paymentType);
+    await updateStage(payModal, "confirmed", paymentType);
     setPayModal(null);
   }
 
@@ -376,11 +379,17 @@ function StageColumn({
   total: number;
   onDelete: (id: number) => void;
 }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: stage.id,
+    data: { type: "stage", stage: stage.id },
+  });
+
   return (
     <div
-      className="bg-slate-100 dark:bg-slate-900 rounded-3xl p-3 min-h-[300px]"
-      id={stage.id}
-      data-stage={stage.id}
+      ref={setNodeRef}
+      className={`bg-slate-100 dark:bg-slate-900 rounded-3xl p-3 min-h-[300px] transition-shadow ${
+        isOver ? "ring-2 ring-accent/60" : ""
+      }`}
     >
       <div className="flex items-center justify-between px-2 py-2 mb-2">
         <div className="flex items-center gap-2">
@@ -427,7 +436,10 @@ function OrderCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: order.id });
+  } = useSortable({
+    id: order.id,
+    data: { type: "order", stage: order.stage },
+  });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
