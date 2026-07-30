@@ -11,6 +11,13 @@ function sessionSecret(): string {
   return requiredEnv("SESSION_SECRET", "flowdesk-local-dev-secret-change-me");
 }
 
+export function missingAuthEnv(): string[] {
+  if (process.env.NODE_ENV !== "production") return [];
+  return ["SESSION_SECRET", "ADMIN_USERNAME", "ADMIN_PASSWORD"].filter(
+    (name) => !process.env[name]
+  );
+}
+
 async function hmac(data: string, key: string): Promise<string> {
   const enc = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(

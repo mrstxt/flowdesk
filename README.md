@@ -61,6 +61,15 @@ Keyin brauzerda `http://localhost:3000` ochiladi.
 | `ADMIN_USERNAME` | `admin` | Panelga kirish login |
 | `ADMIN_PASSWORD` | `kuchli-parol` | Panelga kirish parol |
 
+Vercel’da login ishlashi uchun shu 4 ta env majburiy:
+
+```env
+DATABASE_URL="postgresql://..."
+SESSION_SECRET="uzun-random-secret"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="siz-kiritadigan-parol"
+```
+
 ### Telegram Bot Uchun
 
 | Kalit | Misol | Izoh |
@@ -203,3 +212,17 @@ npm run db:push
 ## Muhim Eslatma
 
 Productionda `ADMIN_PASSWORD`, `SESSION_SECRET`, `BOT_WEBHOOK_SECRET`, `VERCEL_CRON_SECRET` qiymatlarini oddiy yoki default qoldirmang. Har birini uzun random satr qilib qo'ying.
+
+## Login Muammolari
+
+Vercel logs ichida:
+
+| Status | Sabab |
+|---|---|
+| `GET / 307` | Normal holat. Login qilinmagan foydalanuvchi `/login`ga redirect bo'ladi |
+| `GET /login 200` | Normal holat. Login sahifasi ochilgan |
+| `POST /api/auth/login 400` | Login yoki parol input bo'sh/yaroqsiz ketgan |
+| `POST /api/auth/login 401` | `ADMIN_USERNAME` yoki `ADMIN_PASSWORD` qiymatiga mos login/parol kiritilmagan |
+| `POST /api/auth/login 500` | Vercel env ichida `SESSION_SECRET`, `ADMIN_USERNAME` yoki `ADMIN_PASSWORD` yetishmayapti |
+
+Agar `401` chiqsa, Vercel → Project → Settings → Environment Variables ichidagi `ADMIN_USERNAME` va `ADMIN_PASSWORD`ni tekshiring. Keyin projectni redeploy qiling.

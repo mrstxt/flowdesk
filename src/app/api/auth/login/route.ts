@@ -1,11 +1,27 @@
 import { NextResponse } from "next/server";
-import { createToken, checkCredentials } from "@/lib/auth";
+import { createToken, checkCredentials, missingAuthEnv } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
+    const missing = missingAuthEnv();
+    if (missing.length) {
+      console.error(`Missing auth environment variables: ${missing.join(", ")}`);
+      return NextResponse.json(
+        { error: "Server login sozlamalari to'liq emas" },
+        { status: 500 }
+      );
+    }
+
     const { username, password } = await req.json();
+    if (!username || !password) {
+      return NextResponse.json(
+        { error: "Login va parol kiritilishi kerak" },
+        { status: 400 }
+      );
+    }
+
     if (!checkCredentials(String(username ?? ""), String(password ?? ""))) {
       return NextResponse.json(
         { error: "Login yoki parol noto'g'ri" },
@@ -21,7 +37,8 @@ export async function POST(req: Request) {
       secure: process.env.NODE_ENV === "production",
     });
     return res;
-  } catch {
-    return NextResponse.json({ error: "Xatolik" }, { status: 400 });
+  } catch (error) {
+    console.error("Login failed", error);
+    return NextResponse.json({ error: "Server xatoligi" }, { status: 500 });
   }
 }
