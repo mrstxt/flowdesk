@@ -226,3 +226,42 @@ Vercel logs ichida:
 | `POST /api/auth/login 500` | Vercel env ichida `SESSION_SECRET`, `ADMIN_USERNAME` yoki `ADMIN_PASSWORD` yetishmayapti |
 
 Agar `401` chiqsa, Vercel → Project → Settings → Environment Variables ichidagi `ADMIN_USERNAME` va `ADMIN_PASSWORD`ni tekshiring. Keyin projectni redeploy qiling.
+
+## Ma'lumotlar Saqlanmasa Yoki Bot Xato Bersa
+
+Agar panelda amallar refreshdan keyin yo'qolsa yoki bot `❌ Xatolik yuz berdi` desa, frontend ishlayapti, lekin API databasega yoza olmayapti.
+
+1. Vercel’da `DATABASE_URL` borligini tekshiring:
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require"
+```
+
+2. Env qo'shgandan keyin Vercel’da redeploy qiling.
+
+3. Database jadvallarini yarating:
+
+```bash
+DATABASE_URL="postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require" npm run db:push
+```
+
+4. Deploy qilingan saytda health endpointni oching:
+
+```text
+https://SIZNING_DOMEN/api/health
+```
+
+To'g'ri holat:
+
+```json
+{"ok":true,"database":"connected"}
+```
+
+Xato holatlar:
+
+| Code | Nima qilish kerak |
+|---|---|
+| `database_not_configured` | Vercel envga `DATABASE_URL` qo'ying va redeploy qiling |
+| `database_schema_missing` | `npm run db:push` bilan jadvallarni yarating |
+| `database_connection_failed` | `DATABASE_URL` login/parol/host qiymatini tekshiring |
+| `database_error` | Vercel Logs ichidagi `Health check failed` xabarini tekshiring |

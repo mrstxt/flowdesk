@@ -83,6 +83,25 @@ function splitParts(args: string): string[] {
     .filter(Boolean);
 }
 
+function setupErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("DATABASE_URL is required")) {
+    return "❌ DATABASE_URL sozlanmagan. Vercel Environment Variables ichiga DATABASE_URL qo'ying va redeploy qiling.";
+  }
+  if (message.includes("relation") && message.includes("does not exist")) {
+    return "❌ Database jadvallari yaratilmagan. Lokal terminalda DATABASE_URL bilan `npm run db:push` ishlating.";
+  }
+  if (
+    message.includes("password authentication failed") ||
+    message.includes("Tenant or user not found") ||
+    message.includes("ENOTFOUND") ||
+    message.includes("ECONNREFUSED")
+  ) {
+    return "❌ Database ulanishida xatolik. Vercel'dagi DATABASE_URL qiymatini tekshiring.";
+  }
+  return "❌ Xatolik yuz berdi. Vercel Logs ichida `Bot command error` sababini tekshiring.";
+}
+
 function parseYouTubeId(url: string): string | null {
   const m = url.match(
     /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{6,})/
@@ -645,7 +664,7 @@ async function handleCommand(chatId: number, text: string) {
     await sendMessage(chatId, "Noma'lum buyruq.\n\n" + HELP);
   } catch (e) {
     console.error("Bot command error:", e);
-    await sendMessage(chatId, "❌ Xatolik yuz berdi. Qayta urinib ko'ring.");
+    await sendMessage(chatId, setupErrorMessage(e));
   }
 }
 
