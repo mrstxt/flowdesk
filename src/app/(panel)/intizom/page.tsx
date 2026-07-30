@@ -37,8 +37,8 @@ type Task = {
 export default function IntizomPage() {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [wake, setWake] = useState("06:30");
-  const [sleep, setSleep] = useState("23:00");
+  const [wake, setWake] = useState("04:30");
+  const [sleep, setSleep] = useState("21:40");
   const [modal, setModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [botEnabled, setBotEnabled] = useState(false);
