@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { orders } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { confirmOrder } from "@/lib/orderActions";
+import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
       title: body.title,
       description: body.description || null,
       stage: body.stage || "new",
-      amount: body.amount ?? "0",
+      amount: String(parseMoneyInput(body.amount ?? "0")),
       deadline: body.deadline || null,
       clientName: body.clientName || null,
       paymentType: body.paymentType || "cash",

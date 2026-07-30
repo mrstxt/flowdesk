@@ -18,7 +18,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { formatCurrency, monthStartISO, todayISO } from "@/lib/utils";
+import { formatCurrency, monthStartISO, parseMoneyInput, todayISO } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Income = {
@@ -77,8 +77,8 @@ export default function FinancePage() {
   const ms = monthStartISO();
   const monthIncomes = incomes.filter((i) => i.date >= ms);
   const monthExpenses = expenses.filter((e) => e.date >= ms);
-  const totalIn = monthIncomes.reduce((s, i) => s + parseFloat(i.amount), 0);
-  const totalOut = monthExpenses.reduce((s, e) => s + parseFloat(e.amount), 0);
+  const totalIn = monthIncomes.reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  const totalOut = monthExpenses.reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
 
   // Build monthly chart data (last 6 months)
@@ -90,10 +90,10 @@ export default function FinancePage() {
     const key = `${y}-${String(m + 1).padStart(2, "0")}`;
     const inSum = incomes
       .filter((x) => x.date.startsWith(key))
-      .reduce((s, x) => s + parseFloat(x.amount), 0);
+      .reduce((s, x) => s + parseMoneyInput(x.amount), 0);
     const outSum = expenses
       .filter((x) => x.date.startsWith(key))
-      .reduce((s, x) => s + parseFloat(x.amount), 0);
+      .reduce((s, x) => s + parseMoneyInput(x.amount), 0);
     return {
       month: d.toLocaleDateString("uz-UZ", { month: "short" }),
       Kirim: inSum,
@@ -110,7 +110,7 @@ export default function FinancePage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: fd.get("title"),
-        amount: fd.get("amount"),
+        amount: String(parseMoneyInput(fd.get("amount"))),
         source: fd.get("source"),
         date: fd.get("date") || todayISO(),
         paymentType: fd.get("paymentType") || "cash",
@@ -129,7 +129,7 @@ export default function FinancePage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: fd.get("title"),
-        amount: fd.get("amount"),
+        amount: String(parseMoneyInput(fd.get("amount"))),
         category: fd.get("category"),
         date: fd.get("date") || todayISO(),
       }),
@@ -405,7 +405,8 @@ export default function FinancePage() {
               </label>
               <input
                 name="amount"
-                type="number"
+                type="text"
+                inputMode="decimal"
                 required
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
@@ -491,7 +492,8 @@ export default function FinancePage() {
               </label>
               <input
                 name="amount"
-                type="number"
+                type="text"
+                inputMode="decimal"
                 required
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />

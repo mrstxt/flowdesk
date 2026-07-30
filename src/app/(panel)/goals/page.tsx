@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Plus, Target, Trash2 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, parseMoneyInput } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Goal = {
@@ -35,7 +35,7 @@ export default function GoalsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: fd.get("title"),
-        targetAmount: fd.get("targetAmount"),
+        targetAmount: String(parseMoneyInput(fd.get("targetAmount"))),
         autoPercent: Number(fd.get("autoPercent")) || 0,
       }),
     });
@@ -54,8 +54,8 @@ export default function GoalsPage() {
     e.preventDefault();
     if (!addFundsGoal) return;
     const fd = new FormData(e.currentTarget);
-    const amt = parseFloat(String(fd.get("amount") || 0));
-    const newSaved = parseFloat(addFundsGoal.savedAmount) + amt;
+    const amt = parseMoneyInput(fd.get("amount"));
+    const newSaved = parseMoneyInput(addFundsGoal.savedAmount) + amt;
     await fetch("/api/goals", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -67,11 +67,11 @@ export default function GoalsPage() {
   }
 
   const totalSaved = goals.reduce(
-    (s, g) => s + parseFloat(g.savedAmount),
+    (s, g) => s + parseMoneyInput(g.savedAmount),
     0
   );
   const totalTarget = goals.reduce(
-    (s, g) => s + parseFloat(g.targetAmount),
+    (s, g) => s + parseMoneyInput(g.targetAmount),
     0
   );
 
@@ -132,8 +132,8 @@ export default function GoalsPage() {
           </div>
         )}
         {goals.map((g) => {
-          const saved = parseFloat(g.savedAmount);
-          const target = parseFloat(g.targetAmount);
+          const saved = parseMoneyInput(g.savedAmount);
+          const target = parseMoneyInput(g.targetAmount);
           const pct = Math.min(100, (saved / target) * 100);
           const remaining = Math.max(0, target - saved);
           return (
@@ -224,7 +224,8 @@ export default function GoalsPage() {
               </label>
               <input
                 name="targetAmount"
-                type="number"
+                type="text"
+                inputMode="decimal"
                 required
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
                 placeholder="5000000"
@@ -277,7 +278,8 @@ export default function GoalsPage() {
             </label>
             <input
               name="amount"
-              type="number"
+              type="text"
+              inputMode="decimal"
               required
               autoFocus
               className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"

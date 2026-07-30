@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { goals } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,8 @@ export async function POST(req: Request) {
     .insert(goals)
     .values({
       title: body.title,
-      targetAmount: body.targetAmount,
-      savedAmount: body.savedAmount ?? "0",
+      targetAmount: String(parseMoneyInput(body.targetAmount)),
+      savedAmount: String(parseMoneyInput(body.savedAmount ?? "0")),
       autoPercent: body.autoPercent ?? 0,
     })
     .returning();
@@ -28,6 +29,12 @@ export async function PUT(req: Request) {
   const body = await req.json();
   const { id, ...rest } = body;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  if ("targetAmount" in rest) {
+    rest.targetAmount = String(parseMoneyInput(rest.targetAmount));
+  }
+  if ("savedAmount" in rest) {
+    rest.savedAmount = String(parseMoneyInput(rest.savedAmount));
+  }
   const [updated] = await db
     .update(goals)
     .set(rest)

@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { desc, eq, gte, and, asc, isNull, sql, desc as descOrd } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
+import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -68,7 +69,7 @@ function fmt(n: number): string {
 }
 
 function parseAmount(raw: string): number {
-  return Number(String(raw).replace(/[\s'`']/g, "").replace(",", ".")) || 0;
+  return parseMoneyInput(raw);
 }
 
 function parseDate(raw: string | undefined): string {

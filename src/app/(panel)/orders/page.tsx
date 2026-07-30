@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Plus, Calendar, GripVertical, Trash2 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, parseMoneyInput } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Order = {
@@ -119,7 +119,7 @@ export default function OrdersPage() {
       body: JSON.stringify({
         title: fd.get("title"),
         description: fd.get("description") || null,
-        amount: fd.get("amount") || "0",
+        amount: String(parseMoneyInput(fd.get("amount"))),
         deadline: fd.get("deadline") || null,
         clientName: fd.get("clientName") || null,
       }),
@@ -177,7 +177,7 @@ export default function OrdersPage() {
               (o) => o.stage === stage.id
             );
             const total = stageOrders.reduce(
-              (s, o) => s + parseFloat(o.amount),
+              (s, o) => s + parseMoneyInput(o.amount),
               0
             );
             return (
@@ -226,7 +226,8 @@ export default function OrdersPage() {
               </label>
               <input
                 name="amount"
-                type="number"
+                type="text"
+                inputMode="decimal"
                 defaultValue="0"
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />

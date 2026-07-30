@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { orders, incomes, goals } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { parseMoneyInput } from "@/lib/utils";
 
 export function todayDateISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -36,7 +37,7 @@ export async function confirmOrder(
     })
     .where(eq(orders.id, orderId));
 
-  const amt = parseFloat(String(order.amount));
+  const amt = parseMoneyInput(order.amount);
   if (amt > 0) {
     await db.insert(incomes).values({
       title: `Buyurtma: ${order.title}`,

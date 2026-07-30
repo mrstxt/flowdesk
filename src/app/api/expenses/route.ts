@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { expenses } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
     .insert(expenses)
     .values({
       title: body.title,
-      amount: body.amount,
+      amount: String(parseMoneyInput(body.amount)),
       category: body.category || "other",
       date: body.date,
     })

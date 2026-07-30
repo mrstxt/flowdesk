@@ -16,7 +16,7 @@ import {
   AlarmClock,
   Flame,
 } from "lucide-react";
-import { formatCurrency, monthStartISO, todayISO } from "@/lib/utils";
+import { formatCurrency, monthStartISO, parseMoneyInput, todayISO } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Order = {
@@ -98,10 +98,10 @@ export default function Dashboard() {
   const ms = monthStartISO();
   const totalIn = incomes
     .filter((i) => i.date >= ms)
-    .reduce((s, i) => s + parseFloat(i.amount), 0);
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const totalOut = expenses
     .filter((e) => e.date >= ms)
-    .reduce((s, e) => s + parseFloat(e.amount), 0);
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
   const activeOrders = orders.filter(
     (o) => o.stage !== "confirmed" && !o.archived
@@ -140,7 +140,7 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: fd.get("title"),
-        amount: fd.get("amount") || "0",
+        amount: String(parseMoneyInput(fd.get("amount"))),
         deadline: fd.get("deadline") || null,
         clientName: fd.get("clientName") || null,
         description: fd.get("description") || null,
@@ -158,7 +158,7 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: fd.get("title"),
-        amount: fd.get("amount"),
+        amount: String(parseMoneyInput(fd.get("amount"))),
         category: fd.get("category"),
         date: todayISO(),
       }),
@@ -390,8 +390,8 @@ export default function Dashboard() {
             ) : (
               <ul className="space-y-4">
                 {goals.slice(0, 3).map((g) => {
-                  const saved = parseFloat(g.savedAmount);
-                  const target = parseFloat(g.targetAmount);
+                  const saved = parseMoneyInput(g.savedAmount);
+                  const target = parseMoneyInput(g.targetAmount);
                   const pct = Math.min(100, (saved / target) * 100);
                   return (
                     <li key={g.id}>
@@ -499,7 +499,7 @@ export default function Dashboard() {
           <Input label="Nomi" name="title" required placeholder="Masalan: Logo dizayn" />
           <Input label="Mijoz" name="clientName" placeholder="Mijoz ismi (ixtiyoriy)" />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Summa (so'm)" name="amount" type="number" placeholder="500000" />
+            <Input label="Summa (so'm)" name="amount" type="text" inputMode="decimal" placeholder="50.000" />
             <Input label="Deadline" name="deadline" type="date" />
           </div>
           <div>
@@ -538,7 +538,7 @@ export default function Dashboard() {
         <form onSubmit={addExpense} className="space-y-3">
           <Input label="Nomi" name="title" required placeholder="Masalan: Ijara" />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Summa (so'm)" name="amount" type="number" required placeholder="100000" />
+            <Input label="Summa (so'm)" name="amount" type="text" inputMode="decimal" required placeholder="100.000" />
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
                 Kategoriya
@@ -612,12 +612,14 @@ function Input({
   label,
   name,
   type = "text",
+  inputMode,
   required,
   placeholder,
 }: {
   label: string;
   name: string;
   type?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   required?: boolean;
   placeholder?: string;
 }) {
@@ -628,6 +630,7 @@ function Input({
       </label>
       <input
         type={type}
+        inputMode={inputMode}
         name={name}
         required={required}
         placeholder={placeholder}
