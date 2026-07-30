@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, ui-sans-serif,
+    system-ui, sans-serif;
+  --font-display: "Manrope", "Inter", ui-sans-serif, sans-serif;
+  --color-accent: #ff2d5d;
+  --color-accent-hover: #e51a4e;
+  --color-accent-soft: #ffe7ee;
+  --color-accent-ink: #c21240;
+  --color-apple-bg: #fbfbfd;
+  --color-apple-dark: #0a0a0c;
+}
+
+.dark {
+  --color-accent: #ff4569;
+  --color-accent-hover: #ff2d5d;
+  --color-accent-soft: #33121d;
+  --color-accent-ink: #ff8ba0;
+}
+
+html,
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, ui-sans-serif,
+    system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #fbfbfd;
+  color: #1d1d1f;
+  letter-spacing: -0.01em;
+}
+
+.dark body {
+  background: #0a0a0c;
+  color: #f2f2f7;
+}
+
+::selection {
+  background: rgba(255, 45, 93, 0.2);
+}
+
+/* Scrollbar — minimal Apple style */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 999px;
+}
+.dark *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Soft hover lift */
+.card-hover {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(255, 45, 93, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dot grid texture */
+.dot-grid {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.07) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.dark .dot-grid {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
+
+/* Glass panel */
+.glass {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+.dark .glass {
+  background: rgba(16, 16, 20, 0.75);
+}
