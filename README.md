@@ -1,69 +1,189 @@
-# FlowDesk — Shaxsiy Admin Panel + Intizom Bot
+# FlowDesk
 
-Notion uslubidagi minimalistik panel. Aktsent `#ff2d5d`, Apple-style radiuslar, dark mode.
+FlowDesk — shaxsiy admin panel: buyurtmalar, moliya, maqsadlar, intizom, kitoblar, rivojlanish videolari va Telegram intizom bot.
 
-## Bo'limlar
+## Imkoniyatlar
 
-| Bo'lim | Imkoniyat |
+| Bo'lim | Nima qiladi |
 |---|---|
-| **Dashboard** | Umumiy ko'rinish: KPI, intizom, vazifalar, maqsadlar, kitob |
-| **Buyurtmalar** | Drag-and-drop Kanban (Yangi → Tasdiqlandi) |
-| **Hisob-kitob** | Daromad/chiqim, 6 oylik grafik |
-| **Maqsadlar** | Jamg'arma + avtomatik foiz |
-| **Intizom** | Uyg'onish/uxlash, kunlik reja timeline, streak 🔥, **Telegram bot yoqish/o'chirish** |
-| **Kitoblar** | O'qish progressi, sahifa kuzatuvi, sharhlar |
-| **Videolar** | YouTube panelda, ko'rildi belgisi, fikrlar |
-| **Analitika** | Oylik taqoshlash, o'sish %, tavsiyalar |
+| Dashboard | KPI, bugungi vazifalar, intizom, maqsad va kitob progressi |
+| Buyurtmalar | Kanban uslubida buyurtmalarni yuritish |
+| Hisob-kitob | Kirim/chiqim va oylik grafiklar |
+| Maqsadlar | Jamg'arma va avtomatik foiz hisoblash |
+| Intizom | Uyg'onish/uxlash va kunlik reja nazorati |
+| Kitoblar | O'qish progressi va qaydlar |
+| Rivojlanish | YouTube video ro'yxati va fikrlar |
+| Analitika | Oylik taqqoslash va tavsiyalar |
+| Telegram bot | Buyurtma, kirim, chiqim, vazifa va intizom buyruqlari |
 
-## Telegram Bot — Intizom nazoratchi
+## Install paytidagi warning haqida
 
-Bot sizning intizomingizni boshqaradi va xavflantiradi:
+`npm warn deprecated @esbuild-kit/...` xato emas. Bu Drizzle/tsx ekotizimidagi eski dependency haqida ogohlantirish. Agar oxirida `added ... packages` chiqsa, install muvaffaqiyatli tugagan.
 
-### Qanday ishlaydi
+## Local Ishga Tushirish
 
-1. **Ertalab** (`wake_time` da) — ☀️ "Turing!" xabari → ✅ Turdim / 😴 Uxlab qoldim
-2. **Uxlab qolsangiz** — sabab so'raydi → saqlaydi
-3. **Har reja vaqtida** — ⏰ eslatma → ✅ Bajarildi / ⏭ O'tkazish
-4. **Kechqurun 20:00** — 📋 kunlik hisobot
-5. **Yotish vaqtida** — 🌙 eslatma
+1. Dependencylarni o'rnating:
 
-### Vercelga joylash
+```bash
+npm install
+```
 
-1. **GitHub → Vercel:**
-   ```bash
-   git init && git add -A && git commit -m "FlowDesk"
-   git remote add origin https://github.com/SIZ/flowdesk.git
-   git push -u origin main
-   ```
-   https://vercel.com/new → import qiling.
+2. `.env.example`dan nusxa olib `.env` yarating:
 
-2. **Environment Variables:**
-   | Kalit | Qiymat |
-   |---|---|
-   | `DATABASE_URL` | Vercel Postgres / Neon URL |
-   | `SESSION_SECRET` | login sessiyasi uchun uzun, tasodifiy maxfiy satr |
-   | `ADMIN_USERNAME` | panelga kirish login |
-   | `ADMIN_PASSWORD` | panelga kirish parol |
-   | `TELEGRAM_BOT_TOKEN` | @BotFather token |
-   | `TELEGRAM_ADMIN_CHAT_ID` | chat ID (@userinfobot) |
-   | `BOT_WEBHOOK_SECRET` | tasodifiy satr |
-   | `VERCEL_CRON_SECRET` | tasodifiy satr |
+```bash
+cp .env.example .env
+```
 
-3. **Jadvallar:**
-   ```bash
-   DATABASE_URL="postgresql://..." npx drizzle-kit push
-   ```
+3. `.env` ichidagi qiymatlarni to'ldiring. Eng kamida panel ishlashi uchun `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` kerak.
 
-4. **Bot webhook:**
-   ```
-   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://SIZNING_DOMEN/api/bot&secret_token=<BOT_WEBHOOK_SECRET>
-   ```
+4. Database jadvallarini yarating:
 
-5. **Vercel Cron** (Project → Settings → Cron Jobs):
-   - URL: `/api/cron/discipline`
-   - Schedule: `*/30 * * * *` (har 30 daqiqa)
+```bash
+npm run db:push
+```
 
-### Bot buyruqlari
+5. Development serverni yoqing:
+
+```bash
+npm run dev
+```
+
+Keyin brauzerda `http://localhost:3000` ochiladi.
+
+## Env Variables
+
+### Majburiy
+
+| Kalit | Misol | Izoh |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://user:pass@host:5432/db?sslmode=require` | Neon, Supabase, Vercel Postgres yoki local Postgres ulanish URL |
+| `SESSION_SECRET` | `9b4f...uzun-random...` | Login cookie imzosini himoya qiladi. Productionda uzun random satr bo'lishi shart |
+| `ADMIN_USERNAME` | `admin` | Panelga kirish login |
+| `ADMIN_PASSWORD` | `kuchli-parol` | Panelga kirish parol |
+
+### Telegram Bot Uchun
+
+| Kalit | Misol | Izoh |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | @BotFather bergan bot token |
+| `TELEGRAM_ADMIN_CHAT_ID` | `123456789` | Sizning Telegram chat ID. @userinfobot orqali olinadi |
+| `BOT_WEBHOOK_SECRET` | `random-webhook-secret` | Telegram webhook so'rovlarini tekshirish uchun maxfiy satr |
+| `VERCEL_CRON_SECRET` | `random-cron-secret` | Cron endpointni himoya qilish uchun maxfiy satr |
+
+### Local Postgres Misol
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/app_db"
+SESSION_SECRET="local-development-secret-change-me"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="admin123"
+
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_ADMIN_CHAT_ID=""
+BOT_WEBHOOK_SECRET="local-webhook-secret"
+VERCEL_CRON_SECRET="local-cron-secret"
+```
+
+### Production/Vercel Misol
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/DATABASE?sslmode=require"
+SESSION_SECRET="juda-uzun-random-secret-64-belgidan-kam-bolmasin"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="juda-kuchli-parol"
+
+TELEGRAM_BOT_TOKEN="BOTFATHER_TOKEN"
+TELEGRAM_ADMIN_CHAT_ID="SIZNING_CHAT_ID"
+BOT_WEBHOOK_SECRET="juda-uzun-random-webhook-secret"
+VERCEL_CRON_SECRET="juda-uzun-random-cron-secret"
+```
+
+## Vercelga Joylash
+
+1. Repository GitHubga push qilingan bo'lishi kerak:
+
+```bash
+git remote add origin https://github.com/mrstxt/flowdesk.git
+git branch -M main
+git push -u origin main
+```
+
+2. Vercel’da yangi project oching:
+
+`https://vercel.com/new`
+
+GitHubdagi `mrstxt/flowdesk` reposini tanlang.
+
+3. Vercel project settings ichida Environment Variables qo'shing:
+
+```env
+DATABASE_URL="postgresql://..."
+SESSION_SECRET="..."
+ADMIN_USERNAME="..."
+ADMIN_PASSWORD="..."
+TELEGRAM_BOT_TOKEN="..."
+TELEGRAM_ADMIN_CHAT_ID="..."
+BOT_WEBHOOK_SECRET="..."
+VERCEL_CRON_SECRET="..."
+```
+
+4. Deploydan oldin database jadvallarini yarating:
+
+```bash
+DATABASE_URL="postgresql://..." npm run db:push
+```
+
+Yoki local `.env` to'ldirilgan bo'lsa:
+
+```bash
+npm run db:push
+```
+
+5. Vercel deploy qiling.
+
+## Telegram Bot Sozlash
+
+1. @BotFather’dan bot token oling va `TELEGRAM_BOT_TOKEN`ga qo'ying.
+
+2. @userinfobot orqali chat ID oling va `TELEGRAM_ADMIN_CHAT_ID`ga qo'ying.
+
+3. Webhook secret yarating va `BOT_WEBHOOK_SECRET`ga qo'ying.
+
+4. Deploydan keyin webhookni ulang:
+
+```text
+https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://SIZNING_DOMEN/api/bot&secret_token=<BOT_WEBHOOK_SECRET>
+```
+
+Masalan:
+
+```text
+https://api.telegram.org/bot123456:ABC/setWebhook?url=https://flowdesk.vercel.app/api/bot&secret_token=my-secret
+```
+
+## Cron Sozlash
+
+Vercel Project → Settings → Cron Jobs:
+
+| Field | Qiymat |
+|---|---|
+| URL | `/api/cron/discipline` |
+| Schedule | `*/30 * * * *` |
+
+Cron endpoint `VERCEL_CRON_SECRET` orqali himoyalanadi. Agar Vercel Cron header yubormasa, endpoint public ishlamasligi uchun secretni to'g'ri sozlang.
+
+## Foydali Komandalar
+
+```bash
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run typecheck
+npm run db:push
+```
+
+## Bot Buyruqlari
 
 | Buyruq | Format |
 |---|---|
@@ -75,9 +195,11 @@ Bot sizning intizomingizni boshqaradi va xavflantiradi:
 | Kitob | `/kitob Atomic Habits, James Clear, 320` |
 | Video | `/video https://youtu.be/xxx, Nomi, biznes` |
 | To'lov | `/tolov 12` |
-| Rejalar | `/rejalarni` — bugungi reja ro'yxati |
+| Rejalar | `/rejalarni` |
 | Statistika | `/stat`, `/bugun`, `/buyurtmalar` |
-| Bot yoqish | `/bot_yoq` — ogohlantirishlarni yoqish |
-| Bot o'chirish | `/bot_och` — ogohlantirishlarni o'chirish |
+| Bot yoqish | `/bot_yoq` |
+| Bot o'chirish | `/bot_och` |
 
-Yoki **Intizom** bo'limidagi toggle tugmasini bosing — bot avtomatik yoqiladi.
+## Muhim Eslatma
+
+Productionda `ADMIN_PASSWORD`, `SESSION_SECRET`, `BOT_WEBHOOK_SECRET`, `VERCEL_CRON_SECRET` qiymatlarini oddiy yoki default qoldirmang. Har birini uzun random satr qilib qo'ying.
