@@ -254,7 +254,7 @@ https://SIZNING_DOMEN/api/health
 To'g'ri holat:
 
 ```json
-{"ok":true,"database":"connected"}
+{"ok":true,"database":"connected","schema":"ready"}
 ```
 
 Xato holatlar:
@@ -265,3 +265,15 @@ Xato holatlar:
 | `database_schema_missing` | `npm run db:push` bilan jadvallarni yarating |
 | `database_connection_failed` | `DATABASE_URL` login/parol/host qiymatini tekshiring |
 | `database_error` | Vercel Logs ichidagi `Health check failed` xabarini tekshiring |
+
+Vercel logda `getaddrinfo ENOTFOUND base` chiqsa, `DATABASE_URL` noto'g'ri. Host `base` bo'lib qolgan degani. `DATABASE_URL` hech qachon `base` bo'lmasligi kerak; u Neon/Supabase/Vercel Postgres bergan to'liq URL bo'lishi kerak:
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require"
+```
+
+Masalan Neon URL ko'rinishi:
+
+```env
+DATABASE_URL="postgresql://neondb_owner:PAROL@ep-something.region.aws.neon.tech/neondb?sslmode=require"
+```

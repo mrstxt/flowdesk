@@ -83,8 +83,14 @@ function splitParts(args: string): string[] {
     .filter(Boolean);
 }
 
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+  return [error.message, cause ? errorText(cause) : ""].filter(Boolean).join("\n");
+}
+
 function setupErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorText(error);
   if (message.includes("DATABASE_URL is required")) {
     return "❌ DATABASE_URL sozlanmagan. Vercel Environment Variables ichiga DATABASE_URL qo'ying va redeploy qiling.";
   }
@@ -97,7 +103,10 @@ function setupErrorMessage(error: unknown): string {
     message.includes("ENOTFOUND") ||
     message.includes("ECONNREFUSED")
   ) {
-    return "❌ Database ulanishida xatolik. Vercel'dagi DATABASE_URL qiymatini tekshiring.";
+    if (message.includes("ENOTFOUND base")) {
+      return "❌ DATABASE_URL noto'g'ri: host `base` bo'lib qolgan. Vercel Environment Variables ichiga Neon/Supabase/Vercel Postgres bergan to'liq postgresql URLni qo'ying va redeploy qiling.";
+    }
+    return "❌ Database ulanishida xatolik. Vercel'dagi DATABASE_URL qiymatini tekshiring va redeploy qiling.";
   }
   return "❌ Xatolik yuz berdi. Vercel Logs ichida `Bot command error` sababini tekshiring.";
 }

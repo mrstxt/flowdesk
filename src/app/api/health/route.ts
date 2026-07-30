@@ -3,8 +3,14 @@ import { sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+  return [error.message, cause ? errorText(cause) : ""].filter(Boolean).join("\n");
+}
+
 function errorCode(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorText(error);
   if (message.includes("DATABASE_URL is required")) return "database_not_configured";
   if (message.includes("relation") && message.includes("does not exist")) {
     return "database_schema_missing";
@@ -23,7 +29,8 @@ function errorCode(error: unknown): string {
 export async function GET() {
   try {
     await db.execute(sql`select 1`);
-    return Response.json({ ok: true, database: "connected" });
+    await db.execute(sql`select 1 from settings limit 1`);
+    return Response.json({ ok: true, database: "connected", schema: "ready" });
   } catch (error) {
     console.error("Health check failed:", error);
     return Response.json(
