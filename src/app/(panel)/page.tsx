@@ -60,7 +60,7 @@ export default function Dashboard() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
-  const [settings, setSettings] = useState({ wake: "06:30", sleep: "23:00" });
+  const [settings, setSettings] = useState({ wake: "04:30", sleep: "21:40" });
 
   const [orderModal, setOrderModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
