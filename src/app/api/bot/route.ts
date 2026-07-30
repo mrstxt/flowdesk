@@ -15,12 +15,6 @@ import {
 } from "@/db/schema";
 import { desc, eq, gte, and, asc, isNull, sql, desc as descOrd } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
-import {
-  DEFAULT_SLEEP_TIME,
-  DEFAULT_WAKE_TIME,
-  getSettingsMap,
-} from "@/lib/appSettings";
-import { dateTimeInAppTimeZone } from "@/lib/dateTime";
 import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -184,11 +178,10 @@ async function handleCallback(chatId: number, callbackId: string, data: string) 
       .where(
         and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
       );
-    const appSettings = await getSettingsMap();
     await db.insert(sleepLogs).values({
       date: today,
-      expectedWake: appSettings.wake_time || DEFAULT_WAKE_TIME,
-      actualWake: dateTimeInAppTimeZone().time,
+      expectedWake: (await fetch("/api/settings").then((r) => r.json())).wake_time || "06:30",
+      actualWake: new Date().toTimeString().slice(0, 5),
       overslept: false,
     });
     await answerCallback(chatId, callbackId, "✅ Ajoyib! Kun rejalaringiz oldinda. Kuchli boshlang! 💪");
@@ -339,13 +332,13 @@ async function handleCommand(chatId: number, text: string) {
       .limit(1);
 
     if (wakeReminder.length > 0 && cmd !== "/") {
-      const appSettings = await getSettingsMap();
-      const wakeTime = appSettings.wake_time || DEFAULT_WAKE_TIME;
-      const sleepTime = appSettings.sleep_time || DEFAULT_SLEEP_TIME;
+      const wakeTime =
+        (await fetch("/api/settings").then((r) => r.json())).wake_time ||
+        "06:30";
       await db.insert(sleepLogs).values({
         date: today,
         expectedWake: wakeTime,
-        actualWake: dateTimeInAppTimeZone().time,
+        actualWake: new Date().toTimeString().slice(0, 5),
         overslept: true,
         reason: text,
       });
@@ -355,7 +348,10 @@ async function handleCommand(chatId: number, text: string) {
         .where(eq(botReminders.id, wakeReminder[0].id));
       await sendMessage(
         chatId,
-        `📝 Sabab saqlandi: "${text}"\n\n⚠️ Kecha kech yotdingizmi? Ertaga ${sleepTime} da yotishga harakat qiling. Sifatli uxlash = sifatli ish! 💪`
+        `📝 Sabab saqlandi: "${text}"\n\n⚠️ Kecha kech yotdingizmi? Ertaga ${
+          (await fetch("/api/settings").then((r) => r.json())).sleep_time ||
+          "23:00"
+        } da yotishga harakat qiling. Sifatli uxlash = sifatli ish! 💪`
       );
       return;
     }
@@ -376,9 +372,12 @@ async function handleCommand(chatId: number, text: string) {
         }`;
       });
       const done = allRoutines.filter((r) => r.lastDoneDate === today).length;
-      const appSettings = await getSettingsMap();
-      const wake = appSettings.wake_time || DEFAULT_WAKE_TIME;
-      const sleep = appSettings.sleep_time || DEFAULT_SLEEP_TIME;
+      const wake =
+        (await fetch("/api/settings").then((r) => r.json())).wake_time ||
+        "06:30";
+      const sleep =
+        (await fetch("/api/settings").then((r) => r.json())).sleep_time ||
+        "23:00";
       await sendMessage(
         chatId,
         `<b>📋 Bugungi rejalar (${done}/${allRoutines.length}):</b>\n\n⏰ Turish: ${wake} | 💤 Uxlash: ${sleep}\n\n${lines.join(

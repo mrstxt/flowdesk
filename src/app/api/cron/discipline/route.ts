@@ -2,12 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { routines, settings, botReminders } from "@/db/schema";
 import { asc, and, eq, gte } from "drizzle-orm";
-import {
-  DEFAULT_SLEEP_TIME,
-  DEFAULT_WAKE_TIME,
-  getSettingsMap,
-} from "@/lib/appSettings";
-import { dateTimeInAppTimeZone } from "@/lib/dateTime";
+import { todayDateISO } from "@/lib/orderActions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,30 +21,15 @@ async function botSend(method: string, payload: Record<string, unknown>) {
   }
 }
 
-function isInMinuteWindow(
-  currentMinute: number,
-  startMinute: number,
-  duration: number
-): boolean {
-  const normalizedStart = (startMinute + 1440) % 1440;
-  const elapsed = (currentMinute - normalizedStart + 1440) % 1440;
-  return elapsed < duration;
-}
-
 /**
  * Cron job: har 30 daqiqada yuradi.
  * Bugungi barcha routine vaqt bilan taqqoslaydi.
  */
 export async function GET(req: Request) {
-  // Vercel Cron odatda Authorization: Bearer <secret> yuboradi.
-  // Eski x-vercel-cron-secret formatini ham qo'llab-quvvatlaymiz.
-  const cronSecret =
-    process.env.CRON_SECRET || process.env.VERCEL_CRON_SECRET || "";
-  const authorized =
-    req.headers.get("authorization") === `Bearer ${cronSecret}` ||
-    req.headers.get("x-vercel-cron-secret") === cronSecret;
-  if (cronSecret && !authorized) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Vercel Cron secret
+  const headerSecret = req.headers.get("x-vercel-cron-secret");
+  if (process.env.VERCEL_CRON_SECRET && headerSecret !== process.env.VERCEL_CRON_SECRET) {
+    return NextResponse.json({ ok: true });
   }
 
   if (!TOKEN) {
@@ -60,13 +40,11 @@ export async function GET(req: Request) {
   if (!chatIdStr) {
     return NextResponse.json({ ok: true, error: "no chat id" });
   }
-
   const chatId = Number(chatIdStr.split(",")[0]);
-  const now = dateTimeInAppTimeZone();
-  const today = now.date;
-  const nowMin = now.totalMinutes;
-  const appSettings = await getSettingsMap();
-  const enable = appSettings.bot_enabled === "true";
+  const today = todayDateISO();
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const enable = (await fetch("/api/settings").then((r) => r.json())).bot_enabled === "true";
 
   if (!enable) {
     return NextResponse.json({ ok: true, skipped: "bot disabled" });
@@ -77,15 +55,15 @@ export async function GET(req: Request) {
     .from(routines)
     .orderBy(asc(routines.time));
 
-  const wakeTime = appSettings.wake_time || DEFAULT_WAKE_TIME;
-  const sleepTime = appSettings.sleep_time || DEFAULT_SLEEP_TIME;
+  const wakeTime = (await fetch("/api/settings").then((r) => r.json())).wake_time || "06:30";
+  const sleepTime = (await fetch("/api/settings").then((r) => r.json())).sleep_time || "23:00";
 
   let messagesSent = 0;
 
   // ── Wake up reminder ──
   const [wh, wm] = wakeTime.split(":").map(Number);
   const wakeMin = wh * 60 + wm;
-  if (isInMinuteWindow(nowMin, wakeMin, 35)) {
+  if (nowMin >= wakeMin && nowMin < wakeMin + 35) {
     const key = "wake_up";
     const exists = await db
       .select({ id: botReminders.id })
@@ -123,7 +101,7 @@ export async function GET(req: Request) {
   for (const r of allRoutines) {
     const [rh, rm] = r.time.split(":").map(Number);
     const rMin = rh * 60 + rm;
-    if (isInMinuteWindow(nowMin, rMin, 35)) {
+    if (nowMin >= rMin && nowMin < rMin + 35) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -207,7 +185,7 @@ export async function GET(req: Request) {
   // ── Sleep reminder ──
   const [sh, sm] = sleepTime.split(":").map(Number);
   const sleepMin = sh * 60 + sm;
-  if (isInMinuteWindow(nowMin, sleepMin - 30, 65)) {
+  if (nowMin >= sleepMin - 30 && nowMin < sleepMin + 35 && sleepMin > 22 * 60) {
     const exists = await db
       .select({ id: botReminders.id })
       .from(botReminders)

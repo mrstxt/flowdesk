@@ -2,9 +2,10 @@ import { db } from "@/db";
 import { orders, incomes, goals } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
-import { todayDateISO } from "@/lib/dateTime";
 
-export { todayDateISO };
+export function todayDateISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 /**
  * Buyurtmani tasdiqlash:
