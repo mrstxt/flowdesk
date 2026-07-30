@@ -59,16 +59,34 @@ export default function OrdersPage() {
     const { active, over } = event;
     if (!over) return;
 
-    // 1. Yangi bosqichni (stage) aniqlash:
-    // Birinchi bo'lib over.data ichidan qidiradi (agar komponentga data biriktirilgan bo'lsa).
-    // Agar u yo'q bo'lsa, orders ichidan ustiga tashlangan buyurtmani qidirib, uning stage'ini oladi.
-    // Agar u ham bo'lmasa, over.id ni bosqich ID-si deb hisoblaydi.
-    const targetOrder = orders.find((o) => o.id === over.id);
-    const newStage = (over.data.current?.stage || targetOrder?.stage || over.id) as string;
-
-    // 2. Sudralayotgan buyurtmani topish
+    // 1. Sudralayotgan buyurtmani topish
     const order = orders.find((o) => o.id === active.id);
-    if (!order || order.stage === newStage) return;
+    if (!order) return;
+
+    // 2. Yangi bosqichni aniqlash
+    let newStage: string | null = null;
+
+    // over element - bu OrderCard yoki StageColumn bo'lishi mumkin
+    const overId = over.id;
+    
+    // Birinchi navbatda over.data dan stage ni olishga harakat qilamiz
+    if (over.data.current?.stage) {
+      newStage = over.data.current.stage;
+    } else {
+      // over.id stage ID si bo'lishi mumkin
+      const isStage = STAGES.some(s => s.id === overId);
+      if (isStage) {
+        newStage = overId as string;
+      } else {
+        // over - bu OrderCard bo'lsa, uning stage'ini olamiz
+        const targetOrder = orders.find((o) => o.id === overId);
+        if (targetOrder) {
+          newStage = targetOrder.stage;
+        }
+      }
+    }
+
+    if (!newStage || order.stage === newStage) return;
 
     // If moving to confirmed, ask about payment
     if (newStage === "confirmed" && order.stage !== "confirmed") {
@@ -77,9 +95,8 @@ export default function OrdersPage() {
     }
 
     // 3. Bosqichni yangilash
-    await updateStage(order, newStage, order.paymentType)
+    await updateStage(order, newStage, order.paymentType);
   }
-
 
   async function updateStage(
     order: Order,
@@ -331,6 +348,7 @@ function StageColumn({
     <div
       className="bg-slate-100 dark:bg-slate-900 rounded-3xl p-3 min-h-[300px]"
       id={stage.id}
+      data-stage={stage.id} // <-- MUHIM: Bu qator qo'shildi
     >
       <div className="flex items-center justify-between px-2 py-2 mb-2">
         <div className="flex items-center gap-2">
