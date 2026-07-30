@@ -86,8 +86,8 @@ export default function Dashboard() {
     setRoutines(r);
     setBooks(b);
     setSettings({
-      wake: s.wake_time || "06:30",
-      sleep: s.sleep_time || "23:00",
+      wake: s.wake_time || "04:30",
+      sleep: s.sleep_time || "21:40",
     });
   }
 
