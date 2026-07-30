@@ -53,8 +53,8 @@ export default function IntizomPage() {
     ]);
     setRoutines(r);
     setTasks(t);
-    setWake(s.wake_time || "06:30");
-    setSleep(s.sleep_time || "23:00");
+    setWake(s.wake_time || "04:30");
+    setSleep(s.sleep_time || "21:40");
     setBotEnabled(s.bot_enabled === "true");
   }, [today]);
 
