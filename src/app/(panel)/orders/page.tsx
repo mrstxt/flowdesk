@@ -54,17 +54,32 @@ export default function OrdersPage() {
   useEffect(() => {
     load();
   }, []);
-
-
+  
   async function onDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
-    const newStage = over.id as string;   // ← ASOSIY XATO SHU YERDA! //
+
+    // 1. Yangi bosqichni (stage) aniqlash:
+    // Birinchi bo'lib over.data ichidan qidiradi (agar komponentga data biriktirilgan bo'lsa).
+    // Agar u yo'q bo'lsa, orders ichidan ustiga tashlangan buyurtmani qidirib, uning stage'ini oladi.
+    // Agar u ham bo'lmasa, over.id ni bosqich ID-si deb hisoblaydi.
+    const targetOrder = orders.find((o) => o.id === over.id);
+    const newStage = (over.data.current?.stage || targetOrder?.stage || over.id) as string;
+
+    // 2. Sudralayotgan buyurtmani topish
     const order = orders.find((o) => o.id === active.id);
     if (!order || order.stage === newStage) return;
-    await updateStage(order, newStage, order.paymentType);
+
+    // If moving to confirmed, ask about payment
+    if (newStage === "confirmed" && order.stage !== "confirmed") {
+      setPayModal({ ...order, stage: newStage });
+      return;
+    }
+
+    // 3. Bosqichni yangilash
+    await updateStage(order, newStage, order.paymentType)
   }
-  
+
 
   async function updateStage(
     order: Order,
