@@ -37,10 +37,15 @@ type Task = {
 export default function IntizomPage() {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [wake, setWake] = useState("04:30");
-  const [sleep, setSleep] = useState("21:40");
+  const [wake, setWake] = useState("06:30");
+  const [sleep, setSleep] = useState("23:00");
+  const [savedWake, setSavedWake] = useState("06:30");
+  const [savedSleep, setSavedSleep] = useState("23:00");
   const [modal, setModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">(
+    "idle"
+  );
   const [botEnabled, setBotEnabled] = useState(false);
 
   const today = todayISO();
@@ -51,10 +56,14 @@ export default function IntizomPage() {
       fetch(`/api/tasks?from=${today}&to=${today}`).then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()),
     ]);
+    const wakeTime = s.wake_time || "06:30";
+    const sleepTime = s.sleep_time || "23:00";
     setRoutines(r);
     setTasks(t);
-    setWake(s.wake_time || "04:30");
-    setSleep(s.sleep_time || "21:40");
+    setWake(wakeTime);
+    setSleep(sleepTime);
+    setSavedWake(wakeTime);
+    setSavedSleep(sleepTime);
     setBotEnabled(s.bot_enabled === "true");
   }, [today]);
 
@@ -75,19 +84,39 @@ export default function IntizomPage() {
   const doneCount = routines.filter((r) => r.lastDoneDate === today).length;
   const pct = routines.length ? (doneCount / routines.length) * 100 : 0;
 
+  const timesChanged = wake !== savedWake || sleep !== savedSleep;
+
   async function saveTimes() {
+    if (!wake || !sleep) {
+      setSaveStatus("error");
+      return;
+    }
+
     setSaving(true);
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "wake_time", value: wake }),
-    });
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "sleep_time", value: sleep }),
-    });
-    setSaving(false);
+    setSaveStatus("idle");
+
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          values: { wake_time: wake, sleep_time: sleep },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Vaqtlarni saqlab bo'lmadi");
+      }
+
+      setSavedWake(wake);
+      setSavedSleep(sleep);
+      setSaveStatus("saved");
+    } catch (error) {
+      console.error("Vaqtlarni saqlashda xatolik:", error);
+      setSaveStatus("error");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleRoutine(id: number, done: boolean) {
@@ -262,8 +291,12 @@ export default function IntizomPage() {
           <input
             type="time"
             value={wake}
-            onChange={(e) => setWake(e.target.value)}
-            className="font-display text-3xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums w-full"
+            onChange={(e) => {
+              setWake(e.target.value);
+              setSaveStatus("idle");
+            }}
+            aria-label="Uyg'onish vaqti"
+            className="font-display text-3xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none focus:ring-2 focus:ring-[#ff9f0a]/30 rounded-xl tabular-nums w-full cursor-pointer"
           />
         </div>
         <div className="bg-gradient-to-br from-accent to-[#c21240] rounded-3xl p-6 text-white shadow-xl shadow-accent/25">
@@ -278,12 +311,23 @@ export default function IntizomPage() {
           </div>
           <button
             onClick={saveTimes}
-            disabled={saving}
-            className="mt-3 flex items-center gap-1.5 text-xs font-bold bg-white/20 hover:bg-white/30 px-3.5 py-1.5 rounded-full transition-colors disabled:opacity-60"
+            disabled={saving || !timesChanged}
+            className="mt-3 flex items-center gap-1.5 text-xs font-bold bg-white/20 hover:bg-white/30 px-3.5 py-1.5 rounded-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Check className="w-3.5 h-3.5" />
-            {saving ? "Saqlanmoqda..." : "Vaqt saqlandi"}
+            {saving
+              ? "Saqlanmoqda..."
+              : saveStatus === "saved"
+                ? "Saqlandi"
+                : timesChanged
+                  ? "Vaqtlarni saqlash"
+                  : "Vaqtlar saqlangan"}
           </button>
+          {saveStatus === "error" && (
+            <p className="mt-2 text-xs font-semibold text-white/90">
+              Saqlashda xatolik. Qayta urinib ko'ring.
+            </p>
+          )}
         </div>
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
           <div className="flex items-center gap-2 text-[#0a84ff] mb-3">
@@ -295,8 +339,12 @@ export default function IntizomPage() {
           <input
             type="time"
             value={sleep}
-            onChange={(e) => setSleep(e.target.value)}
-            className="font-display text-3xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums w-full"
+            onChange={(e) => {
+              setSleep(e.target.value);
+              setSaveStatus("idle");
+            }}
+            aria-label="Uxlash vaqti"
+            className="font-display text-3xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none focus:ring-2 focus:ring-[#0a84ff]/30 rounded-xl tabular-nums w-full cursor-pointer"
           />
         </div>
       </div>
