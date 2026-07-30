@@ -55,21 +55,16 @@ export default function OrdersPage() {
     load();
   }, []);
 
+
   async function onDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
-    const newStage = over.id as string;
+    const newStage = over.id as string;   // ← ASOSIY XATO SHU YERDA! //
     const order = orders.find((o) => o.id === active.id);
     if (!order || order.stage === newStage) return;
-
-    // If moving to confirmed, ask about payment
-    if (newStage === "confirmed" && order.stage !== "confirmed") {
-      setPayModal({ ...order, stage: newStage });
-      return;
-    }
-
     await updateStage(order, newStage, order.paymentType);
   }
+  
 
   async function updateStage(
     order: Order,
