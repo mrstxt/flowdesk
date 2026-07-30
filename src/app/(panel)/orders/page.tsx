@@ -47,14 +47,18 @@ export default function OrdersPage() {
   const sensors = useSensors(useSensor(PointerSensor));
 
   async function load() {
-    const rows = await fetch("/api/orders").then((r) => r.json());
-    setOrders(rows);
+    try {
+      const rows = await fetch("/api/orders").then((r) => r.json());
+      setOrders(rows);
+    } catch (error) {
+      console.error("Failed to load orders:", error);
+    }
   }
 
   useEffect(() => {
     load();
   }, []);
-  
+
   async function onDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
@@ -68,13 +72,13 @@ export default function OrdersPage() {
 
     // over element - bu OrderCard yoki StageColumn bo'lishi mumkin
     const overId = over.id;
-    
+
     // Birinchi navbatda over.data dan stage ni olishga harakat qilamiz
     if (over.data.current?.stage) {
       newStage = over.data.current.stage;
     } else {
       // over.id stage ID si bo'lishi mumkin
-      const isStage = STAGES.some(s => s.id === overId);
+      const isStage = STAGES.some((s) => s.id === overId);
       if (isStage) {
         newStage = overId as string;
       } else {
@@ -104,6 +108,8 @@ export default function OrdersPage() {
     paymentType: string
   ) {
     const oldStage = order.stage;
+
+    // Optimistic update
     const optimistic = orders.map((o) =>
       o.id === order.id
         ? {
@@ -116,19 +122,32 @@ export default function OrdersPage() {
     );
     setOrders(optimistic);
 
-    await fetch("/api/orders", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: order.id,
-        stage,
-        paymentType,
-        title: order.title,
-        amount: order.amount,
-        _oldStage: oldStage,
-      }),
-    });
-    load();
+    try {
+      const response = await fetch("/api/orders", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: order.id,
+          stage,
+          paymentType,
+          title: order.title,
+          amount: order.amount,
+          _oldStage: oldStage,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update order");
+      }
+
+      // Muvaffaqiyatli bo'lsa, serverdan so'nggi holatni olish
+      const rows = await fetch("/api/orders").then((r) => r.json());
+      setOrders(rows);
+    } catch (error) {
+      console.error("Update failed:", error);
+      // Xatolik bo'lsa, eski holatga qaytarish
+      await load();
+    }
   }
 
   async function confirmPayment(paymentType: string) {
@@ -140,26 +159,39 @@ export default function OrdersPage() {
   async function createOrder(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    await fetch("/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: fd.get("title"),
-        description: fd.get("description") || null,
-        amount: String(parseMoneyInput(fd.get("amount"))),
-        deadline: fd.get("deadline") || null,
-        clientName: fd.get("clientName") || null,
-      }),
-    });
-    setModal(false);
-    e.currentTarget.reset();
-    load();
+
+    try {
+      await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: fd.get("title"),
+          description: fd.get("description") || null,
+          amount: String(parseMoneyInput(fd.get("amount"))),
+          deadline: fd.get("deadline") || null,
+          clientName: fd.get("clientName") || null,
+        }),
+      });
+
+      setModal(false);
+      e.currentTarget.reset();
+      await load();
+    } catch (error) {
+      console.error("Failed to create order:", error);
+      alert("Buyurtma yaratishda xatolik yuz berdi");
+    }
   }
 
   async function deleteOrder(id: number) {
     if (!confirm("Buyurtmani o'chirmoqchimisiz?")) return;
-    await fetch(`/api/orders?id=${id}`, { method: "DELETE" });
-    load();
+
+    try {
+      await fetch(`/api/orders?id=${id}`, { method: "DELETE" });
+      await load();
+    } catch (error) {
+      console.error("Failed to delete order:", error);
+      alert("Buyurtmani o'chirishda xatolik yuz berdi");
+    }
   }
 
   const visibleOrders = showArchived
@@ -348,7 +380,7 @@ function StageColumn({
     <div
       className="bg-slate-100 dark:bg-slate-900 rounded-3xl p-3 min-h-[300px]"
       id={stage.id}
-      data-stage={stage.id} // <-- MUHIM: Bu qator qo'shildi
+      data-stage={stage.id}
     >
       <div className="flex items-center justify-between px-2 py-2 mb-2">
         <div className="flex items-center gap-2">
@@ -388,8 +420,14 @@ function OrderCard({
   order: Order;
   onDelete: (id: number) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: order.id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: order.id });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
