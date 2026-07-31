@@ -28,6 +28,7 @@ type Income = {
   source: string;
   date: string;
   paymentType: string;
+  cardId: number | null;
 };
 type Expense = {
   id: number;
@@ -35,6 +36,7 @@ type Expense = {
   amount: string;
   category: string;
   date: string;
+  cardId: number | null;
 };
 type Goal = {
   id: number;
@@ -42,6 +44,14 @@ type Goal = {
   targetAmount: string;
   savedAmount: string;
   autoPercent: number | null;
+  cardId: number | null;
+};
+type Card = {
+  id: number;
+  name: string;
+  bank: string | null;
+  last4: string | null;
+  color: string;
 };
 
 const EXPENSE_CATS: Record<string, string> = {
@@ -56,18 +66,30 @@ export default function FinancePage() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [cards, setCards] = useState<Card[]>([]);
   const [tab, setTab] = useState<"incomes" | "expenses" | "report">("report");
   const [modal, setModal] = useState<"income" | "expense" | null>(null);
 
   async function load() {
-    const [i, e, g] = await Promise.all([
+    const [i, e, g, c] = await Promise.all([
       fetch("/api/incomes").then((r) => r.json()),
       fetch("/api/expenses").then((r) => r.json()),
       fetch("/api/goals").then((r) => r.json()),
+      fetch("/api/cards").then((r) => r.json()),
     ]);
     setIncomes(i);
     setExpenses(e);
     setGoals(g);
+    setCards(c);
+  }
+
+  function cardName(id: number | null | undefined): string {
+    if (!id) return "—";
+    return cards.find((c) => c.id === id)?.name || "—";
+  }
+  function cardColor(id: number | null | undefined): string {
+    if (!id) return "#94a3b8";
+    return cards.find((c) => c.id === id)?.color || "#94a3b8";
   }
 
   useEffect(() => {
@@ -105,6 +127,7 @@ export default function FinancePage() {
   async function addIncome(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const cardIdRaw = fd.get("cardId") as string;
     await fetch("/api/incomes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -114,6 +137,7 @@ export default function FinancePage() {
         source: fd.get("source"),
         date: fd.get("date") || todayISO(),
         paymentType: fd.get("paymentType") || "cash",
+        cardId: cardIdRaw && cardIdRaw !== "cash" ? Number(cardIdRaw) : null,
       }),
     });
     setModal(null);
@@ -124,6 +148,7 @@ export default function FinancePage() {
   async function addExpense(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const cardIdRaw = fd.get("cardId") as string;
     await fetch("/api/expenses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -132,6 +157,7 @@ export default function FinancePage() {
         amount: String(parseMoneyInput(fd.get("amount"))),
         category: fd.get("category"),
         date: fd.get("date") || todayISO(),
+        cardId: cardIdRaw && cardIdRaw !== "cash" ? Number(cardIdRaw) : null,
       }),
     });
     setModal(null);
@@ -228,11 +254,84 @@ export default function FinancePage() {
       </div>
 
       {tab === "report" && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
-            Oxirgi 6 oylik dinamika
-          </h2>
-          <div style={{ width: "100%", height: 320 }}>
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
+              Kartalar bo'yicha taqsimot (shu oy)
+            </h2>
+            {cards.length === 0 ? (
+              <div className="text-sm text-slate-500 text-center py-8">
+                Kartalar yo'q. Maqsadlar sahifasidan karta qo'shing.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {cards.map((c) => {
+                  const cardIn = monthIncomes
+                    .filter((i) => i.cardId === c.id)
+                    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+                  const cardOut = monthExpenses
+                    .filter((e) => e.cardId === c.id)
+                    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+                  const cardNet = cardIn - cardOut;
+                  return (
+                    <div
+                      key={c.id}
+                      className="p-4 border-2 border-slate-100 rounded-2xl"
+                      style={{ borderLeftColor: c.color, borderLeftWidth: 4 }}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <div
+                          className="w-8 h-6 rounded"
+                          style={{ background: c.color }}
+                        />
+                        <div>
+                          <div className="font-semibold text-sm text-slate-900">
+                            {c.name}
+                          </div>
+                          {c.bank && (
+                            <div className="text-[11px] text-slate-500">
+                              {c.bank}
+                              {c.last4 ? ` •••• ${c.last4}` : ""}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <div className="text-slate-500">Kirim</div>
+                          <div className="font-bold text-green-600">
+                            {formatCurrency(cardIn)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-500">Chiqim</div>
+                          <div className="font-bold text-red-600">
+                            {formatCurrency(cardOut)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-500">Sof</div>
+                          <div
+                            className={`font-bold ${
+                              cardNet >= 0 ? "text-slate-900" : "text-red-600"
+                            }`}
+                          >
+                            {formatCurrency(cardNet)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
+              Oxirgi 6 oylik dinamika
+            </h2>
+            <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
               <AreaChart data={chartData}>
                 <defs>
@@ -292,6 +391,7 @@ export default function FinancePage() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          </div>
         </div>
       )}
 
@@ -313,15 +413,34 @@ export default function FinancePage() {
                 key={i.id}
                 className="px-6 py-3 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50"
               >
-                <div>
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
                     {i.title}
                   </div>
-                  <div className="text-xs text-slate-500">
-                    {i.date} · {i.paymentType === "card" ? "Plastik" : "Naqd"} · {i.source === "order" ? "Buyurtma" : "Boshqa"}
+                  <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                    <span>{i.date}</span>
+                    <span>·</span>
+                    <span>{i.source === "order" ? "Buyurtma" : i.source === "goal" ? "Maqsadga" : i.source === "bonus" ? "Bonus" : "Boshqa"}</span>
+                    {i.cardId && (
+                      <>
+                        <span>·</span>
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                          style={{
+                            background: `${cardColor(i.cardId)}20`,
+                            color: cardColor(i.cardId),
+                          }}
+                        >
+                          💳 {cardName(i.cardId)}
+                        </span>
+                      </>
+                    )}
+                    {!i.cardId && (
+                      <span className="text-[10px] text-slate-400">💵 Naqd</span>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <div className="text-sm font-semibold text-green-600">
                     +{formatCurrency(i.amount)}
                   </div>
@@ -356,15 +475,34 @@ export default function FinancePage() {
                 key={e.id}
                 className="px-6 py-3 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50"
               >
-                <div>
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
                     {e.title}
                   </div>
-                  <div className="text-xs text-slate-500">
-                    {e.date} · {EXPENSE_CATS[e.category] || e.category}
+                  <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                    <span>{e.date}</span>
+                    <span>·</span>
+                    <span>{EXPENSE_CATS[e.category] || e.category}</span>
+                    {e.cardId && (
+                      <>
+                        <span>·</span>
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                          style={{
+                            background: `${cardColor(e.cardId)}20`,
+                            color: cardColor(e.cardId),
+                          }}
+                        >
+                          💳 {cardName(e.cardId)}
+                        </span>
+                      </>
+                    )}
+                    {!e.cardId && (
+                      <span className="text-[10px] text-slate-400">💵 Naqd</span>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <div className="text-sm font-semibold text-red-600">
                     -{formatCurrency(e.amount)}
                   </div>
@@ -426,14 +564,19 @@ export default function FinancePage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                To'lov turi
+                Qaysi kartaga
               </label>
               <select
-                name="paymentType"
+                name="cardId"
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
               >
-                <option value="cash">Naqd</option>
-                <option value="card">Plastik</option>
+                <option value="cash">💵 Naqd pul</option>
+                {cards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    💳 {c.name}
+                    {c.last4 ? ` •••• ${c.last4}` : ""}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -447,6 +590,7 @@ export default function FinancePage() {
                 <option value="other">Boshqa</option>
                 <option value="order">Buyurtma</option>
                 <option value="bonus">Bonus</option>
+                <option value="goal">Maqsadga ajratish</option>
               </select>
             </div>
           </div>
@@ -510,20 +654,39 @@ export default function FinancePage() {
               />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-              Kategoriya
-            </label>
-            <select
-              name="category"
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
-            >
-              <option value="rent">Ijara</option>
-              <option value="ads">Reklama</option>
-              <option value="subscriptions">Abonent to'lovlar</option>
-              <option value="personal">Shaxsiy</option>
-              <option value="other">Boshqa</option>
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                Kategoriya
+              </label>
+              <select
+                name="category"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
+              >
+                <option value="rent">Ijara</option>
+                <option value="ads">Reklama</option>
+                <option value="subscriptions">Abonent to'lovlar</option>
+                <option value="personal">Shaxsiy</option>
+                <option value="other">Boshqa</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                Qaysi kartadan
+              </label>
+              <select
+                name="cardId"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
+              >
+                <option value="cash">💵 Naqd pul</option>
+                {cards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    💳 {c.name}
+                    {c.last4 ? ` •••• ${c.last4}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button

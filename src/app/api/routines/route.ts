@@ -10,9 +10,32 @@ function yesterdayISO(): string {
   return new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const filter = searchParams.get("filter") || "today"; // "today" | "tomorrow"
   const today = todayDateISO();
-  // Har kuni uchun (targetDate null) yoki bugungi targetDate ga tegishli rejalar
+  const tomorrowDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  if (filter === "tomorrow") {
+    // Ertangi kun uchun: targetDate = tomorrow yoki NULL (har kuni, doim ko'rinadi)
+    const rows = await db
+      .select()
+      .from(routines)
+      .where(
+        or(
+          isNull(routines.targetDate),
+          eq(routines.targetDate, tomorrowDate)
+        )!
+      )
+      .orderBy(asc(routines.time));
+    return NextResponse.json(rows);
+  }
+
+  // Bugungi kun uchun: targetDate = today yoki NULL (har kuni, doim ko'rinadi)
   const rows = await db
     .select()
     .from(routines)

@@ -20,9 +20,28 @@ export async function POST(req: Request) {
       amount: String(parseMoneyInput(body.amount)),
       category: body.category || "other",
       date: body.date,
+      cardId: body.cardId ? Number(body.cardId) : null,
     })
     .returning();
   return NextResponse.json(created);
+}
+
+export async function PUT(req: Request) {
+  const body = await req.json();
+  const { id, ...rest } = body;
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  if ("amount" in rest) {
+    rest.amount = String(parseMoneyInput(rest.amount));
+  }
+  if ("cardId" in rest) {
+    rest.cardId = rest.cardId ? Number(rest.cardId) : null;
+  }
+  const [updated] = await db
+    .update(expenses)
+    .set(rest)
+    .where(eq(expenses.id, id))
+    .returning();
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(req: Request) {

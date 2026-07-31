@@ -10,6 +10,19 @@ import {
   boolean,
 } from "drizzle-orm/pg-core";
 
+/* ── Kartalar (pul tushadigan karta) ── */
+
+export const cards = pgTable("cards", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  // Ixtiyoriy: bank, karta raqami oxirgi 4 ta raqami
+  bank: varchar("bank", { length: 100 }),
+  last4: varchar("last4", { length: 4 }),
+  color: varchar("color", { length: 20 }).default("#0a84ff"),
+  archived: boolean("archived").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
   title: varchar("title", { length: 255 }).notNull(),
@@ -40,6 +53,8 @@ export const incomes = pgTable("incomes", {
   source: varchar("source", { length: 100 }).default("other"),
   date: date("date").notNull(),
   paymentType: varchar("payment_type", { length: 50 }).default("cash"),
+  // Qaysi kartaga tushgan (nullable — naqd pul uchun)
+  cardId: integer("card_id"),
   orderId: integer("order_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -50,6 +65,8 @@ export const expenses = pgTable("expenses", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   category: varchar("category", { length: 100 }).default("other"),
   date: date("date").notNull(),
+  // Qaysi kartadan chiqqan (nullable)
+  cardId: integer("card_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -61,6 +78,8 @@ export const goals = pgTable("goals", {
     .notNull()
     .default("0"),
   autoPercent: integer("auto_percent").default(0),
+  // Qaysi kartaga to'planadi (nullable — umumiy)
+  cardId: integer("card_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

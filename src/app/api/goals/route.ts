@@ -20,6 +20,7 @@ export async function POST(req: Request) {
       targetAmount: String(parseMoneyInput(body.targetAmount)),
       savedAmount: String(parseMoneyInput(body.savedAmount ?? "0")),
       autoPercent: body.autoPercent ?? 0,
+      cardId: body.cardId ? Number(body.cardId) : null,
     })
     .returning();
   return NextResponse.json(created);
@@ -34,6 +35,9 @@ export async function PUT(req: Request) {
   }
   if ("savedAmount" in rest) {
     rest.savedAmount = String(parseMoneyInput(rest.savedAmount));
+  }
+  if ("cardId" in rest) {
+    rest.cardId = rest.cardId ? Number(rest.cardId) : null;
   }
   const [updated] = await db
     .update(goals)

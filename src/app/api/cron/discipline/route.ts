@@ -176,8 +176,6 @@ export async function GET(req: Request) {
         ? Math.round((doneRoutines / totalRoutines) * 100)
         : 0;
 
-      // 2-3 soatdan keyin uxlash vaqti — u yotishdan oldin ishlarni
-      // va ertangi rejalarni kiritishni so'raydi
       const summary =
         taskPct === 100 && routinePct === 100
           ? "🏆 Mukammal kun! Barcha ish va rejalar bajarildi!"
@@ -192,7 +190,7 @@ export async function GET(req: Request) {
           `📋 Ishlar: <b>${doneTasks}/${totalTasks}</b> (${taskPct}%)\n\n` +
           `${summary}\n\n` +
           `📌 <b>Ertangi kun uchun reja va ishlarni</b> shu yerga yozib qo'ying — ertalab uyg'onganda ko'rasiz.\n\n` +
-          `💡 Bot menyudan "📚 Kitob qo'shish", "🎯 Maqsad", "📋 Bugungi vazifalar" orqali qo'shishingiz mumkin.`,
+          `💡 Quyidagi tugmalar orqali qo'shing:`,
         parse_mode: "HTML",
         reply_markup: {
           inline_keyboard: [

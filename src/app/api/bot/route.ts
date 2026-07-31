@@ -58,6 +58,10 @@ const MAIN_KEYBOARD = {
     [{ text: "➕ Buyurtma" }, { text: "💸 Chiqim" }, { text: "💰 Kirim" }],
     [{ text: "📊 Statistika" }, { text: "📚 Kitob qo'shish" }],
     [{ text: "🎬 Video qo'shish" }, { text: "🎯 Maqsad" }],
+    [
+      { text: "☀️ Uyg'onish vaqti" },
+      { text: "🌙 Uxlash vaqti" },
+    ],
     [{ text: "🔔 Botni yoqish" }, { text: "🔕 Botni o'chirish" }],
     [{ text: "🏠 Menyu" }, { text: "❓ Yordam" }],
   ],
@@ -94,6 +98,8 @@ const BUTTON_TO_CMD: Record<string, string> = {
   "📚 Kitob qo'shish": "/kitob_qilish",
   "🎬 Video qo'shish": "/video_qilish",
   "🎯 Maqsad": "/maqsad_qilish",
+  "☀️ Uyg'onish vaqti": "/uyg_onish",
+  "🌙 Uxlash vaqti": "/uxlash",
   "🔔 Botni yoqish": "/bot_yoq",
   "🔕 Botni o'chirish": "/bot_och",
   "❓ Yordam": "/yordam",
@@ -697,6 +703,46 @@ async function handleWizardStep(chatId: number, text: string) {
     );
     return;
   }
+
+  // ── Uyg'onish vaqtini o'rnatish ──
+  if (state.mode === "set_wake_time") {
+    const time = text.trim();
+    if (!/^\d{1,2}:\d{2}$/.test(time)) {
+      await sendMessage(chatId, "⚠️ Vaqt formati noto'g'ri. HH:MM ko'rinishida kiriting (masalan: 06:30):");
+      return;
+    }
+    userState.delete(chatId);
+    await db
+      .insert(settings)
+      .values({ key: "wake_time", value: time })
+      .onConflictDoUpdate({ target: settings.key, set: { value: time } });
+    await sendMessage(
+      chatId,
+      `✅ Uyg'onish vaqti yangilandi: <b>${time}</b>\n\nErtalab shu vaqtda "Turingmi?" xabari keladi.`,
+      { reply_markup: MAIN_KEYBOARD }
+    );
+    return;
+  }
+
+  // ── Uxlash vaqtini o'rnatish ──
+  if (state.mode === "set_sleep_time") {
+    const time = text.trim();
+    if (!/^\d{1,2}:\d{2}$/.test(time)) {
+      await sendMessage(chatId, "⚠️ Vaqt formati noto'g'ri. HH:MM ko'rinishida kiriting (masalan: 22:00):");
+      return;
+    }
+    userState.delete(chatId);
+    await db
+      .insert(settings)
+      .values({ key: "sleep_time", value: time })
+      .onConflictDoUpdate({ target: settings.key, set: { value: time } });
+    await sendMessage(
+      chatId,
+      `✅ Uxlash vaqti yangilandi: <b>${time}</b>\n\nKechqurun shu vaqtda "Kun yakuni" va ertangi reja so'raladi.`,
+      { reply_markup: MAIN_KEYBOARD }
+    );
+    return;
+  }
 }
 
 /* ── Callback handlers (inline buttons from cron) ── */
@@ -1044,6 +1090,30 @@ async function handleCommand(chatId: number, text: string) {
       await sendMessage(chatId, "🏠 <b>Asosiy menyu</b>", {
         reply_markup: MAIN_KEYBOARD,
       });
+      return;
+    }
+
+    // ── Uyg'onish vaqtini sozlash (bot orqali) ──
+    if (cmd === "/uyg_onish") {
+      userState.set(chatId, { mode: "set_wake_time", step: 1, data: {} });
+      const cur = (await fetch("/api/settings").then((r) => r.json())).wake_time || "04:30";
+      await sendMessage(
+        chatId,
+        `☀️ <b>Uyg'onish vaqtini o'zgartirish</b>\n\nHozirgi vaqt: <b>${cur}</b>\n\nYangi vaqtni HH:MM formatida yozing:`,
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    // ── Uxlash vaqtini sozlash ──
+    if (cmd === "/uxlash") {
+      userState.set(chatId, { mode: "set_sleep_time", step: 1, data: {} });
+      const cur = (await fetch("/api/settings").then((r) => r.json())).sleep_time || "21:40";
+      await sendMessage(
+        chatId,
+        `🌙 <b>Uxlash vaqtini o'zgartirish</b>\n\nHozirgi vaqt: <b>${cur}</b>\n\nYangi vaqtni HH:MM formatida yozing:`,
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
       return;
     }
 

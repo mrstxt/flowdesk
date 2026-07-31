@@ -146,11 +146,15 @@ export default function AnalitikaPage() {
 
   const sumIn = (key: string) =>
     incomes
-      .filter((x) => x.date.startsWith(key))
+      .filter((x) => x.date.startsWith(key) && x.source !== "goal")
       .reduce((s, x) => s + Number(x.amount), 0);
   const sumOut = (key: string) =>
     expenses
       .filter((x) => x.date.startsWith(key))
+      .reduce((s, x) => s + Number(x.amount), 0);
+  const sumGoalAlloc = (key: string) =>
+    incomes
+      .filter((x) => x.date.startsWith(key) && x.source === "goal")
       .reduce((s, x) => s + Number(x.amount), 0);
   const doneOrders = (key: string) =>
     orders.filter(
@@ -161,8 +165,14 @@ export default function AnalitikaPage() {
   const inPrev = sumIn(prevKey);
   const outCur = sumOut(curKey);
   const outPrev = sumOut(prevKey);
+  const goalAllocCur = sumGoalAlloc(curKey);
+  const goalAllocPrev = sumGoalAlloc(prevKey);
+  // Sof foyda = sof kirim - chiqim (maqsadlarga ajratish alohida ko'rsatiladi)
   const netCur = inCur - outCur;
   const netPrev = inPrev - outPrev;
+  // Sof qolgan pul = sof foyda - maqsadlarga ajratilgan
+  const netRemainingCur = netCur - goalAllocCur;
+  const netRemainingPrev = netPrev - goalAllocPrev;
   const ordCur = doneOrders(curKey);
   const ordPrev = doneOrders(prevKey);
 
@@ -172,11 +182,13 @@ export default function AnalitikaPage() {
     const key = monthKey(off);
     const inn = sumIn(key);
     const out = sumOut(key);
+    const goalAlloc = sumGoalAlloc(key);
     return {
       month: monthLabel(off).slice(0, 3),
       Kirim: inn,
       Chiqim: out,
-      Foyda: inn - out,
+      "Sof foyda": inn - out,
+      "Maqsadlarga": goalAlloc,
     };
   });
 
@@ -292,10 +304,10 @@ export default function AnalitikaPage() {
     { label: "Chiqim", cur: outCur, prev: outPrev, money: true, goodUp: false },
     { label: "Sof foyda", cur: netCur, prev: netPrev, money: true, goodUp: true },
     {
-      label: "Yakunlangan buyurtmalar",
-      cur: ordCur,
-      prev: ordPrev,
-      money: false,
+      label: "Maqsadlarga ajratilgan",
+      cur: goalAllocCur,
+      prev: goalAllocPrev,
+      money: true,
       goodUp: true,
     },
   ];
@@ -523,15 +535,19 @@ export default function AnalitikaPage() {
 
         <div className="bg-white rounded-3xl border border-black/[0.06] p-6">
           <h2 className="font-display text-lg font-bold text-slate-900 mb-4">
-            Sof foyda dinamikasi
+            Sof foyda va maqsadlarga ajratish
           </h2>
           <div style={{ width: "100%", height: 280 }}>
             <ResponsiveContainer>
               <AreaChart data={chart}>
                 <defs>
                   <linearGradient id="gNet" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#ff2d5d" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#ff2d5d" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#0a84ff" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#0a84ff" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gGoal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#af52de" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#af52de" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -557,15 +573,67 @@ export default function AnalitikaPage() {
                     fontSize: 13,
                   }}
                 />
+                <Legend />
                 <Area
                   type="monotone"
-                  dataKey="Foyda"
-                  stroke="#ff2d5d"
+                  dataKey="Sof foyda"
+                  stroke="#0a84ff"
                   strokeWidth={2.5}
                   fill="url(#gNet)"
                 />
+                <Area
+                  type="monotone"
+                  dataKey="Maqsadlarga"
+                  stroke="#af52de"
+                  strokeWidth={2.5}
+                  fill="url(#gGoal)"
+                />
               </AreaChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Net foyda tafsilotlari */}
+      <div className="bg-white rounded-3xl border border-black/[0.06] p-6 mb-6">
+        <h2 className="font-display text-lg font-bold text-slate-900 mb-4">
+          💰 Sof foyda tafsilotlari (shu oy)
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="p-4 bg-green-50 border border-green-200 rounded-2xl">
+            <div className="text-xs text-green-700 mb-1">Kirim</div>
+            <div className="font-display text-xl font-bold text-green-700">
+              {formatCurrency(inCur)}
+            </div>
+          </div>
+          <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
+            <div className="text-xs text-red-700 mb-1">− Chiqim</div>
+            <div className="font-display text-xl font-bold text-red-700">
+              {formatCurrency(outCur)}
+            </div>
+          </div>
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl">
+            <div className="text-xs text-blue-700 mb-1">= Sof foyda</div>
+            <div className="font-display text-xl font-bold text-blue-700">
+              {formatCurrency(netCur)}
+            </div>
+          </div>
+          <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl">
+            <div className="text-xs text-purple-700 mb-1">− Maqsadlarga</div>
+            <div className="font-display text-xl font-bold text-purple-700">
+              {formatCurrency(goalAllocCur)}
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-600">Sof qo'lga tegadigan pul</div>
+            <div className="font-display text-2xl font-bold text-slate-900">
+              {formatCurrency(netRemainingCur)}
+            </div>
+          </div>
+          <div className="text-xs text-slate-500 max-w-xs text-right">
+            Sof foydadan maqsadlarga ajratilganidan keyin qolgan sof pul
           </div>
         </div>
       </div>

@@ -47,9 +47,11 @@ export async function PUT(req: Request) {
 
   // Automation: move to confirmed -> income + goals allocation + archive
   if (oldStage && oldStage !== "confirmed" && payload.stage === "confirmed") {
+    const cardId = payload.cardId ? Number(payload.cardId) : null;
     const result = await confirmOrder(
       id,
-      String(payload.paymentType || "cash")
+      String(payload.paymentType || "cash"),
+      cardId
     );
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: 400 });
@@ -58,7 +60,10 @@ export async function PUT(req: Request) {
       .select()
       .from(orders)
       .where(eq(orders.id, id));
-    return NextResponse.json(updated);
+    return NextResponse.json({
+      ...updated,
+      _distributed: result.netDistributed,
+    });
   }
 
   const [updated] = await db

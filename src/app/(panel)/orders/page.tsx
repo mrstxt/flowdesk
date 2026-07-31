@@ -30,6 +30,14 @@ type Order = {
   clientName: string | null;
   paymentType: string;
   archived: boolean | null;
+  updatedAt: string;
+};
+type Card = {
+  id: number;
+  name: string;
+  bank: string | null;
+  last4: string | null;
+  color: string;
 };
 
 const STAGES = [
@@ -41,6 +49,7 @@ const STAGES = [
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [cards, setCards] = useState<Card[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [modal, setModal] = useState(false);
   const [payModal, setPayModal] = useState<Order | null>(null);
@@ -49,8 +58,12 @@ export default function OrdersPage() {
 
   async function load() {
     try {
-      const rows = await fetch("/api/orders").then((r) => r.json());
+      const [rows, cardsRows] = await Promise.all([
+        fetch("/api/orders").then((r) => r.json()),
+        fetch("/api/cards").then((r) => r.json()),
+      ]);
       setOrders(rows);
+      setCards(cardsRows);
     } catch (error) {
       console.error("Failed to load orders:", error);
     }
@@ -108,7 +121,8 @@ export default function OrdersPage() {
   async function updateStage(
     order: Order,
     stage: string,
-    paymentType: string
+    paymentType: string,
+    cardId: number | null = null
   ) {
     const oldStage = order.stage;
 
@@ -133,6 +147,7 @@ export default function OrdersPage() {
           id: order.id,
           stage,
           paymentType,
+          cardId,
           title: order.title,
           amount: order.amount,
           _oldStage: oldStage,
@@ -141,6 +156,14 @@ export default function OrdersPage() {
 
       if (!response.ok) {
         throw new Error("Failed to update order");
+      }
+
+      const result = await response.json();
+      // Agar maqsadlarga taqsim bo'lgan bo'lsa, xabar beramiz
+      if (result._distributed && result._distributed > 0) {
+        alert(
+          `✅ Buyurtma tasdiqlandi!\n\n💰 ${parseMoneyInput(order.amount).toLocaleString()} so'm kirim.\n🎯 Maqsadlarga ${result._distributed.toLocaleString()} so'm avtomatik ajratildi (sof foydadan).`
+        );
       }
 
       // Muvaffaqiyatli bo'lsa, serverdan so'nggi holatni olish
@@ -153,9 +176,9 @@ export default function OrdersPage() {
     }
   }
 
-  async function confirmPayment(paymentType: string) {
+  async function confirmPayment(paymentType: string, cardId: number | null) {
     if (!payModal) return;
-    await updateStage(payModal, "confirmed", paymentType);
+    await updateStage(payModal, "confirmed", paymentType, cardId);
     setPayModal(null);
   }
 
@@ -336,30 +359,54 @@ export default function OrdersPage() {
       <Modal
         open={!!payModal}
         onClose={() => setPayModal(null)}
-        title="To'lov turi"
+        title="To'lovni tasdiqlash"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Buyurtma tasdiqlandi. To'lov qanday amalga oshirildi?
+          <p className="text-sm text-slate-600">
+            <b>{payModal?.title}</b> buyurtmasi tasdiqlansinmi? To'lov qaysi
+            kartaga tushdi?
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          {cards.length === 0 ? (
+            <div className="text-sm text-slate-500 bg-amber-50 border border-amber-200 rounded-xl p-3">
+              ⚠️ Avval "Maqsadlar" sahifasida kamida bitta karta qo'shing. Naqd
+              pul uchun karta kerak emas — "Naqd" ni tanlang.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {cards.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => confirmPayment("card", c.id)}
+                  className="w-full p-3 border-2 border-slate-200 rounded-xl hover:border-accent transition-colors text-left flex items-center gap-3"
+                >
+                  <div
+                    className="w-10 h-7 rounded-md shrink-0"
+                    style={{ background: c.color }}
+                  />
+                  <div className="flex-1">
+                    <div className="font-semibold text-sm text-slate-900">
+                      {c.name}
+                    </div>
+                    {c.bank && (
+                      <div className="text-xs text-slate-500">
+                        {c.bank}
+                        {c.last4 ? ` •••• ${c.last4}` : ""}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="border-t border-slate-200 pt-3">
             <button
-              onClick={() => confirmPayment("cash")}
-              className="p-4 border-2 border-slate-200 dark:border-slate-700 rounded-xl hover:border-accent transition-colors text-left"
+              onClick={() => confirmPayment("cash", null)}
+              className="w-full p-3 border-2 border-slate-200 rounded-xl hover:border-accent transition-colors text-left"
             >
-              <div className="font-semibold text-slate-900 dark:text-slate-100">
-                Naqd
+              <div className="font-semibold text-slate-900">💵 Naqd pul</div>
+              <div className="text-xs text-slate-500 mt-1">
+                Qo'lda olindi, karta ko'rsatilmaydi
               </div>
-              <div className="text-xs text-slate-500 mt-1">Qo'lda olindi</div>
-            </button>
-            <button
-              onClick={() => confirmPayment("card")}
-              className="p-4 border-2 border-slate-200 dark:border-slate-700 rounded-xl hover:border-accent transition-colors text-left"
-            >
-              <div className="font-semibold text-slate-900 dark:text-slate-100">
-                Plastik
-              </div>
-              <div className="text-xs text-slate-500 mt-1">Karta orqali</div>
             </button>
           </div>
         </div>
