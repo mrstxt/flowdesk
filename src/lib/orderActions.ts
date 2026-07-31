@@ -12,7 +12,18 @@ import { parseMoneyInput } from "@/lib/utils";
 import { getPrimaryCard } from "@/lib/cardActions";
 
 export function todayDateISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${year}-${month}-${day}`;
 }
 
 export function monthStartISO(date?: string): string {

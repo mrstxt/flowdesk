@@ -13,10 +13,16 @@ import {
   sleepLogs,
   dailyResults,
   settings,
+  cards,
 } from "@/db/schema";
 import { desc, eq, gte, and, asc, sql, desc as descOrd } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
+import {
+  addCardIncome,
+  addCardExpense,
+  getPrimaryCard,
+} from "@/lib/cardActions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -154,6 +160,21 @@ function fmt(n: number): string {
   return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
 }
 
+function getTashkentTimeString(): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tashkent",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(now);
+  let hour = Number(parts.find((p) => p.type === "hour")?.value || 0);
+  if (hour === 24) hour = 0;
+  const min = Number(parts.find((p) => p.type === "minute")?.value || 0);
+  return `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
 function parseAmount(raw: string): number {
   return parseMoneyInput(raw);
 }
@@ -220,6 +241,44 @@ const HELP = [
   "",
   "Kategoriyalar: ijara, reklama, obuna, shaxsiy, biznes, dasturlash, psixologiya",
 ].join("\n");
+
+async function sendCardSelectionButtons(
+  chatId: number,
+  prefix: string,
+  promptText: string,
+  includeCash = false
+) {
+  const activeCards = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.archived, false));
+  const cardButtons = activeCards.map((c) => [
+    {
+      text: `💳 ${c.name} ${c.type === "primary" ? "(Asosiy karta)" : ""}`,
+      callback_data: `${prefix}${c.id}`,
+    },
+  ]);
+  if (includeCash) {
+    cardButtons.push([
+      { text: "💵 Naqd pul", callback_data: `${prefix}cash` },
+    ]);
+  }
+  await sendMessage(chatId, promptText, {
+    reply_markup: { inline_keyboard: cardButtons },
+  });
+}
+
+async function findCardByText(text: string) {
+  const t = text.trim().toLowerCase();
+  if (t === "naqd" || t === "cash" || t === "-") return null;
+  const activeCards = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.archived, false));
+  const match = activeCards.find((c) => c.name.toLowerCase().includes(t));
+  if (match) return match;
+  return activeCards.find((c) => c.type === "primary") || activeCards[0] || null;
+}
 
 /* ── Wizard (kiritish rejimi) handlerlari ── */
 
@@ -323,19 +382,50 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 3) {
       const cat = EXPENSE_CAT[text.trim().toLowerCase()] || "other";
+      state.data.category = cat;
+      state.step = 4;
+      userState.set(chatId, state);
+      await sendCardSelectionButtons(
+        chatId,
+        "wizard_card_exp_",
+        "4️⃣ Qaysi kartadan yechildi? Kartalardan tanlang (yoki naqd deb yozing):",
+        true
+      );
+      return;
+    }
+    if (state.step === 4) {
+      const c = await findCardByText(text);
       userState.delete(chatId);
+      let cardLabel = "💵 Naqd pul";
+      if (c) {
+        cardLabel = `💳 ${c.name}`;
+        const res = await addCardExpense(
+          c.id,
+          Number(state.data.amount),
+          `Chiqim: ${state.data.title}`
+        );
+        if (!res.ok) {
+          await sendMessage(
+            chatId,
+            `❌ <b>Chiqim amalga oshmadi:</b>\n${res.error}`,
+            { reply_markup: MAIN_KEYBOARD }
+          );
+          return;
+        }
+      }
       try {
         await db.insert(expenses).values({
           title: state.data.title ?? "",
           amount: state.data.amount ?? "0",
-          category: cat,
+          category: state.data.category ?? "other",
           date: today,
+          cardId: c ? c.id : null,
         });
         await sendMessage(
           chatId,
           `<b>📉 Chiqim qo'shildi:</b>\n${state.data.title}\n💸 ${fmt(
             Number(state.data.amount)
-          )}`,
+          )}\nTo'lov turi: ${cardLabel}`,
           { reply_markup: MAIN_KEYBOARD }
         );
       } catch (e) {
@@ -368,30 +458,40 @@ async function handleWizardStep(chatId: number, text: string) {
       state.data.amount = String(amount);
       state.step = 3;
       userState.set(chatId, state);
-      await sendMessage(
+      await sendCardSelectionButtons(
         chatId,
-        "3️⃣ To'lov turi: naqd yoki karta yozing:",
-        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+        "wizard_card_inc_",
+        "3️⃣ Qaysi kartaga tushdi? Kartalardan tanlang (yoki naqd deb yozing):",
+        true
       );
       return;
     }
     if (state.step === 3) {
-      const t = text.toLowerCase();
-      const pay = t.includes("karta") || t.includes("card") ? "card" : "cash";
+      const c = await findCardByText(text);
       userState.delete(chatId);
+      let cardLabel = "💵 Naqd pul";
+      if (c) {
+        cardLabel = `💳 ${c.name}`;
+        await addCardIncome(
+          c.id,
+          Number(state.data.amount),
+          `Kirim: ${state.data.title}`
+        );
+      }
       try {
         await db.insert(incomes).values({
           title: state.data.title ?? "",
           amount: state.data.amount ?? "0",
           source: "other",
           date: today,
-          paymentType: pay,
+          paymentType: c ? "card" : "cash",
+          cardId: c ? c.id : null,
         });
         await sendMessage(
           chatId,
           `<b>📈 Kirim qo'shildi:</b>\n${state.data.title}\n💰 ${fmt(
             Number(state.data.amount)
-          )}\n💳 ${pay === "card" ? "Plastik" : "Naqd"}`,
+          )}\nTo'lov turi: ${cardLabel}`,
           { reply_markup: MAIN_KEYBOARD }
         );
       } catch (e) {
@@ -549,18 +649,35 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 3) {
       const pct = Math.min(100, Math.max(0, parseAmount(text)));
+      state.data.autoPercent = String(pct);
+      state.step = 4;
+      userState.set(chatId, state);
+      await sendCardSelectionButtons(
+        chatId,
+        "wizard_card_goal_",
+        "4️⃣ Maqsad uchun pul qaysi kartada to'planadi? Kartalardan tanlang:",
+        false
+      );
+      return;
+    }
+    if (state.step === 4) {
+      const c = await findCardByText(text);
       userState.delete(chatId);
+      const cardLabel = c ? `💳 ${c.name}` : "—";
       try {
         await db.insert(goals).values({
           title: state.data.title ?? "",
           targetAmount: state.data.amount ?? "0",
           savedAmount: "0",
-          autoPercent: pct,
+          autoPercent: Number(state.data.autoPercent) || 0,
+          cardId: c ? c.id : null,
         });
         let msg = `<b>🎯 Maqsad yaratildi:</b>\n${state.data.title}\n💰 ${fmt(
           Number(state.data.amount)
-        )}`;
-        if (pct > 0) msg += `\n🔄 Har bir kirimdan: ${pct}%`;
+        )}\nKarta: ${cardLabel}`;
+        if (Number(state.data.autoPercent) > 0) {
+          msg += `\n🔄 Har bir kirimdan: ${state.data.autoPercent}%`;
+        }
         await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
       } catch (e) {
         console.error("goal insert error:", e);
@@ -855,8 +972,145 @@ async function handleCallback(
 ) {
   const today = todayDateISO();
 
+  if (data.startsWith("wizard_card_inc_")) {
+    const val = data.replace("wizard_card_inc_", "");
+    const state = userState.get(chatId);
+    if (!state || state.mode !== "income") {
+      await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
+      return;
+    }
+    userState.delete(chatId);
+    const cardId = val === "cash" ? null : Number(val);
+    const payType = cardId ? "card" : "cash";
+    let cardLabel = "💵 Naqd pul";
+    if (cardId) {
+      const [c] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, cardId))
+        .limit(1);
+      if (c) {
+        cardLabel = `💳 ${c.name}`;
+        await addCardIncome(
+          c.id,
+          Number(state.data.amount),
+          `Kirim: ${state.data.title}`
+        );
+      }
+    }
+    await db.insert(incomes).values({
+      title: state.data.title ?? "",
+      amount: state.data.amount ?? "0",
+      source: "other",
+      date: today,
+      paymentType: payType,
+      cardId,
+    });
+    await answerCallback(chatId, callbackId, "✅ Kirim saqlandi!");
+    await sendMessage(
+      chatId,
+      `<b>📈 Kirim qo'shildi:</b>\n${state.data.title}\n💰 ${fmt(
+        Number(state.data.amount)
+      )}\nTo'lov turi: ${cardLabel}`,
+      { reply_markup: MAIN_KEYBOARD }
+    );
+    return;
+  }
+
+  if (data.startsWith("wizard_card_exp_")) {
+    const val = data.replace("wizard_card_exp_", "");
+    const state = userState.get(chatId);
+    if (!state || state.mode !== "expense") {
+      await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
+      return;
+    }
+    userState.delete(chatId);
+    const cardId = val === "cash" ? null : Number(val);
+    let cardLabel = "💵 Naqd pul";
+    if (cardId) {
+      const [c] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, cardId))
+        .limit(1);
+      if (c) {
+        cardLabel = `💳 ${c.name}`;
+        const res = await addCardExpense(
+          c.id,
+          Number(state.data.amount),
+          `Chiqim: ${state.data.title}`
+        );
+        if (!res.ok) {
+          await answerCallback(
+            chatId,
+            callbackId,
+            res.error || "❌ Mablag' yetarli emas"
+          );
+          await sendMessage(
+            chatId,
+            `❌ <b>Chiqim amalga oshmadi:</b>\n${res.error}`,
+            { reply_markup: MAIN_KEYBOARD }
+          );
+          return;
+        }
+      }
+    }
+    await db.insert(expenses).values({
+      title: state.data.title ?? "",
+      amount: state.data.amount ?? "0",
+      category: state.data.category ?? "other",
+      date: today,
+      cardId,
+    });
+    await answerCallback(chatId, callbackId, "✅ Chiqim saqlandi!");
+    await sendMessage(
+      chatId,
+      `<b>📉 Chiqim qo'shildi:</b>\n${state.data.title}\n💸 ${fmt(
+        Number(state.data.amount)
+      )}\nTo'lov turi: ${cardLabel}`,
+      { reply_markup: MAIN_KEYBOARD }
+    );
+    return;
+  }
+
+  if (data.startsWith("wizard_card_goal_")) {
+    const val = data.replace("wizard_card_goal_", "");
+    const state = userState.get(chatId);
+    if (!state || state.mode !== "goal") {
+      await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
+      return;
+    }
+    userState.delete(chatId);
+    const cardId = Number(val);
+    let cardLabel = "—";
+    if (cardId) {
+      const [c] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, cardId))
+        .limit(1);
+      if (c) cardLabel = `💳 ${c.name}`;
+    }
+    await db.insert(goals).values({
+      title: state.data.title ?? "",
+      targetAmount: state.data.amount ?? "0",
+      savedAmount: "0",
+      autoPercent: Number(state.data.autoPercent) || 0,
+      cardId: cardId || null,
+    });
+    await answerCallback(chatId, callbackId, "✅ Maqsad yaratildi!");
+    let msg = `<b>🎯 Maqsad yaratildi:</b>\n${state.data.title}\n💰 ${fmt(
+      Number(state.data.amount)
+    )}\nKarta: ${cardLabel}`;
+    if (Number(state.data.autoPercent) > 0) {
+      msg += `\n🔄 Har bir kirimdan: ${state.data.autoPercent}%`;
+    }
+    await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
+    return;
+  }
+
   if (data === "woke_yes") {
-    const actualWake = new Date().toTimeString().slice(0, 5);
+    const actualWake = getTashkentTimeString();
     const settingsMap = await loadSettingsMap();
     const expectedWake = getSetting(settingsMap, "wake_time", "04:30");
     const [eh, em] = expectedWake.split(":").map(Number);
@@ -896,6 +1150,7 @@ async function handleCallback(
         ? `⚠️ Siz ${delay} daqiqa kechikdingiz. Ertaga yana 10 daqiqa oldinroq uyg'onishga harakat qiling.`
         : "✅ Ajoyib! O'z vaqtida turibsiz. Kun rejalaringiz oldinda. Kuchli boshlang! 💪";
       await answerCallback(chatId, callbackId, onTimeMsg);
+      await sendMessage(chatId, onTimeMsg, { reply_markup: MAIN_KEYBOARD });
 
       // Bugungi rejalar
       const routinesToday = await db
@@ -931,10 +1186,11 @@ async function handleCallback(
           and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
         );
       userState.set(chatId, { mode: "wake_reason", step: 1, data: {} });
-      await answerCallback(
+      await answerCallback(chatId, callbackId, "😴 Uxlab qoldim");
+      await sendMessage(
         chatId,
-        callbackId,
-        "😴 Nima uchun uxlab qoldingiz? Sababini yozing — sababni bilish = kelgusi safar o'zgartirish!\n\nMasalan: kech yotdim, ertalab kech turdim..."
+        "😴 <b>Nima uchun uxlab qoldingiz? Sababini yozib yuboring:</b>\n\n<i>Sababini bilish = kelgusi safar o'zgartirish! Masalan: kech yotdim, ertalab kech turdim...</i>",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
       );
     } catch (e) {
       console.error("woke_no error:", e);
@@ -944,7 +1200,7 @@ async function handleCallback(
   }
 
   if (data === "sleep_ack") {
-    const actualSleep = new Date().toTimeString().slice(0, 5);
+    const actualSleep = getTashkentTimeString();
     const settingsMap = await loadSettingsMap();
     const expectedSleep = getSetting(settingsMap, "sleep_time", "21:40");
     const [eh, em] = expectedSleep.split(":").map(Number);
@@ -978,10 +1234,11 @@ async function handleCallback(
         .where(
           and(eq(botReminders.date, today), eq(botReminders.type, "sleep"))
         );
-      await answerCallback(
+      await answerCallback(chatId, callbackId, "🌙 Yaxshi dam oling!");
+      await sendMessage(
         chatId,
-        callbackId,
-        "🌙 Yaxshi! Telefonni qo'ying, ertaga kuchli kun sizni kutmoqda! Yaxshi dam oling 💤"
+        "🌙 <b>Yaxshi!</b> Telefonni qo'ying, ertaga kuchli kun sizni kutmoqda! Yaxshi dam oling 💤",
+        { reply_markup: MAIN_KEYBOARD }
       );
     } catch (e) {
       console.error("sleep_ack error:", e);
@@ -1049,11 +1306,15 @@ async function handleCallback(
       await answerCallback(
         chatId,
         callbackId,
-        tasksDone
-          ? "✅ Ajoyib! Ishlar bajarilgan deb belgilandi"
-          : "❌ Ishlar bajarilmagan deb belgilandi. Ertaga urinib ko'ring!"
+        tasksDone ? "✅ Ajoyib!" : "❌ Bajarilmadi"
       );
-      if (!tasksDone) {
+      if (tasksDone) {
+        await sendMessage(
+          chatId,
+          "✅ <b>Ajoyib!</b> Bugungi ishlar bajarilgan deb belgilandi. Barakalla!",
+          { reply_markup: MAIN_KEYBOARD }
+        );
+      } else {
         userState.set(chatId, {
           mode: "result_response",
           step: 1,
@@ -1061,7 +1322,7 @@ async function handleCallback(
         });
         await sendMessage(
           chatId,
-          "📝 Nima uchun bajara olmadingiz? Sababini yozing yoki qisqa video yuboring (maks 1 minut):",
+          "📝 <b>Nima uchun bajara olmadingiz?</b>\n\nSababini yozing yoki qisqa video yuboring (maks 1 minut):",
           { reply_markup: REQUEST_CANCEL_KEYBOARD }
         );
       }
@@ -1094,9 +1355,7 @@ async function handleCallback(
       await answerCallback(
         chatId,
         callbackId,
-        financeRecorded
-          ? "✅ Hisob yozilgan. Zo'r!"
-          : "❌ Hisob yozilmagan. Bugungi natijalarni kiriting."
+        financeRecorded ? "✅ Hisob yozildi!" : "❌ Yozilmadi"
       );
       if (!financeRecorded) {
         userState.set(chatId, {
@@ -1106,7 +1365,7 @@ async function handleCallback(
         });
         await sendMessage(
           chatId,
-          "📝 Nima uchun yozmadingiz? Yoki kiriting:\n• 💸 /chiqim — chiqim qo'shish\n• 💰 /kirim — kirim qo'shish\n\nYoki sabab yozing / video yuboring:",
+          "📝 <b>Nima uchun hisob-kitob yozmadingiz?</b>\n\nYoki kiriting:\n• 💸 /chiqim — chiqim qo'shish\n• 💰 /kirim — kirim qo'shish\n\nYoki sabab yozing / video yuboring:",
           { reply_markup: REQUEST_CANCEL_KEYBOARD }
         );
       } else {
@@ -1119,6 +1378,12 @@ async function handleCallback(
           await sendMessage(
             chatId,
             "🌟 <b>Kun yakunlandi!</b>\n\nBarcha natijalar qayd etildi. Yaxshi dam oling! Ertaga kuchliroq davom etamiz 💪",
+            { reply_markup: MAIN_KEYBOARD }
+          );
+        } else {
+          await sendMessage(
+            chatId,
+            "✅ <b>Hisob-kitob yozilgan deb belgilandi!</b>",
             { reply_markup: MAIN_KEYBOARD }
           );
         }
@@ -1156,7 +1421,12 @@ async function handleCallback(
       await answerCallback(
         chatId,
         callbackId,
-        `${streakMsg} <b>${r?.title} bajarildi!</b>\nStreak: ${streak} kun`
+        `${streakMsg} ${r?.title} bajarildi!`
+      );
+      await sendMessage(
+        chatId,
+        `✅ <b>Reja bajarildi:</b> ${r?.title || ""}\n${streakMsg} <b>Ketma-ket: ${streak} kun!</b>`,
+        { reply_markup: MAIN_KEYBOARD }
       );
     } catch (e) {
       console.error("routine_yes error:", e);
@@ -1177,7 +1447,12 @@ async function handleCallback(
       await answerCallback(
         chatId,
         callbackId,
-        "⏭ Hech qanday muammo yo'q — lekin ehtiyot bo'ling! Ketma-ket o'tkazish odatga aylanishi mumkin. Yana urinib ko'ring 🔄"
+        "⏭ O'tkazildi"
+      );
+      await sendMessage(
+        chatId,
+        "⏭ <b>Hozircha o'tkazib yuborildi.</b>\n<i>Ehtiyot bo'ling — ketma-ket o'tkazish odatga aylanib qolmasin! Yana urinib ko'ring 🔄</i>",
+        { reply_markup: MAIN_KEYBOARD }
       );
     } catch (e) {
       console.error("routine_no error:", e);

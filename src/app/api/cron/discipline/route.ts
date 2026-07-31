@@ -45,6 +45,31 @@ function safeMinutes(time: string | null | undefined, fallback: number): number 
   return h * 60 + m;
 }
 
+function getTashkentTime() {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value || 0);
+  const year = get("year");
+  const month = String(get("month")).padStart(2, "0");
+  const day = String(get("day")).padStart(2, "0");
+  let hour = get("hour");
+  if (hour === 24) hour = 0;
+  const minute = get("minute");
+  return {
+    today: `${year}-${month}-${day}`,
+    nowMin: hour * 60 + minute,
+  };
+}
+
 /**
  * Cron job: har 30 daqiqada yuradi.
  * - Uyg'onish vaqti: "Turingmi?" tugmasi
@@ -55,10 +80,16 @@ function safeMinutes(time: string | null | undefined, fallback: number): number 
  *   Vercel serverless'da ishlamaydi)
  */
 export async function GET(req: Request) {
-  // Vercel Cron secret
+  const { searchParams } = new URL(req.url);
+  const force =
+    searchParams.get("force") === "true" || searchParams.get("test") === "true";
+
+  // Vercel Cron secret (agar force test bo'lmasa va header berilsa tekshiramiz)
   const headerSecret = req.headers.get("x-vercel-cron-secret");
   if (
+    !force &&
     process.env.VERCEL_CRON_SECRET &&
+    headerSecret &&
     headerSecret !== process.env.VERCEL_CRON_SECRET
   ) {
     return NextResponse.json({ ok: true });
@@ -78,17 +109,15 @@ export async function GET(req: Request) {
   }
 
   try {
-    const today = todayDateISO();
-    const now = new Date();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const { today, nowMin } = getTashkentTime();
 
-    // ── Settings ni DB dan to'g'ridan-to'g'ri o'qish (fetch ishlamaydi Vercel'da) ──
+    // ── Settings ni DB dan to'g'ridan-to'g'ri o'qish ──
     const settingsRows = await db.select().from(settings);
     const settingsMap: Record<string, string> = {};
     for (const r of settingsRows) settingsMap[r.key] = r.value ?? "";
 
     const enable = settingsMap.bot_enabled === "true";
-    if (!enable) {
+    if (!enable && !force) {
       return NextResponse.json({ ok: true, skipped: "bot disabled" });
     }
 
@@ -107,11 +136,8 @@ export async function GET(req: Request) {
     let messagesSent = 0;
 
     // ── Wake up reminder ──
-    // Cron har 10 daqiqada yuradi. Vaqtdan 5 daqiqa oldin va 25 daqiqa keyin
-    // ichida trigger qilinadi (botReminders yozuvi orqali dublikat
-    // oldini olamiz).
     const wakeMin = safeMinutes(wakeTime, 4 * 60 + 30);
-    if (nowMin >= wakeMin - 5 && nowMin < wakeMin + 25) {
+    if (force || nowMin >= wakeMin - 15) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -120,7 +146,7 @@ export async function GET(req: Request) {
         )
         .limit(1);
 
-      if (exists.length === 0) {
+      if (force || exists.length === 0) {
         await botSend("sendMessage", {
           chat_id: chatId,
           text: `☀️ <b>SALOM! ${wakeTime} da turing!</b>\n\nYengillik bilan ko'zni oching, birinchi ishi suv iching 💧`,
@@ -134,12 +160,14 @@ export async function GET(req: Request) {
             ],
           },
         });
-        await db.insert(botReminders).values({
-          routineId: null,
-          date: today,
-          type: "wake_up",
-          sent: true,
-        });
+        if (exists.length === 0) {
+          await db.insert(botReminders).values({
+            routineId: null,
+            date: today,
+            type: "wake_up",
+            sent: true,
+          });
+        }
         messagesSent++;
       }
     }
@@ -147,8 +175,7 @@ export async function GET(req: Request) {
     // ── Routine reminders ──
     for (const r of allRoutines) {
       const rMin = safeMinutes(r.time, 0);
-      // Cron har 10 daqiqada yuradi. Vaqtdan 5 daqiqa oldin va 25 daqiqa keyin
-      if (nowMin >= rMin - 5 && nowMin < rMin + 25) {
+      if (force || nowMin >= rMin - 15) {
         const exists = await db
           .select({ id: botReminders.id })
           .from(botReminders)
@@ -157,7 +184,7 @@ export async function GET(req: Request) {
           )
           .limit(1);
 
-        if (exists.length === 0) {
+        if (force || exists.length === 0) {
           const endInfo = r.endTime ? ` (deadline: ${r.endTime})` : "";
           await botSend("sendMessage", {
             chat_id: chatId,
@@ -175,20 +202,21 @@ export async function GET(req: Request) {
               ],
             },
           });
-          await db.insert(botReminders).values({
-            routineId: r.id,
-            date: today,
-            type: "routine",
-            sent: true,
-          });
+          if (exists.length === 0) {
+            await db.insert(botReminders).values({
+              routineId: r.id,
+              date: today,
+              type: "routine",
+              sent: true,
+            });
+          }
           messagesSent++;
         }
       }
     }
 
     // ── 20:00 — bugungi natija + ertangi reja kiritish so'rovi ──
-    // Cron har 10 daqiqada yuradi. 20:00 dan 20:29 gacha trigger.
-    if (nowMin >= 20 * 60 && nowMin < 20 * 60 + 30) {
+    if (force || nowMin >= 20 * 60 - 15) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -197,7 +225,7 @@ export async function GET(req: Request) {
         )
         .limit(1);
 
-      if (exists.length === 0) {
+      if (force || exists.length === 0) {
         const todayTasks = await db
           .select()
           .from(tasks)
@@ -247,22 +275,22 @@ export async function GET(req: Request) {
             ],
           },
         });
-        await db.insert(botReminders).values({
-          routineId: null,
-          date: today,
-          type: "evening",
-          sent: true,
-          responded: true,
-        });
+        if (exists.length === 0) {
+          await db.insert(botReminders).values({
+            routineId: null,
+            date: today,
+            type: "evening",
+            sent: true,
+            responded: true,
+          });
+        }
         messagesSent++;
       }
     }
 
     // ── Sleep reminder (uxlash vaqti) ──
-    // Cron har 10 daqiqada yuradi. Vaqtdan 5 daqiqa oldin va 25 daqiqa keyin
-    // ichida trigger qilinadi. 18:00 dan oldin yuborilmaydi.
     const sleepMin = safeMinutes(sleepTime, 21 * 60 + 40);
-    if (sleepMin > 18 * 60 && nowMin >= sleepMin - 5 && nowMin < sleepMin + 25) {
+    if (force || (nowMin >= sleepMin - 15 && nowMin >= 18 * 60)) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -271,8 +299,7 @@ export async function GET(req: Request) {
         )
         .limit(1);
 
-      if (exists.length === 0) {
-        // Birlashtirilgan xabar: ertangi reja + kunlik natija
+      if (force || exists.length === 0) {
         await botSend("sendMessage", {
           chat_id: chatId,
           text:
@@ -323,12 +350,14 @@ export async function GET(req: Request) {
             ],
           },
         });
-        await db.insert(botReminders).values({
-          routineId: null,
-          date: today,
-          type: "sleep",
-          sent: true,
-        });
+        if (exists.length === 0) {
+          await db.insert(botReminders).values({
+            routineId: null,
+            date: today,
+            type: "sleep",
+            sent: true,
+          });
+        }
         messagesSent++;
       }
     }
