@@ -12,11 +12,8 @@ import {
   BookOpen,
   Clapperboard,
   BarChart3,
-  Moon,
-  Sun,
   LogOut,
 } from "lucide-react";
-import { useTheme } from "./ThemeProvider";
 import { cn } from "@/lib/utils";
 
 const groups = [
@@ -43,7 +40,6 @@ const groups = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -109,17 +105,6 @@ export function Sidebar() {
       </nav>
 
       <div className="p-3 space-y-1 border-t border-black/[0.06] dark:border-white/[0.08]">
-        <button
-          onClick={toggleTheme}
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-        >
-          {theme === "dark" ? (
-            <Sun className="w-[18px] h-[18px]" />
-          ) : (
-            <Moon className="w-[18px] h-[18px]" />
-          )}
-          {theme === "dark" ? "Kunduzgi rejim" : "Tungi rejim"}
-        </button>
         <button
           onClick={logout}
           className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-accent-soft hover:text-accent-ink transition-colors"

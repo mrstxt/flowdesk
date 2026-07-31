@@ -8,6 +8,14 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Sunrise,
+  Moon,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Video as VideoIcon,
+  MessageSquare,
+  Calendar,
 } from "lucide-react";
 import {
   BarChart,
@@ -27,6 +35,27 @@ type Income = { id: number; amount: string; date: string; source: string | null 
 type Expense = { id: number; amount: string; date: string; category: string };
 type Order = { id: number; stage: string; updatedAt: string; archived: boolean | null };
 type Goal = { id: number; title: string; autoPercent: number | null };
+type SleepLog = {
+  id: number;
+  date: string;
+  expectedWake: string | null;
+  actualWake: string | null;
+  expectedSleep: string | null;
+  actualSleep: string | null;
+  overslept: boolean | null;
+  wentLateSleep: boolean | null;
+  reason: string | null;
+};
+type DailyResult = {
+  id: number;
+  date: string;
+  tasksDone: boolean | null;
+  financeRecorded: boolean | null;
+  responseType: string | null;
+  responseText: string | null;
+  videoFileId: string | null;
+  createdAt: string;
+};
 
 const EXPENSE_LABEL: Record<string, string> = {
   rent: "Ijara",
@@ -50,9 +79,31 @@ function monthLabel(offset: number): string {
   return d.toLocaleDateString("uz-UZ", { month: "long" });
 }
 
+function dateKey(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+
 function delta(cur: number, prev: number): number {
   if (prev === 0) return cur > 0 ? 100 : 0;
   return ((cur - prev) / Math.abs(prev)) * 100;
+}
+
+function timeDiffMinutes(expected: string | null, actual: string | null): number | null {
+  if (!expected || !actual) return null;
+  const [eh, em] = expected.split(":").map(Number);
+  const [ah, am] = actual.split(":").map(Number);
+  const expMin = (eh || 0) * 60 + (em || 0);
+  const actMin = (ah || 0) * 60 + (am || 0);
+  return actMin - expMin;
+}
+
+function fmtMin(min: number | null): string {
+  if (min === null) return "—";
+  if (min === 0) return "0 daq";
+  if (min > 0) return `+${min} daq (kechikkan)`;
+  return `${Math.abs(min)} daq (erta)`;
 }
 
 export default function AnalitikaPage() {
@@ -60,6 +111,10 @@ export default function AnalitikaPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [sleepLogs, setSleepLogs] = useState<SleepLog[]>([]);
+  const [dailyResults, setDailyResults] = useState<DailyResult[]>([]);
+  const [wake, setWake] = useState("04:30");
+  const [sleep, setSleep] = useState("21:40");
 
   useEffect(() => {
     Promise.all([
@@ -67,11 +122,22 @@ export default function AnalitikaPage() {
       fetch("/api/expenses").then((r) => r.json()),
       fetch("/api/orders").then((r) => r.json()),
       fetch("/api/goals").then((r) => r.json()),
-    ]).then(([i, e, o, g]) => {
+      fetch(`/api/sleep-logs?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
+        r.json()
+      ),
+      fetch(`/api/daily-results?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
+        r.json()
+      ),
+      fetch("/api/settings").then((r) => r.json()),
+    ]).then(([i, e, o, g, sl, dr, s]) => {
       setIncomes(i);
       setExpenses(e);
       setOrders(o);
       setGoals(g);
+      setSleepLogs(sl);
+      setDailyResults(dr);
+      setWake(s.wake_time || "04:30");
+      setSleep(s.sleep_time || "21:40");
     });
   }, []);
 
@@ -79,9 +145,13 @@ export default function AnalitikaPage() {
   const prevKey = monthKey(-1);
 
   const sumIn = (key: string) =>
-    incomes.filter((x) => x.date.startsWith(key)).reduce((s, x) => s + Number(x.amount), 0);
+    incomes
+      .filter((x) => x.date.startsWith(key))
+      .reduce((s, x) => s + Number(x.amount), 0);
   const sumOut = (key: string) =>
-    expenses.filter((x) => x.date.startsWith(key)).reduce((s, x) => s + Number(x.amount), 0);
+    expenses
+      .filter((x) => x.date.startsWith(key))
+      .reduce((s, x) => s + Number(x.amount), 0);
   const doneOrders = (key: string) =>
     orders.filter(
       (o) => o.stage === "confirmed" && o.updatedAt?.startsWith(key)
@@ -109,6 +179,42 @@ export default function AnalitikaPage() {
       Foyda: inn - out,
     };
   });
+
+  // Uyg'onish/uxlash samaradorligi (oxirgi 7 kun)
+  const last7 = Array.from({ length: 7 }, (_, i) => dateKey(i - 6));
+  const wakeStats = last7
+    .map((d) => sleepLogs.find((s) => s.date === d))
+    .filter(Boolean) as SleepLog[];
+  const onTimeWake = wakeStats.filter(
+    (s) => !s.overslept && s.actualWake
+  ).length;
+  const wakePct = wakeStats.length
+    ? Math.round((onTimeWake / wakeStats.length) * 100)
+    : 0;
+  const avgWakeDelay = wakeStats.length
+    ? Math.round(
+        wakeStats.reduce(
+          (sum, s) => sum + (timeDiffMinutes(s.expectedWake, s.actualWake) ?? 0),
+          0
+        ) / wakeStats.length
+      )
+    : 0;
+  const onTimeSleep = wakeStats.filter(
+    (s) => !s.wentLateSleep && s.actualSleep
+  ).length;
+  const sleepPct = wakeStats.length
+    ? Math.round((onTimeSleep / wakeStats.length) * 100)
+    : 0;
+  const avgSleepDelay = wakeStats.length
+    ? Math.round(
+        wakeStats.reduce(
+          (sum, s) =>
+            sum + (timeDiffMinutes(s.expectedSleep, s.actualSleep) ?? 0),
+          0
+        ) / wakeStats.length
+      )
+    : 0;
+  const oversleptDays = wakeStats.filter((s) => s.overslept);
 
   // Top expense category this month
   const byCat: Record<string, number> = {};
@@ -160,6 +266,21 @@ export default function AnalitikaPage() {
       text: `Sof foyda o'sishda: ${formatCurrency(netPrev)} → ${formatCurrency(netCur)}. Ortiqcha qismni maqsadga yo'naltiring.`,
       good: true,
     });
+  // Intizom bo'yicha insight
+  if (wakeStats.length >= 3) {
+    if (wakePct >= 80)
+      insights.push({
+        text: `Intizom a'lo darajada! So'nggi 7 kunda ${wakePct}% vaqtida o'z vaqtida uyg'ongansiz. Shu ruhda davom eting.`,
+        good: true,
+      });
+    else if (wakePct < 50)
+      insights.push({
+        text: `Uyg'onish intizomi past (${wakePct}%). O'rtacha ${Math.abs(
+          avgWakeDelay
+        )} daqiqa kechikkan ekansiz. Kechqurun uxlash vaqtini 30 daqiqa oldinroq qiling.`,
+        good: false,
+      });
+  }
   if (insights.length === 0)
     insights.push({
       text: "Hozircha ma'lumot kam — buyurtmalar va xarajatlarni kiritib boring, analitika o'zi tavsiyalar beradi.",
@@ -167,27 +288,9 @@ export default function AnalitikaPage() {
     });
 
   const cards = [
-    {
-      label: "Kirim",
-      cur: inCur,
-      prev: inPrev,
-      money: true,
-      goodUp: true,
-    },
-    {
-      label: "Chiqim",
-      cur: outCur,
-      prev: outPrev,
-      money: true,
-      goodUp: false,
-    },
-    {
-      label: "Sof foyda",
-      cur: netCur,
-      prev: netPrev,
-      money: true,
-      goodUp: true,
-    },
+    { label: "Kirim", cur: inCur, prev: inPrev, money: true, goodUp: true },
+    { label: "Chiqim", cur: outCur, prev: outPrev, money: true, goodUp: false },
+    { label: "Sof foyda", cur: netCur, prev: netPrev, money: true, goodUp: true },
     {
       label: "Yakunlangan buyurtmalar",
       cur: ordCur,
@@ -200,12 +303,134 @@ export default function AnalitikaPage() {
   return (
     <div className="p-8 max-w-6xl mx-auto fade-in">
       <div className="mb-8">
-        <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+        <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900">
           Analitika
         </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1.5">
+        <p className="text-slate-500 mt-1.5">
           {monthLabel(-1)} → {monthLabel(0)} taqoshlash va o'sish natijalari
         </p>
+      </div>
+
+      {/* Intizom samaradorligi */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {/* Uyg'onish samaradorligi */}
+        <div className="bg-gradient-to-br from-[#ff9f0a]/8 to-white rounded-3xl border border-[#ff9f0a]/20 p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Sunrise className="w-5 h-5 text-[#ff9f0a]" />
+            <h2 className="font-display text-lg font-bold text-slate-900">
+              Uyg'onish samaradorligi
+            </h2>
+            <span className="ml-auto text-xs text-slate-500">
+              Oxirgi 7 kun
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">O'z vaqtida</div>
+              <div className="font-display text-2xl font-extrabold text-[#34c759]">
+                {wakePct}%
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">
+                O'rtacha farq
+              </div>
+              <div
+                className={`font-display text-2xl font-extrabold ${
+                  avgWakeDelay > 5
+                    ? "text-accent"
+                    : avgWakeDelay < -5
+                    ? "text-[#0a84ff]"
+                    : "text-slate-700"
+                }`}
+              >
+                {fmtMin(avgWakeDelay)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">
+                Kechikkan kun
+              </div>
+              <div className="font-display text-2xl font-extrabold text-slate-700">
+                {wakeStats.length - onTimeWake}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <Clock className="w-3 h-3" />
+            Reja: {wake}
+          </div>
+          {oversleptDays.length > 0 && (
+            <details className="mt-3">
+              <summary className="text-[11px] text-accent cursor-pointer hover:underline">
+                Kechikkan kunlarning sabablari ({oversleptDays.length})
+              </summary>
+              <ul className="mt-2 space-y-1.5">
+                {oversleptDays.map((s) => (
+                  <li
+                    key={s.id}
+                    className="text-[11px] p-2 rounded-xl bg-accent-soft/60 text-slate-700"
+                  >
+                    <span className="font-bold">
+                      {new Date(s.date + "T00:00:00").toLocaleDateString(
+                        "uz-UZ",
+                        { day: "2-digit", month: "short" }
+                      )}
+                    </span>{" "}
+                    — {s.reason || "Sabab ko'rsatilmagan"}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+
+        {/* Uxlash samaradorligi */}
+        <div className="bg-gradient-to-br from-[#0a84ff]/8 to-white rounded-3xl border border-[#0a84ff]/20 p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Moon className="w-5 h-5 text-[#0a84ff]" />
+            <h2 className="font-display text-lg font-bold text-slate-900">
+              Uxlash samaradorligi
+            </h2>
+            <span className="ml-auto text-xs text-slate-500">
+              Oxirgi 7 kun
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">O'z vaqtida</div>
+              <div className="font-display text-2xl font-extrabold text-[#34c759]">
+                {sleepPct}%
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">
+                O'rtacha farq
+              </div>
+              <div
+                className={`font-display text-2xl font-extrabold ${
+                  avgSleepDelay > 5
+                    ? "text-accent"
+                    : avgSleepDelay < -5
+                    ? "text-[#0a84ff]"
+                    : "text-slate-700"
+                }`}
+              >
+                {fmtMin(avgSleepDelay)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">Kech yotgan</div>
+              <div className="font-display text-2xl font-extrabold text-slate-700">
+                {wakeStats.length - onTimeSleep}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <Clock className="w-3 h-3" />
+            Reja: {sleep}
+          </div>
+        </div>
       </div>
 
       {/* Comparison cards */}
@@ -219,19 +444,19 @@ export default function AnalitikaPage() {
           return (
             <div
               key={c.label}
-              className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-5 card-hover"
+              className="bg-white rounded-3xl border border-black/[0.06] p-5 card-hover"
             >
               <div className="text-[13px] font-medium text-slate-500 mb-3">
                 {c.label}
               </div>
-              <div className="font-display text-[22px] font-extrabold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums">
+              <div className="font-display text-[22px] font-extrabold tracking-tight text-slate-900 tabular-nums">
                 {c.money ? formatCurrency(c.cur) : `${c.cur} ta`}
               </div>
               <div className="flex items-center gap-2 mt-2">
                 <span
                   className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${
                     flat
-                      ? "bg-black/[0.05] dark:bg-white/[0.08] text-slate-500"
+                      ? "bg-black/[0.05] text-slate-500"
                       : positive
                       ? "bg-[#34c759]/12 text-[#34c759]"
                       : "bg-accent-soft text-accent"
@@ -258,8 +483,8 @@ export default function AnalitikaPage() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
-          <h2 className="font-display text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
+        <div className="bg-white rounded-3xl border border-black/[0.06] p-6">
+          <h2 className="font-display text-lg font-bold text-slate-900 mb-4">
             Kirim vs Chiqim — 6 oy
           </h2>
           <div style={{ width: "100%", height: 280 }}>
@@ -296,8 +521,8 @@ export default function AnalitikaPage() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
-          <h2 className="font-display text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
+        <div className="bg-white rounded-3xl border border-black/[0.06] p-6">
+          <h2 className="font-display text-lg font-bold text-slate-900 mb-4">
             Sof foyda dinamikasi
           </h2>
           <div style={{ width: "100%", height: 280 }}>
@@ -345,13 +570,90 @@ export default function AnalitikaPage() {
         </div>
       </div>
 
+      {/* Kunlik natijalar */}
+      <div className="bg-white rounded-3xl border border-black/[0.06] p-6 mb-6">
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="p-2 rounded-full bg-[#af52de]/12 text-[#af52de]">
+            <Calendar className="w-4 h-4" />
+          </div>
+          <h2 className="font-display text-lg font-bold text-slate-900">
+            Kunlik natijalar
+          </h2>
+          <span className="ml-auto text-xs text-slate-500">
+            Kechqurun bot so'rovi
+          </span>
+        </div>
+
+        {dailyResults.length === 0 ? (
+          <div className="text-sm text-slate-500 py-8 text-center border border-dashed border-black/[0.1] rounded-2xl">
+            Hali kunlik natija yo'q. Kechqurun uxlash vaqtida bot savollar beradi.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {dailyResults.map((r) => {
+              const dt = new Date(r.date + "T00:00:00");
+              const label = dt.toLocaleDateString("uz-UZ", {
+                day: "2-digit",
+                month: "short",
+                weekday: "short",
+              });
+              return (
+                <li
+                  key={r.id}
+                  className="flex items-center gap-3 p-3.5 rounded-2xl border border-black/[0.05] hover:border-accent/30 transition-colors"
+                >
+                  <div className="text-sm font-bold text-slate-700 w-24 shrink-0">
+                    {label}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {r.tasksDone ? (
+                      <span className="flex items-center gap-1 text-[11px] font-bold text-[#34c759] bg-[#34c759]/12 px-2 py-1 rounded-full">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Ishlar ✓
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[11px] font-bold text-accent bg-accent-soft px-2 py-1 rounded-full">
+                        <XCircle className="w-3 h-3" />
+                        Ishlar ✗
+                      </span>
+                    )}
+                    {r.financeRecorded ? (
+                      <span className="flex items-center gap-1 text-[11px] font-bold text-[#34c759] bg-[#34c759]/12 px-2 py-1 rounded-full">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Hisob ✓
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[11px] font-bold text-accent bg-accent-soft px-2 py-1 rounded-full">
+                        <XCircle className="w-3 h-3" />
+                        Hisob ✗
+                      </span>
+                    )}
+                  </div>
+                  {r.videoFileId && (
+                    <span className="flex items-center gap-1 text-[11px] font-bold text-[#0a84ff] bg-[#0a84ff]/10 px-2 py-1 rounded-full">
+                      <VideoIcon className="w-3 h-3" />
+                      Video
+                    </span>
+                  )}
+                  {r.responseText && (
+                    <span className="flex-1 text-[12px] text-slate-600 truncate">
+                      {r.responseText}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
       {/* Insights */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
+      <div className="bg-white rounded-3xl border border-black/[0.06] p-6">
         <div className="flex items-center gap-2.5 mb-5">
           <div className="p-2 rounded-full bg-[#ff9f0a]/12 text-[#ff9f0a]">
             <Lightbulb className="w-4 h-4" />
           </div>
-          <h2 className="font-display text-lg font-bold text-slate-900 dark:text-slate-100">
+          <h2 className="font-display text-lg font-bold text-slate-900">
             Nima qilsak bo'ladi?
           </h2>
         </div>
@@ -364,7 +666,7 @@ export default function AnalitikaPage() {
                   ? "border-[#34c759]/25 bg-[#34c759]/[0.05]"
                   : ins.good === false
                   ? "border-accent/20 bg-accent-soft/60"
-                  : "border-black/[0.05] dark:border-white/[0.06] bg-black/[0.02] dark:bg-white/[0.03]"
+                  : "border-black/[0.05] bg-black/[0.02]"
               }`}
             >
               {ins.good === true ? (
@@ -374,7 +676,7 @@ export default function AnalitikaPage() {
               ) : (
                 <Lightbulb className="w-5 h-5 text-[#ff9f0a] shrink-0 mt-0.5" />
               )}
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-200 leading-relaxed">
+              <p className="text-sm font-medium text-slate-700 leading-relaxed">
                 {ins.text}
               </p>
             </li>

@@ -74,6 +74,12 @@ export const settings = pgTable("settings", {
 export const routines = pgTable("routines", {
   id: serial("id").primaryKey(),
   time: varchar("time", { length: 5 }).notNull(),
+  // Reja uchun belgilangan sana (masalan ertangi kun). NULL = har kuni
+  targetDate: date("target_date"),
+  // Reja boshlanish vaqti (default = time bilan bir xil)
+  startTime: varchar("start_time", { length: 5 }),
+  // Reja tugash vaqti / deadline (ixtiyoriy)
+  endTime: varchar("end_time", { length: 5 }),
   title: varchar("title", { length: 255 }).notNull(),
   lastDoneDate: date("last_done_date"),
   streak: integer("streak").default(0),
@@ -142,7 +148,27 @@ export const sleepLogs = pgTable("sleep_logs", {
   date: date("date").notNull(),
   expectedWake: varchar("expected_wake", { length: 5 }),
   actualWake: varchar("actual_wake", { length: 5 }),
+  expectedSleep: varchar("expected_sleep", { length: 5 }),
+  actualSleep: varchar("actual_sleep", { length: 5 }),
   overslept: boolean("overslept").default(false),
+  wentLateSleep: boolean("went_late_sleep").default(false),
   reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/* ── Kunlik natijalar (kechqurun bot tekshiruvi uchun) ── */
+
+export const dailyResults = pgTable("daily_results", {
+  id: serial("id").primaryKey(),
+  date: date("date").notNull().unique(),
+  // Kechqurun savol: ishlarni bajardingizmi? (ha/yoq)
+  tasksDone: boolean("tasks_done").default(false),
+  // Kechqurun savol: hisob yozdingizmi? (ha/yoq)
+  financeRecorded: boolean("finance_recorded").default(false),
+  // "Yoq" bo'lsa: video yoki matn yuborgan javob
+  responseType: varchar("response_type", { length: 20 }), // "video" | "text" | null
+  responseText: text("response_text"),
+  // Telegram file_id agar video yuborgan bo'lsa
+  videoFileId: varchar("video_file_id", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

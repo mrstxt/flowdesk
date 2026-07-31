@@ -2,7 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
-type Theme = "light" | "dark";
+// Light mode only — dark mode o'chirilgan.
+// Provider saqlanib qolgan, lekin hech qachon dark klass qo'shmaydi.
+type Theme = "light";
 
 const ThemeContext = createContext<{
   theme: Theme;
@@ -10,34 +12,22 @@ const ThemeContext = createContext<{
 }>({ theme: "light", toggleTheme: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme") as Theme | null;
-    const prefers = window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-    const initial = saved || prefers;
-    setTheme(initial);
+    // Har doim light klassini o'rnatamiz
+    const root = document.documentElement;
+    root.classList.remove("dark");
+    root.style.colorScheme = "light";
+    localStorage.setItem("theme", "light");
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (!mounted) return;
-    const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-    localStorage.setItem("theme", theme);
-  }, [theme, mounted]);
-
-  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  // toggleTheme endi hech narsa qilmaydi (dark mode yo'q)
+  const toggleTheme = () => {};
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme: "light", toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

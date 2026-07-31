@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { routines, settings, botReminders } from "@/db/schema";
-import { asc, and, eq, gte } from "drizzle-orm";
+import {
+  routines,
+  settings,
+  botReminders,
+  sleepLogs,
+  tasks,
+  dailyResults,
+} from "@/db/schema";
+import { asc, and, eq, gte, desc, sql } from "drizzle-orm";
 import { todayDateISO } from "@/lib/orderActions";
 
 export const dynamic = "force-dynamic";
@@ -23,12 +30,18 @@ async function botSend(method: string, payload: Record<string, unknown>) {
 
 /**
  * Cron job: har 30 daqiqada yuradi.
- * Bugungi barcha routine vaqt bilan taqqoslaydi.
+ * - Uyg'onish vaqti: "Turingmi?" tugmasi
+ * - Reja vaqti kelganda: eslatma
+ * - 20:00: kunlik hisobot
+ * - Uxlash vaqti: ertangi reja kiritish so'rovi + kunlik natija (ishlar, hisob)
  */
 export async function GET(req: Request) {
   // Vercel Cron secret
   const headerSecret = req.headers.get("x-vercel-cron-secret");
-  if (process.env.VERCEL_CRON_SECRET && headerSecret !== process.env.VERCEL_CRON_SECRET) {
+  if (
+    process.env.VERCEL_CRON_SECRET &&
+    headerSecret !== process.env.VERCEL_CRON_SECRET
+  ) {
     return NextResponse.json({ ok: true });
   }
 
@@ -44,19 +57,24 @@ export async function GET(req: Request) {
   const today = todayDateISO();
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
-  const enable = (await fetch("/api/settings").then((r) => r.json())).bot_enabled === "true";
+  const settingsData = await fetch("/api/settings").then((r) => r.json());
+  const enable = settingsData.bot_enabled === "true";
 
   if (!enable) {
     return NextResponse.json({ ok: true, skipped: "bot disabled" });
   }
 
+  const wakeTime = settingsData.wake_time || "04:30";
+  const sleepTime = settingsData.sleep_time || "21:40";
+
+  // Faqat bugungi targetDate ga tegishli yoki har kuni uchun rejalar
   const allRoutines = await db
     .select()
     .from(routines)
+    .where(
+      sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${today}`
+    )
     .orderBy(asc(routines.time));
-
-  const wakeTime = (await fetch("/api/settings").then((r) => r.json())).wake_time || "06:30";
-  const sleepTime = (await fetch("/api/settings").then((r) => r.json())).sleep_time || "23:00";
 
   let messagesSent = 0;
 
@@ -64,13 +82,10 @@ export async function GET(req: Request) {
   const [wh, wm] = wakeTime.split(":").map(Number);
   const wakeMin = wh * 60 + wm;
   if (nowMin >= wakeMin && nowMin < wakeMin + 35) {
-    const key = "wake_up";
     const exists = await db
       .select({ id: botReminders.id })
       .from(botReminders)
-      .where(
-        and(eq(botReminders.date, today), eq(botReminders.type, key))
-      )
+      .where(and(eq(botReminders.date, today), eq(botReminders.type, "wake_up")))
       .limit(1);
 
     if (exists.length === 0) {
@@ -106,17 +121,15 @@ export async function GET(req: Request) {
         .select({ id: botReminders.id })
         .from(botReminders)
         .where(
-          and(
-            eq(botReminders.date, today),
-            eq(botReminders.routineId, r.id)
-          )
+          and(eq(botReminders.date, today), eq(botReminders.routineId, r.id))
         )
         .limit(1);
 
       if (exists.length === 0) {
+        const endInfo = r.endTime ? ` (deadline: ${r.endTime})` : "";
         await botSend("sendMessage", {
           chat_id: chatId,
-          text: `⏰ <b>${r.time} — ${r.title}</b>\n\nVaqti keldi! Boshlang 💪`,
+          text: `⏰ <b>${r.time} — ${r.title}</b>${endInfo}\n\nVaqti keldi! Boshlang 💪`,
           parse_mode: "HTML",
           reply_markup: {
             inline_keyboard: [
@@ -136,7 +149,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // ── Evening summary (20:00) ──
+  // ── 20:00 — bugungi natija + ertangi reja kiritish so'rovi ──
   if (nowMin === 20 * 60 || nowMin === 20 * 60 + 30) {
     const exists = await db
       .select({ id: botReminders.id })
@@ -145,32 +158,57 @@ export async function GET(req: Request) {
       .limit(1);
 
     if (exists.length === 0) {
-      const todayReminders = await db
+      // Bugungi natijalarni yig'amiz
+      const todayTasks = await db
         .select()
-        .from(botReminders)
-        .where(
-          and(
-            eq(botReminders.date, today),
-            gte(botReminders.type, ""),
-            eq(botReminders.sent, true)
-          )
-        );
-      const done = todayReminders.filter(
-        (r) => r.responded && r.responseText?.startsWith("✅")
+        .from(tasks)
+        .where(eq(tasks.date, today));
+      const doneTasks = todayTasks.filter((t) => t.completed).length;
+      const totalTasks = todayTasks.length;
+      const doneRoutines = allRoutines.filter(
+        (r) => r.lastDoneDate === today
       ).length;
-      const total = allRoutines.length;
+      const totalRoutines = allRoutines.length;
+      const taskPct = totalTasks
+        ? Math.round((doneTasks / totalTasks) * 100)
+        : 0;
+      const routinePct = totalRoutines
+        ? Math.round((doneRoutines / totalRoutines) * 100)
+        : 0;
 
-        const emoji = done === total ? "🏆" : done >= total * 0.7 ? "👏" : done >= total * 0.5 ? "💪" : "📌";
-        const summary = done === total
-          ? "Ajoyib! Barcha rejalar bajardi! 🎉"
-          : done >= total * 0.7
-          ? "Yaxshi natija! Yana 1-2 qadamda mukammal!"
-          : "Ertaga yanada kuchli bo'ling. Asosiy — to'xtamaslik!";
-        await botSend("sendMessage", {
-          chat_id: chatId,
-          text: `${emoji} <b>KUNLIK HISOBOT</b>\n\n📅 Bugungi kun:\n✅ ${done}/${total} reja bajarildi\n\n${summary}`,
-          parse_mode: "HTML",
-        });
+      // 2-3 soatdan keyin uxlash vaqti — u yotishdan oldin ishlarni
+      // va ertangi rejalarni kiritishni so'raydi
+      const summary =
+        taskPct === 100 && routinePct === 100
+          ? "🏆 Mukammal kun! Barcha ish va rejalar bajarildi!"
+          : taskPct >= 70
+          ? "👏 Yaxshi kun! Asosiy qismi bajarildi."
+          : "💪 Ertaga yanada kuchliroq bo'ling.";
+
+      await botSend("sendMessage", {
+        chat_id: chatId,
+        text: `🌆 <b>KUN YAKUNI (20:00)</b>\n\n` +
+          `✅ Rejalar: <b>${doneRoutines}/${totalRoutines}</b> (${routinePct}%)\n` +
+          `📋 Ishlar: <b>${doneTasks}/${totalTasks}</b> (${taskPct}%)\n\n` +
+          `${summary}\n\n` +
+          `📌 <b>Ertangi kun uchun reja va ishlarni</b> shu yerga yozib qo'ying — ertalab uyg'onganda ko'rasiz.\n\n` +
+          `💡 Bot menyudan "📚 Kitob qo'shish", "🎯 Maqsad", "📋 Bugungi vazifalar" orqali qo'shishingiz mumkin.`,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "📋 Ertangi ish qo'shish",
+                callback_data: "tomorrow_task",
+              },
+              {
+                text: "🎯 Ertangi reja",
+                callback_data: "tomorrow_routine",
+              },
+            ],
+          ],
+        },
+      });
       await db.insert(botReminders).values({
         routineId: null,
         date: today,
@@ -182,10 +220,10 @@ export async function GET(req: Request) {
     }
   }
 
-  // ── Sleep reminder ──
+  // ── Sleep reminder (uxlash vaqti) — kunlik natija savollari ──
   const [sh, sm] = sleepTime.split(":").map(Number);
   const sleepMin = sh * 60 + sm;
-  if (nowMin >= sleepMin - 30 && nowMin < sleepMin + 35 && sleepMin > 22 * 60) {
+  if (nowMin >= sleepMin - 5 && nowMin < sleepMin + 35 && sleepMin > 18 * 60) {
     const exists = await db
       .select({ id: botReminders.id })
       .from(botReminders)
@@ -193,16 +231,72 @@ export async function GET(req: Request) {
       .limit(1);
 
     if (exists.length === 0) {
+      // Avval ertangi rejalar haqida eslatma yuborish
       await botSend("sendMessage", {
         chat_id: chatId,
-        text: `🌙 <b>Yotish vaqti yaqinlashmoqda!</b>\n\n🕐 ${sleepTime} da yotish rejalashtirilgan.\nTelefonni qo'ying, ertaga kuchli turish uchun 💤`,
+        text: `🌙 <b>Yotish vaqti: ${sleepTime}</b>\n\n` +
+          `📝 <b>Ertangi kun uchun reja va ishlarni</b> yozib qo'ying. Kechqurun uxlamasdan kiritsangiz — ertalab ko'rasiz.\n\n` +
+          `💡 Quyidagi tugmalar orqali qo'shing yoki "📋 Ertangi reja" deb yozing.`,
         parse_mode: "HTML",
         reply_markup: {
           inline_keyboard: [
-            [{ text: "👍 Ma'lum bo'ldi", callback_data: "sleep_ack" }],
+            [
+              {
+                text: "📋 Ertangi ish",
+                callback_data: "tomorrow_task",
+              },
+              {
+                text: "🎯 Ertangi reja",
+                callback_data: "tomorrow_routine",
+              },
+            ],
+            [
+              {
+                text: "✅ Hammasi tayyor, yotaman",
+                callback_data: "sleep_ack",
+              },
+            ],
           ],
         },
       });
+
+      // 1 daqiqadan so'ng kunlik natija savolini yuborish
+      setTimeout(() => {
+        botSend("sendMessage", {
+          chat_id: chatId,
+          text:
+            `📊 <b>Bugungi kun natijasi:</b>\n\n` +
+            `1️⃣ Bugungi ishlarni bajardingizmi?\n` +
+            `2️⃣ Bugungi kirim-chiqimni yozdingizmi?\n\n` +
+            `👇 Javob bering:`,
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "✅ Ha, bajardim",
+                  callback_data: "result_done_yes",
+                },
+                {
+                  text: "❌ Yo'q",
+                  callback_data: "result_done_no",
+                },
+              ],
+              [
+                {
+                  text: "✅ Hisob yozdim",
+                  callback_data: "result_finance_yes",
+                },
+                {
+                  text: "❌ Yozmadim",
+                  callback_data: "result_finance_no",
+                },
+              ],
+            ],
+          },
+        });
+      }, 60_000);
+
       await db.insert(botReminders).values({
         routineId: null,
         date: today,

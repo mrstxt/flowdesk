@@ -11,6 +11,7 @@ import {
   botReminders,
   routines,
   sleepLogs,
+  dailyResults,
   settings,
 } from "@/db/schema";
 import { desc, eq, gte, and, asc, isNull, sql, desc as descOrd } from "drizzle-orm";
@@ -529,6 +530,173 @@ async function handleWizardStep(chatId: number, text: string) {
       return;
     }
   }
+
+  // ── Wake reason (uxlab qolish sababi) ──
+  if (state.mode === "wake_reason") {
+    const reason = text.trim();
+    if (!reason) {
+      await sendMessage(chatId, "Sabab bo'sh bo'lmasligi kerak. Yozing:");
+      return;
+    }
+    userState.delete(chatId);
+    const settingsData = await fetch("/api/settings").then((r) => r.json());
+    const expectedWake = settingsData.wake_time || "04:30";
+    const actualWake = new Date().toTimeString().slice(0, 5);
+    const today = todayDateISO();
+    // Yozuvni yangilash yoki qo'shish
+    const [existing] = await db
+      .select()
+      .from(sleepLogs)
+      .where(eq(sleepLogs.date, today))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(sleepLogs)
+        .set({ reason, actualWake, expectedWake, overslept: true })
+        .where(eq(sleepLogs.id, existing.id));
+    } else {
+      await db.insert(sleepLogs).values({
+        date: today,
+        reason,
+        actualWake,
+        expectedWake,
+        overslept: true,
+      });
+    }
+    await sendMessage(
+      chatId,
+      `📝 Sabab saqlandi: "${reason}"\n\n⚠️ Kecha kech yotdingizmi? Ertaga ${
+        settingsData.sleep_time || "23:00"
+      } da yotishga harakat qiling. Sifatli uxlash = sifatli ish! 💪\n\n📊 Sababingiz analitika sahifasida saqlandi.`,
+      { reply_markup: MAIN_KEYBOARD }
+    );
+    return;
+  }
+
+  // ── Ertangi ish qo'shish ──
+  if (state.mode === "tomorrow_task") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "2️⃣ Kategoriya tanlang yoki yozing:\n\nshoshilinch / shaxsiy / moliyaviy",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 2) {
+      const cat = TASK_CAT[text.trim().toLowerCase()] || "personal";
+      userState.delete(chatId);
+      await db.insert(tasks).values({
+        title: state.data.title ?? "",
+        date: state.data.targetDate ?? today,
+        category: cat,
+        completed: false,
+      });
+      await sendMessage(
+        chatId,
+        `<b>✅ Ertangi ish qo'shildi:</b>\n${state.data.title}\n📅 ${state.data.targetDate}\n🏷 ${cat}`,
+        { reply_markup: MAIN_KEYBOARD }
+      );
+      return;
+    }
+  }
+
+  // ── Ertangi reja qo'shish ──
+  if (state.mode === "tomorrow_routine") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Boshlanish vaqtini kiriting (masalan: 07:00):");
+      return;
+    }
+    if (state.step === 2) {
+      const time = text.trim();
+      if (!/^\d{1,2}:\d{2}$/.test(time)) {
+        await sendMessage(chatId, "⚠️ Vaqt formati noto'g'ri. HH:MM ko'rinishida kiriting:");
+        return;
+      }
+      // Vaqt allaqachon o'tgan bo'lsa, ertangi kunga o'tkazishni tavsiya qilamiz
+      const [hh, mm] = time.split(":").map(Number);
+      const target = new Date(state.data.targetDate + "T00:00:00");
+      target.setHours(hh, mm, 0, 0);
+      const now = new Date();
+      if (target.getTime() <= now.getTime()) {
+        // Bugungi kunga o'tkazamiz
+        const todayISO = todayDateISO();
+        await sendMessage(
+          chatId,
+          `⚠️ Bu vaqt (${time}) allaqachon o'tib ketgan. Ertangi kun uchun saqlanadi, lekin agar shu vaqtda bajarmoqchi bo'lsangiz — bugungi kun uchun qo'shamiz.\n\nDavom etamiz.`
+        );
+      }
+      state.data.time = time;
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "3️⃣ Deadline (ixtiyoriy, masalan: 09:00) yoki \"-\" yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 3) {
+      const endTime = text.trim();
+      state.data.endTime = endTime === "-" || !endTime ? null : endTime;
+      userState.delete(chatId);
+      await db.insert(routines).values({
+        title: state.data.title ?? "",
+        time: state.data.time ?? "09:00",
+        startTime: state.data.time ?? "09:00",
+        endTime: state.data.endTime,
+        targetDate: state.data.targetDate,
+        lastDoneDate: null,
+        streak: 0,
+      });
+      let msg = `<b>✅ Ertangi reja qo'shildi:</b>\n${state.data.title}\n⏰ ${state.data.time}`;
+      if (state.data.endTime) msg += ` → ${state.data.endTime}`;
+      msg += `\n📅 ${state.data.targetDate}`;
+      await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
+      return;
+    }
+  }
+
+  // ── Kunlik natija javobi (sabab yoki video) ──
+  if (state.mode === "result_response") {
+    const responseText = text.trim();
+    if (!responseText) {
+      await sendMessage(chatId, "Sabab yoki video yuboring:");
+      return;
+    }
+    userState.delete(chatId);
+    const today = todayDateISO();
+    // Matnli javob
+    const [existing] = await db
+      .select()
+      .from(dailyResults)
+      .where(eq(dailyResults.date, today))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(dailyResults)
+        .set({ responseText, responseType: "text" })
+        .where(eq(dailyResults.id, existing.id));
+    } else {
+      await db.insert(dailyResults).values({
+        date: today,
+        responseText,
+        responseType: "text",
+      });
+    }
+    await sendMessage(
+      chatId,
+      `📝 Sababingiz saqlandi: "${responseText}"\n\nErtaga yaxshiroq harakat qiling! 💪`,
+      { reply_markup: MAIN_KEYBOARD }
+    );
+    return;
+  }
 }
 
 /* ── Callback handlers (inline buttons from cron) ── */
@@ -537,35 +705,63 @@ async function handleCallback(chatId: number, callbackId: string, data: string) 
   const today = todayDateISO();
 
   if (data === "woke_yes") {
+    const actualWake = new Date().toTimeString().slice(0, 5);
+    const settingsData = await fetch("/api/settings").then((r) => r.json());
+    const expectedWake = settingsData.wake_time || "04:30";
+    const [eh, em] = expectedWake.split(":").map(Number);
+    const [ah, am] = actualWake.split(":").map(Number);
+    const expMin = (eh || 0) * 60 + (em || 0);
+    const actMin = (ah || 0) * 60 + (am || 0);
+    const delay = actMin - expMin;
+    const overslept = delay > 5;
+
+    // sleepLogs ga yozish
+    const [existing] = await db
+      .select()
+      .from(sleepLogs)
+      .where(eq(sleepLogs.date, today))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(sleepLogs)
+        .set({ actualWake, overslept, expectedWake })
+        .where(eq(sleepLogs.id, existing.id));
+    } else {
+      await db.insert(sleepLogs).values({
+        date: today,
+        expectedWake,
+        actualWake,
+        overslept,
+      });
+    }
+
     await db
       .update(botReminders)
       .set({ responded: true, responseText: "✅ Turdim" })
       .where(
         and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
       );
-    await db.insert(sleepLogs).values({
-      date: today,
-      expectedWake: (await fetch("/api/settings").then((r) => r.json())).wake_time || "06:30",
-      actualWake: new Date().toTimeString().slice(0, 5),
-      overslept: false,
-    });
-    await answerCallback(chatId, callbackId, "✅ Ajoyib! Kun rejalaringiz oldinda. Kuchli boshlang! 💪");
 
-    // Send today's first routine info
+    const onTimeMsg = overslept
+      ? `⚠️ Siz ${delay} daqiqa kechikdingiz. Ertaga yana 10 daqiqa oldinroq uyg'onishga harakat qiling.`
+      : "✅ Ajoyib! O'z vaqtida turibsiz. Kun rejalaringiz oldinda. Kuchli boshlang! 💪";
+
+    await answerCallback(chatId, callbackId, onTimeMsg);
+
+    // Bugungi rejalar
     const routinesToday = await db
       .select()
       .from(routines)
-      .where(isNull(routines.lastDoneDate))
+      .where(sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${today}`)
       .orderBy(asc(routines.time));
     if (routinesToday.length > 0) {
-      const next = routinesToday[0];
-      const elapsed = Math.floor((Date.now() % 86400000) / 60000);
-      const [nh, nm] = next.time.split(":").map(Number);
-      const targetMin = nh * 60 + nm;
-      const diff = Math.max(0, targetMin - elapsed);
+      const lines = routinesToday.map((r) => {
+        const done = r.lastDoneDate === today;
+        return `${done ? "✅" : "⬜"} <b>${r.time}</b> — ${r.title}`;
+      });
       await sendMessage(
         chatId,
-        `📋 <b>Kelgasi reja:</b>\n⏰ ${next.time} — ${next.title}\n⏳ ${diff} daqiqa qoldi`
+        `📋 <b>Bugungi rejalar (${routinesToday.filter((r) => r.lastDoneDate === today).length}/${routinesToday.length}):</b>\n\n${lines.join("\n")}`
       );
     }
     return;
@@ -578,6 +774,8 @@ async function handleCallback(chatId: number, callbackId: string, data: string) 
       .where(
         and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
       );
+    // Wizard rejimiga o'tkazamiz — foydalanuvchi sabab yozadi
+    userState.set(chatId, { mode: "wake_reason", step: 1, data: {} });
     await answerCallback(
       chatId,
       callbackId,
@@ -587,17 +785,177 @@ async function handleCallback(chatId: number, callbackId: string, data: string) 
   }
 
   if (data === "sleep_ack") {
+    const actualSleep = new Date().toTimeString().slice(0, 5);
+    const settingsData = await fetch("/api/settings").then((r) => r.json());
+    const expectedSleep = settingsData.sleep_time || "21:40";
+    const [eh, em] = expectedSleep.split(":").map(Number);
+    const [ah, am] = actualSleep.split(":").map(Number);
+    const expMin = (eh || 0) * 60 + (em || 0);
+    const actMin = (ah || 0) * 60 + (am || 0);
+    // Uxlash vaqti kechqurungi — kech yotish = actMin > expMin
+    const wentLateSleep = actMin > expMin + 5;
+
+    const [existing] = await db
+      .select()
+      .from(sleepLogs)
+      .where(eq(sleepLogs.date, today))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(sleepLogs)
+        .set({ actualSleep, wentLateSleep, expectedSleep })
+        .where(eq(sleepLogs.id, existing.id));
+    } else {
+      await db.insert(sleepLogs).values({
+        date: today,
+        expectedSleep,
+        actualSleep,
+        wentLateSleep,
+      });
+    }
+
     await db
       .update(botReminders)
       .set({ responded: true, responseText: "👍 OK" })
       .where(
         and(eq(botReminders.date, today), eq(botReminders.type, "sleep"))
       );
+
     await answerCallback(
       chatId,
       callbackId,
-      "🌙 Yaxshi! Telefonni qo'ying, ertaga kuchli kun sizni kutmoqda! 💤"
+      "🌙 Yaxshi! Telefonni qo'ying, ertaga kuchli kun sizni kutmoqda! Yaxshi dam oling 💤"
     );
+    return;
+  }
+
+  // ── Ertangi kun uchun ish qo'shish (cron tugmasi) ──
+  if (data === "tomorrow_task") {
+    const tomorrow = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    userState.set(chatId, {
+      mode: "tomorrow_task",
+      step: 1,
+      data: { targetDate: tomorrow },
+    });
+    await sendMessage(
+      chatId,
+      `📋 <b>Ertangi kun uchun ish qo'shish</b>\n\n📅 ${tomorrow}\n\n1️⃣ Ish matnini yozing:`,
+      { reply_markup: REQUEST_CANCEL_KEYBOARD }
+    );
+    await answerCallback(chatId, callbackId, "📝 Ish matnini yozing");
+    return;
+  }
+
+  // ── Ertangi kun uchun reja qo'shish ──
+  if (data === "tomorrow_routine") {
+    const tomorrow = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    userState.set(chatId, {
+      mode: "tomorrow_routine",
+      step: 1,
+      data: { targetDate: tomorrow },
+    });
+    await sendMessage(
+      chatId,
+      `🎯 <b>Ertangi kun uchun reja</b>\n\n📅 ${tomorrow}\n\n1️⃣ Reja nomini yozing (masalan: "Sport bilan shug'ullanish"):`,
+      { reply_markup: REQUEST_CANCEL_KEYBOARD }
+    );
+    await answerCallback(chatId, callbackId, "📝 Reja nomini yozing");
+    return;
+  }
+
+  // ── Kunlik natija: ishlarni bajardingizmi ──
+  if (data === "result_done_yes" || data === "result_done_no") {
+    const tasksDone = data === "result_done_yes";
+    // Yozuvni yangilash
+    const [existing] = await db
+      .select()
+      .from(dailyResults)
+      .where(eq(dailyResults.date, today))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(dailyResults)
+        .set({ tasksDone })
+        .where(eq(dailyResults.id, existing.id));
+    } else {
+      await db.insert(dailyResults).values({ date: today, tasksDone });
+    }
+    await answerCallback(
+      chatId,
+      callbackId,
+      tasksDone
+        ? "✅ Ajoyib! Ishlar bajarilgan deb belgilandi"
+        : "❌ Ishlar bajarilmagan deb belgilandi. Ertaga urinib ko'ring!"
+    );
+    // Agar "yo'q" bo'lsa — video yoki matn yuboring
+    if (!tasksDone) {
+      userState.set(chatId, {
+        mode: "result_response",
+        step: 1,
+        data: { question: "tasksDone" },
+      });
+      await sendMessage(
+        chatId,
+        "📝 Nima uchun bajara olmadingiz? Sababini yozing yoki qisqa video yuboring (maks 1 minut):",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+    }
+    return;
+  }
+
+  // ── Kunlik natija: hisob yozdingizmi ──
+  if (data === "result_finance_yes" || data === "result_finance_no") {
+    const financeRecorded = data === "result_finance_yes";
+    const [existing] = await db
+      .select()
+      .from(dailyResults)
+      .where(eq(dailyResults.date, today))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(dailyResults)
+        .set({ financeRecorded })
+        .where(eq(dailyResults.id, existing.id));
+    } else {
+      await db.insert(dailyResults).values({ date: today, financeRecorded });
+    }
+    await answerCallback(
+      chatId,
+      callbackId,
+      financeRecorded
+        ? "✅ Hisob yozilgan. Zo'r!"
+        : "❌ Hisob yozilmagan. Bugungi natijalarni kiriting."
+    );
+    if (!financeRecorded) {
+      userState.set(chatId, {
+        mode: "result_response",
+        step: 1,
+        data: { question: "financeRecorded" },
+      });
+      await sendMessage(
+        chatId,
+        "📝 Nima uchun yozmadingiz? Yoki kiriting:\n• 💸 /chiqim — chiqim qo'shish\n• 💰 /kirim — kirim qo'shish\n\nYoki sabab yozing / video yuboring:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+    } else {
+      // Hisob yozilgan bo'lsa, kun yakunlandi
+      const allYes = await checkAllDone(chatId, today);
+      if (allYes) {
+        await sendMessage(
+          chatId,
+          "🌟 <b>Kun yakunlandi!</b>\n\nBarcha natijalar qayd etildi. Yaxshi dam oling! Ertaga kuchliroq davom etamiz 💪",
+          { reply_markup: MAIN_KEYBOARD }
+        );
+      }
+    }
     return;
   }
 
@@ -646,6 +1004,15 @@ async function handleCallback(chatId: number, callbackId: string, data: string) 
     );
     return;
   }
+}
+
+async function checkAllDone(chatId: number, today: string): Promise<boolean> {
+  const [r] = await db
+    .select()
+    .from(dailyResults)
+    .where(eq(dailyResults.date, today))
+    .limit(1);
+  return !!(r && r.tasksDone && r.financeRecorded);
 }
 
 /* ── Text command handlers ── */
@@ -796,49 +1163,17 @@ async function handleCommand(chatId: number, text: string) {
       return;
     }
 
-    // ── Check if responding to "uxlab qoldim" ──
-    const today = todayDateISO();
-    const wakeReminder = await db
-      .select()
-      .from(botReminders)
-      .where(
-        and(
-          eq(botReminders.date, today),
-          eq(botReminders.type, "wake_up"),
-          eq(botReminders.responded, false)
-        )
-      )
-      .limit(1);
-
-    if (wakeReminder.length > 0 && cmd !== "/") {
-      const wakeTime =
-        (await fetch("/api/settings").then((r) => r.json())).wake_time ||
-        "06:30";
-      await db.insert(sleepLogs).values({
-        date: today,
-        expectedWake: wakeTime,
-        actualWake: new Date().toTimeString().slice(0, 5),
-        overslept: true,
-        reason: text,
-      });
-      await db
-        .update(botReminders)
-        .set({ responded: true, responseText: text })
-        .where(eq(botReminders.id, wakeReminder[0].id));
-      await sendMessage(
-        chatId,
-        `📝 Sabab saqlandi: "${text}"\n\n⚠️ Kecha kech yotdingizmi? Ertaga ${
-          (await fetch("/api/settings").then((r) => r.json())).sleep_time ||
-          "23:00"
-        } da yotishga harakat qiling. Sifatli uxlash = sifatli ish! 💪`
-      );
-      return;
-    }
+    // ── Check if responding to "uxlab qoldim" legacy handler olib tashlandi,
+    //    wake_reason wizard orqali ishlaydi ──
 
     if (cmd === "/rejalarni") {
+      const today = todayDateISO();
       const allRoutines = await db
         .select()
         .from(routines)
+        .where(
+          sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${today}`
+        )
         .orderBy(asc(routines.time));
       if (allRoutines.length === 0) {
         await sendMessage(chatId, "📋 Bugungi reja yo'q. Intizom bo'limidan qo'shing.", { reply_markup: MAIN_KEYBOARD });
@@ -1207,9 +1542,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // ── Text message ──
     const msg = update?.message;
-    if (!msg?.text) return NextResponse.json({ ok: true });
+    if (!msg) return NextResponse.json({ ok: true });
 
     const chatId: number = msg.chat.id;
     if (!TOKEN) {
@@ -1218,9 +1552,80 @@ export async function POST(req: Request) {
     }
 
     if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
-      await sendMessage(chatId, "Ruxsat yo'q. Bu bot faqat administrator uchun.");
+      await sendMessage(
+        chatId,
+        "Ruxsat yo'q. Bu bot faqat administrator uchun."
+      );
       return NextResponse.json({ ok: true });
     }
+
+    // ── Video note (dumaloq video) — faqat result_response rejimida ──
+    if (msg.video_note) {
+      const state = userState.get(chatId);
+      if (state?.mode === "result_response") {
+        const fileId = msg.video_note.file_id;
+        const today = todayDateISO();
+        const [existing] = await db
+          .select()
+          .from(dailyResults)
+          .where(eq(dailyResults.date, today))
+          .limit(1);
+        if (existing) {
+          await db
+            .update(dailyResults)
+            .set({ videoFileId: fileId, responseType: "video" })
+            .where(eq(dailyResults.id, existing.id));
+        } else {
+          await db.insert(dailyResults).values({
+            date: today,
+            videoFileId: fileId,
+            responseType: "video",
+          });
+        }
+        userState.delete(chatId);
+        await sendMessage(
+          chatId,
+          "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
+          { reply_markup: MAIN_KEYBOARD }
+        );
+        return NextResponse.json({ ok: true });
+      }
+    }
+
+    // ── Oddiy video (video message) ──
+    if (msg.video && !msg.video_note) {
+      const state = userState.get(chatId);
+      if (state?.mode === "result_response") {
+        const fileId = msg.video.file_id;
+        const today = todayDateISO();
+        const [existing] = await db
+          .select()
+          .from(dailyResults)
+          .where(eq(dailyResults.date, today))
+          .limit(1);
+        if (existing) {
+          await db
+            .update(dailyResults)
+            .set({ videoFileId: fileId, responseType: "video" })
+            .where(eq(dailyResults.id, existing.id));
+        } else {
+          await db.insert(dailyResults).values({
+            date: today,
+            videoFileId: fileId,
+            responseType: "video",
+          });
+        }
+        userState.delete(chatId);
+        await sendMessage(
+          chatId,
+          "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
+          { reply_markup: MAIN_KEYBOARD }
+        );
+        return NextResponse.json({ ok: true });
+      }
+    }
+
+    if (!msg.text) return NextResponse.json({ ok: true });
 
     await handleCommand(chatId, msg.text.trim());
   } catch (e) {

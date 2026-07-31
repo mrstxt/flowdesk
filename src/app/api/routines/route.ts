@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { routines } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, isNull, or } from "drizzle-orm";
 import { todayDateISO } from "@/lib/orderActions";
 
 export const dynamic = "force-dynamic";
@@ -11,17 +11,44 @@ function yesterdayISO(): string {
 }
 
 export async function GET() {
-  const rows = await db.select().from(routines).orderBy(asc(routines.time));
+  const today = todayDateISO();
+  // Har kuni uchun (targetDate null) yoki bugungi targetDate ga tegishli rejalar
+  const rows = await db
+    .select()
+    .from(routines)
+    .where(
+      or(
+        isNull(routines.targetDate),
+        eq(routines.targetDate, today)
+      )!
+    )
+    .orderBy(asc(routines.time));
   return NextResponse.json(rows);
 }
 
 export async function POST(req: Request) {
   const body = await req.json();
+  // Vaqt validatsiyasi: HH:MM format
+  const time = body.time || "09:00";
+  // targetDate ixtiyoriy — bo'sh string bo'lsa null
+  const targetDate = body.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(body.targetDate)
+    ? body.targetDate
+    : null;
+  // startTime / endTime ixtiyoriy
+  const startTime = body.startTime && /^\d{1,2}:\d{2}$/.test(body.startTime)
+    ? body.startTime
+    : null;
+  const endTime = body.endTime && /^\d{1,2}:\d{2}$/.test(body.endTime)
+    ? body.endTime
+    : null;
   const [created] = await db
     .insert(routines)
     .values({
-      time: body.time || "09:00",
+      time,
       title: body.title,
+      targetDate,
+      startTime,
+      endTime,
       lastDoneDate: null,
       streak: 0,
     })
@@ -68,9 +95,22 @@ export async function PUT(req: Request) {
     return NextResponse.json(updated);
   }
 
+  const patch: Record<string, unknown> = {};
+  if (typeof time === "string") patch.time = time;
+  if (typeof title === "string") patch.title = title;
+  if (body.targetDate === null) patch.targetDate = null;
+  else if (body.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(body.targetDate))
+    patch.targetDate = body.targetDate;
+  if (body.startTime === null) patch.startTime = null;
+  else if (body.startTime && /^\d{1,2}:\d{2}$/.test(body.startTime))
+    patch.startTime = body.startTime;
+  if (body.endTime === null) patch.endTime = null;
+  else if (body.endTime && /^\d{1,2}:\d{2}$/.test(body.endTime))
+    patch.endTime = body.endTime;
+
   const [updated] = await db
     .update(routines)
-    .set({ time, title })
+    .set(patch)
     .where(eq(routines.id, id))
     .returning();
   return NextResponse.json(updated);

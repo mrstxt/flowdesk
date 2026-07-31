@@ -15,6 +15,8 @@ import {
   Bell,
   BellOff,
   Zap,
+  Clock,
+  CalendarDays,
 } from "lucide-react";
 import { todayISO } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
@@ -25,6 +27,9 @@ type Routine = {
   title: string;
   lastDoneDate: string | null;
   streak: number | null;
+  targetDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
 };
 type Task = {
   id: number;
@@ -34,9 +39,24 @@ type Task = {
   category: string;
 };
 
+function tomorrowISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayHuman(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString("uz-UZ", {
+    day: "2-digit",
+    month: "short",
+    weekday: "short",
+  });
+}
+
 export default function IntizomPage() {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [tomorrowTasks, setTomorrowTasks] = useState<Task[]>([]);
   const [wake, setWake] = useState("04:30");
   const [sleep, setSleep] = useState("21:40");
   const [modal, setModal] = useState(false);
@@ -44,19 +64,22 @@ export default function IntizomPage() {
   const [botEnabled, setBotEnabled] = useState(false);
 
   const today = todayISO();
+  const tomorrow = tomorrowISO();
 
   const load = useCallback(async () => {
-    const [r, t, s] = await Promise.all([
+    const [r, t, tt, s] = await Promise.all([
       fetch("/api/routines").then((r) => r.json()),
       fetch(`/api/tasks?from=${today}&to=${today}`).then((r) => r.json()),
+      fetch(`/api/tasks?from=${tomorrow}&to=${tomorrow}`).then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()),
     ]);
     setRoutines(r);
     setTasks(t);
+    setTomorrowTasks(tt);
     setWake(s.wake_time || "04:30");
     setSleep(s.sleep_time || "21:40");
     setBotEnabled(s.bot_enabled === "true");
-  }, [today]);
+  }, [today, tomorrow]);
 
   useEffect(() => {
     load();
@@ -109,16 +132,39 @@ export default function IntizomPage() {
   async function addRoutine(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const time = fd.get("time") as string;
+    const targetDate = fd.get("targetDate") as string;
+    const endTimeRaw = fd.get("endTime") as string;
+    // Vaqt validatsiyasi: agar startTime (vaqt formasi) allaqachon o'tgan bo'lsa,
+    // va targetDate bugun bo'lsa, xato beramiz
+    const targetDateISO = targetDate === "today" ? today : tomorrow;
+    const now = new Date();
+    const [hh, mm] = time.split(":").map(Number);
+    const target = new Date(targetDateISO + "T00:00:00");
+    target.setHours(hh, mm, 0, 0);
+    if (targetDateISO === today && target.getTime() <= now.getTime()) {
+      alert(
+        "⚠️ Bu vaqt allaqachon o'tib ketgan. Ertangi kun uchun reja qo'shing yoki boshqa vaqt tanlang."
+      );
+      return;
+    }
+    const body: Record<string, unknown> = {
+      time,
+      title: fd.get("title"),
+      targetDate: targetDateISO,
+      startTime: time,
+    };
+    if (endTimeRaw) body.endTime = endTimeRaw;
     await fetch("/api/routines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ time: fd.get("time"), title: fd.get("title") }),
+      body: JSON.stringify(body),
     });
     setModal(false);
     load();
   }
 
-  async function addTask(e: React.FormEvent<HTMLFormElement>) {
+  async function addTask(e: React.FormEvent<HTMLFormElement>, date: string) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     await fetch("/api/tasks", {
@@ -126,7 +172,7 @@ export default function IntizomPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: fd.get("title"),
-        date: today,
+        date,
         category: fd.get("category") || "personal",
       }),
     });
@@ -143,21 +189,25 @@ export default function IntizomPage() {
     setTasks((ts) =>
       ts.map((t) => (t.id === id ? { ...t, completed: !completed } : t))
     );
+    setTomorrowTasks((ts) =>
+      ts.map((t) => (t.id === id ? { ...t, completed: !completed } : t))
+    );
   }
 
   async function deleteTask(id: number) {
     await fetch(`/api/tasks?id=${id}`, { method: "DELETE" });
     setTasks((ts) => ts.filter((t) => t.id !== id));
+    setTomorrowTasks((ts) => ts.filter((t) => t.id !== id));
   }
 
   return (
     <div className="p-8 max-w-5xl mx-auto fade-in">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+          <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900">
             Intizom
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1.5">
+          <p className="text-slate-500 mt-1.5">
             Kun tartibi — uyg'onish, ishlar va uxlash
           </p>
         </div>
@@ -165,32 +215,42 @@ export default function IntizomPage() {
           onClick={() => setModal(true)}
           className="flex items-center gap-2 px-5 py-2.5 bg-accent text-white rounded-full text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all shadow-lg shadow-accent/25"
         >
-          <Plus className="w-4 h-4" /> Reja qo'shish
+          <Plus className="w-4 h-4" /> Ertangi reja
         </button>
       </div>
 
       {/* Bot toggle */}
-      <div className="mb-6 bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6 overflow-hidden relative">
-        <div className={`absolute inset-0 opacity-[0.04] ${botEnabled ? "bg-accent" : ""}`} />
+      <div className="mb-6 bg-white rounded-3xl border border-black/[0.06] p-6 overflow-hidden relative">
+        <div
+          className={`absolute inset-0 opacity-[0.04] ${
+            botEnabled ? "bg-accent" : ""
+          }`}
+        />
         <div className="relative flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-2xl transition-colors ${
-              botEnabled ? "bg-accent text-white" : "bg-black/[0.05] dark:bg-white/[0.07] text-slate-400"
-            }`}>
+            <div
+              className={`p-3 rounded-2xl transition-colors ${
+                botEnabled
+                  ? "bg-accent text-white"
+                  : "bg-black/[0.05] text-slate-400"
+              }`}
+            >
               <Bot className="w-6 h-6" />
             </div>
             <div>
-              <div className="font-display font-bold text-slate-900 dark:text-slate-100 text-lg">
+              <div className="font-display font-bold text-slate-900 text-lg">
                 Telegram Bot — Intizom nazoratchi
               </div>
               <div className="text-sm text-slate-500 mt-0.5">
                 {botEnabled ? (
                   <span className="flex items-center gap-1.5 text-[#34c759]">
-                    <Bell className="w-3.5 h-3.5" /> Eslatmalar yoqildi — ertalab, rejalarda va kechqurun xabar keladi
+                    <Bell className="w-3.5 h-3.5" /> Eslatmalar yoqildi —
+                    ertalab, rejalarda va kechqurun xabar keladi
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 text-slate-500">
-                    <BellOff className="w-3.5 h-3.5" /> O'chirilgan — Telegram orqali eslatma kelmaydi
+                    <BellOff className="w-3.5 h-3.5" /> O'chirilgan — Telegram
+                    orqali eslatma kelmaydi
                   </span>
                 )}
               </div>
@@ -207,7 +267,7 @@ export default function IntizomPage() {
               });
             }}
             className={`shrink-0 w-14 h-8 rounded-full transition-all relative ${
-              botEnabled ? "bg-accent" : "bg-slate-300 dark:bg-slate-700"
+              botEnabled ? "bg-accent" : "bg-slate-300"
             }`}
           >
             <div
@@ -218,12 +278,12 @@ export default function IntizomPage() {
           </button>
         </div>
         {botEnabled && (
-          <div className="relative mt-4 pt-4 border-t border-black/[0.06] dark:border-white/[0.08] grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="relative mt-4 pt-4 border-t border-black/[0.06] grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="flex items-center gap-3 p-3 rounded-2xl bg-[#ff9f0a]/[0.08]">
               <Sunrise className="w-4 h-4 text-[#ff9f0a] shrink-0" />
               <div>
                 <div className="text-xs text-slate-500">Uyg'onishda</div>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                <div className="text-sm font-semibold text-slate-800">
                   "Turingmi?" tugmasi keladi
                 </div>
               </div>
@@ -232,7 +292,7 @@ export default function IntizomPage() {
               <Zap className="w-4 h-4 text-accent shrink-0" />
               <div>
                 <div className="text-xs text-slate-500">Har rejada</div>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                <div className="text-sm font-semibold text-slate-800">
                   Vaqti kelsa eslatma yuboriladi
                 </div>
               </div>
@@ -241,8 +301,8 @@ export default function IntizomPage() {
               <CheckCircle2 className="w-4 h-4 text-[#34c759] shrink-0" />
               <div>
                 <div className="text-xs text-slate-500">Kechqurun</div>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  Kunlik hisobot yuboriladi
+                <div className="text-sm font-semibold text-slate-800">
+                  Kun yakuni va ertangi reja so'raladi
                 </div>
               </div>
             </div>
@@ -252,7 +312,7 @@ export default function IntizomPage() {
 
       {/* Wake / sleep hero */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
+        <div className="bg-white rounded-3xl border border-black/[0.06] p-6">
           <div className="flex items-center gap-2 text-[#ff9f0a] mb-3">
             <Sunrise className="w-4 h-4" />
             <span className="text-xs font-bold uppercase tracking-wider">
@@ -263,7 +323,7 @@ export default function IntizomPage() {
             type="time"
             value={wake}
             onChange={(e) => setWake(e.target.value)}
-            className="font-display text-3xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums w-full"
+            className="font-display text-3xl font-extrabold text-slate-900 bg-transparent focus:outline-none tabular-nums w-full"
           />
         </div>
         <div className="bg-gradient-to-br from-accent to-[#c21240] rounded-3xl p-6 text-white shadow-xl shadow-accent/25">
@@ -285,7 +345,7 @@ export default function IntizomPage() {
             {saving ? "Saqlanmoqda..." : "Vaqt saqlandi"}
           </button>
         </div>
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
+        <div className="bg-white rounded-3xl border border-black/[0.06] p-6">
           <div className="flex items-center gap-2 text-[#0a84ff] mb-3">
             <Moon className="w-4 h-4" />
             <span className="text-xs font-bold uppercase tracking-wider">
@@ -296,22 +356,23 @@ export default function IntizomPage() {
             type="time"
             value={sleep}
             onChange={(e) => setSleep(e.target.value)}
-            className="font-display text-3xl font-extrabold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums w-full"
+            className="font-display text-3xl font-extrabold text-slate-900 bg-transparent focus:outline-none tabular-nums w-full"
           />
         </div>
       </div>
 
-      {/* Routine timeline */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6 mb-8">
+      {/* Bugungi kunlik rejalar */}
+      <div className="bg-white rounded-3xl border border-black/[0.06] p-6 mb-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="font-display text-lg font-bold text-slate-900 dark:text-slate-100">
-            Kunlik rejalar
+          <h2 className="font-display text-lg font-bold text-slate-900 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-accent" />
+            Bugungi rejalar
           </h2>
           <div className="flex items-center gap-3">
             <span className="font-display text-sm font-bold text-accent tabular-nums">
               {doneCount}/{routines.length}
             </span>
-            <div className="w-28 h-2 bg-black/[0.05] dark:bg-white/[0.07] rounded-full overflow-hidden">
+            <div className="w-28 h-2 bg-black/[0.05] rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-[#ff6b8e] to-accent transition-all duration-500"
                 style={{ width: `${pct}%` }}
@@ -321,8 +382,8 @@ export default function IntizomPage() {
         </div>
 
         {routines.length === 0 ? (
-          <div className="text-sm text-slate-500 py-12 text-center border border-dashed border-black/[0.1] dark:border-white/[0.1] rounded-2xl">
-            Reja yo'q. Masalan: 06:30 — Turish va suv ichish
+          <div className="text-sm text-slate-500 py-12 text-center border border-dashed border-black/[0.1] rounded-2xl">
+            Bugun uchun reja yo'q. "Ertangi reja" tugmasidan qo'shing.
           </div>
         ) : (
           <ul className="space-y-1.5">
@@ -334,12 +395,17 @@ export default function IntizomPage() {
                   className={`flex items-center gap-4 p-3.5 rounded-2xl border transition-all group ${
                     done
                       ? "border-[#34c759]/30 bg-[#34c759]/[0.06]"
-                      : "border-black/[0.05] dark:border-white/[0.06] hover:border-accent/30"
+                      : "border-black/[0.05] hover:border-accent/30"
                   }`}
                 >
-                  <span className="font-display text-sm font-extrabold text-slate-900 dark:text-slate-100 w-14 tabular-nums">
+                  <span className="font-display text-sm font-extrabold text-slate-900 w-14 tabular-nums">
                     {r.time}
                   </span>
+                  {r.endTime && (
+                    <span className="text-[11px] text-slate-400 tabular-nums">
+                      → {r.endTime}
+                    </span>
+                  )}
                   <button
                     onClick={() => toggleRoutine(r.id, done)}
                     className="shrink-0 transition-transform active:scale-90"
@@ -347,14 +413,14 @@ export default function IntizomPage() {
                     {done ? (
                       <CheckCircle2 className="w-6 h-6 text-[#34c759]" />
                     ) : (
-                      <Circle className="w-6 h-6 text-slate-300 dark:text-slate-600 hover:text-accent" />
+                      <Circle className="w-6 h-6 text-slate-300 hover:text-accent" />
                     )}
                   </button>
                   <span
                     className={`flex-1 text-sm font-medium ${
                       done
                         ? "line-through text-slate-400"
-                        : "text-slate-800 dark:text-slate-100"
+                        : "text-slate-800"
                     }`}
                   >
                     {r.title}
@@ -378,22 +444,26 @@ export default function IntizomPage() {
         )}
       </div>
 
-      {/* Daily tasks */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-6">
-        <h2 className="font-display text-lg font-bold text-slate-900 dark:text-slate-100 mb-5">
-          Kunlik ishlar
+      {/* Bugungi kunlik ishlar */}
+      <div className="bg-white rounded-3xl border border-black/[0.06] p-6 mb-6">
+        <h2 className="font-display text-lg font-bold text-slate-900 mb-5 flex items-center gap-2">
+          <CheckCircle2 className="w-5 h-5 text-[#34c759]" />
+          Bugungi ishlar
         </h2>
 
-        <form onSubmit={addTask} className="flex gap-2 mb-5">
+        <form
+          onSubmit={(e) => addTask(e, today)}
+          className="flex gap-2 mb-5"
+        >
           <input
             name="title"
             required
-            placeholder="Yangi ish... masalan: Mijozga qo'ng'iroq qilish"
-            className="flex-1 px-5 py-2.5 bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
+            placeholder="Bugungi ish... masalan: Mijozga qo'ng'iroq qilish"
+            className="flex-1 px-5 py-2.5 bg-black/[0.03] border border-black/[0.06] rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
           />
           <select
             name="category"
-            className="px-4 py-2.5 bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] rounded-full text-sm text-slate-600 dark:text-slate-300 focus:outline-none"
+            className="px-4 py-2.5 bg-black/[0.03] border border-black/[0.06] rounded-full text-sm text-slate-600 focus:outline-none"
           >
             <option value="personal">Shaxsiy</option>
             <option value="urgent">Shoshilinch</option>
@@ -408,7 +478,7 @@ export default function IntizomPage() {
         </form>
 
         {tasks.length === 0 ? (
-          <div className="text-sm text-slate-500 py-8 text-center border border-dashed border-black/[0.1] dark:border-white/[0.1] rounded-2xl">
+          <div className="text-sm text-slate-500 py-8 text-center border border-dashed border-black/[0.1] rounded-2xl">
             Bugun uchun ish yo'q
           </div>
         ) : (
@@ -416,7 +486,7 @@ export default function IntizomPage() {
             {tasks.map((t) => (
               <li
                 key={t.id}
-                className="flex items-center gap-3 p-2.5 rounded-2xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] group transition-colors"
+                className="flex items-center gap-3 p-2.5 rounded-2xl hover:bg-black/[0.03] group transition-colors"
               >
                 <button
                   onClick={() => toggleTask(t.id, t.completed)}
@@ -425,14 +495,14 @@ export default function IntizomPage() {
                   {t.completed ? (
                     <CheckCircle2 className="w-5 h-5 text-[#34c759]" />
                   ) : (
-                    <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
+                    <Circle className="w-5 h-5 text-slate-300" />
                   )}
                 </button>
                 <span
                   className={`flex-1 text-sm font-medium ${
                     t.completed
                       ? "line-through text-slate-400"
-                      : "text-slate-700 dark:text-slate-200"
+                      : "text-slate-700"
                   }`}
                 >
                   {t.title}
@@ -454,38 +524,155 @@ export default function IntizomPage() {
         )}
       </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title="Yangi kunlik reja">
+      {/* Ertangi kun uchun rejalar va ishlar */}
+      <div className="bg-gradient-to-br from-accent-soft to-white rounded-3xl border border-accent/20 p-6 mb-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="font-display text-lg font-bold text-slate-900 flex items-center gap-2">
+              <CalendarDays className="w-5 h-5 text-accent" />
+              Ertangi kun uchun
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {todayHuman(tomorrow)} — ertalab shu reja bilan uyg'onasiz
+            </p>
+          </div>
+        </div>
+
+        <form
+          onSubmit={(e) => addTask(e, tomorrow)}
+          className="flex gap-2 mb-4"
+        >
+          <input
+            name="title"
+            placeholder="Ertangi ish... masalan: Ertalabki sport"
+            className="flex-1 px-5 py-2.5 bg-white border border-black/[0.06] rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
+          />
+          <select
+            name="category"
+            className="px-4 py-2.5 bg-white border border-black/[0.06] rounded-full text-sm text-slate-600 focus:outline-none"
+          >
+            <option value="personal">Shaxsiy</option>
+            <option value="urgent">Shoshilinch</option>
+            <option value="financial">Moliyaviy</option>
+          </select>
+          <button
+            type="submit"
+            className="px-5 py-2.5 bg-accent text-white rounded-full text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all shadow-lg shadow-accent/25"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </form>
+
+        {tomorrowTasks.length === 0 ? (
+          <div className="text-sm text-slate-500 py-6 text-center border border-dashed border-black/[0.1] rounded-2xl bg-white/50">
+            Ertangi kun uchun hali ish qo'shilmagan
+          </div>
+        ) : (
+          <ul className="space-y-1">
+            {tomorrowTasks.map((t) => (
+              <li
+                key={t.id}
+                className="flex items-center gap-3 p-2.5 rounded-2xl hover:bg-white/70 group transition-colors"
+              >
+                <button
+                  onClick={() => toggleTask(t.id, t.completed)}
+                  className="shrink-0 active:scale-90 transition-transform"
+                >
+                  {t.completed ? (
+                    <CheckCircle2 className="w-5 h-5 text-[#34c759]" />
+                  ) : (
+                    <Circle className="w-5 h-5 text-slate-300" />
+                  )}
+                </button>
+                <span
+                  className={`flex-1 text-sm font-medium ${
+                    t.completed
+                      ? "line-through text-slate-400"
+                      : "text-slate-700"
+                  }`}
+                >
+                  {t.title}
+                </span>
+                {t.category === "urgent" && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-accent bg-accent-soft px-2 py-0.5 rounded-full">
+                    Shoshilinch
+                  </span>
+                )}
+                <button
+                  onClick={() => deleteTask(t.id)}
+                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-accent transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Reja qo'shish modali (ertangi kun uchun) */}
+      <Modal
+        open={modal}
+        onClose={() => setModal(false)}
+        title="Yangi reja (ertangi kun uchun)"
+      >
         <form onSubmit={addRoutine} className="space-y-3">
-          <div className="grid grid-cols-[120px_1fr] gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Qaysi kun uchun
+            </label>
+            <select
+              name="targetDate"
+              defaultValue="tomorrow"
+              className="w-full px-4 py-2.5 bg-black/[0.03] border border-black/[0.06] rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
+            >
+              <option value="tomorrow">
+                Ertangi kun ({todayHuman(tomorrow)})
+              </option>
+              <option value="today">Bugun ({todayHuman(today)})</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                Vaqt
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Boshlanish vaqti
               </label>
               <input
                 name="time"
                 type="time"
                 required
                 defaultValue="07:00"
-                className="w-full px-4 py-2.5 bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
+                className="w-full px-4 py-2.5 bg-black/[0.03] border border-black/[0.06] rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                Nomi
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Deadline (ixtiyoriy)
               </label>
               <input
-                name="title"
-                required
-                placeholder="Masalan: Sport bilan shug'ullanish"
-                className="w-full px-4 py-2.5 bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
+                name="endTime"
+                type="time"
+                placeholder="09:00"
+                className="w-full px-4 py-2.5 bg-black/[0.03] border border-black/[0.06] rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Reja nomi
+            </label>
+            <input
+              name="title"
+              required
+              placeholder="Masalan: Sport bilan shug'ullanish"
+              className="w-full px-4 py-2.5 bg-black/[0.03] border border-black/[0.06] rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={() => setModal(false)}
-              className="px-5 py-2.5 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] rounded-full"
+              className="px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-black/[0.04] rounded-full"
             >
               Bekor
             </button>
