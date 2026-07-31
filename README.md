@@ -209,6 +209,46 @@ npm run db:push
 | Bot yoqish | `/bot_yoq` |
 | Bot o'chirish | `/bot_och` |
 
+### Bot tugmalari (Reply Keyboard)
+
+Botda pastdagi klaviatura orqali tez ishlash mumkin. Tugmalar:
+
+| Tugma | Nima qiladi |
+|---|---|
+| 📋 Rejalar | Bugungi rejalarni ko'rsatadi |
+| 📅 Bugungi vazifalar | Bugungi tasklarni ko'rsatadi |
+| ➕ Buyurtma | Buyurtma qo'shishni boshlaydi (bosqichma-bosqich) |
+| 💸 Chiqim | Chiqim qo'shishni boshlaydi |
+| 💰 Kirim | Kirim qo'shishni boshlaydi |
+| 📊 Statistika | Oylik statistikani ko'rsatadi |
+| 📚 Kitob qo'shish | Kitob qo'shadi (nom, muallif, sahifa, PDF havola) |
+| 🎬 Video qo'shish | Video qo'shadi (YouTube havola, nom, kategoriya) |
+| 🎯 Maqsad | Maqsad yaratadi (nom, summa, avtomatik foiz) |
+| 🔔 Botni yoqish | Eslatmalarni yoqadi |
+| 🔕 Botni o'chirish | Eslatmalarni o'chiradi |
+| 🏠 Menyu | Asosiy menyuga qaytadi |
+| ❌ Bekor | Kiritish jarayonini bekor qiladi |
+| ❓ Yordam | Barcha buyruqlar ro'yxati |
+
+**Kitob qo'shish** tugmasi bosilganda bot 4 bosqichda so'raydi: nom → muallif → sahifalar soni → PDF varianti havolasi. Har qadamda "❌ Bekor" tugmasi orqali chiqish mumkin.
+
+## Video Resume (pauza qilinsa davom ettirish)
+
+YouTube videolar panelida "Rivojlanish" bo'limida:
+
+1. Video ko'rishni boshlang — har 5 soniyada `currentTime` serverga saqlanadi
+2. Pauza qilib, keyin sahifani tark etsangiz ham progress saqlanib qoladi
+3. Video kartasida "**X daqiqa Y soniya ko'rilgan**" yozuvi va "▶️ Davom ettirish" tugmasi paydo bo'ladi
+4. "Davom ettirish" bosilganda iframe o'sha daqiqadan boshlanadi
+
+Bunda YouTube IFrame API (`enablejsapi=1`) ishlatiladi va `?start=NN` parametri URLga qo'shiladi.
+
+## Kitob PDF varianti
+
+Kitob qo'shish formasida endi **PDF varianti havolasi** maydoni bor (ixtiyoriy). Havola kiritilsa, kitob kartasida qizil "📄 PDF" tugmasi paydo bo'lib, yangi tabda ochiladi.
+
+Buni Telegram bot orqali ham qilish mumkin — `/kitob qilish` tugmasini bosing yoki bot menyudan "📚 Kitob qo'shish"ni tanlang.
+
 ## Muhim Eslatma
 
 Productionda `ADMIN_PASSWORD`, `SESSION_SECRET`, `BOT_WEBHOOK_SECRET`, `VERCEL_CRON_SECRET` qiymatlarini oddiy yoki default qoldirmang. Har birini uzun random satr qilib qo'ying.

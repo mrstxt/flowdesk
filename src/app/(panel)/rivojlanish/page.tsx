@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Plus,
   CheckCircle2,
@@ -10,6 +10,7 @@ import {
   Clapperboard,
   Link2,
   X,
+  PlayCircle,
 } from "lucide-react";
 
 type Video = {
@@ -19,6 +20,8 @@ type Video = {
   videoId: string;
   category: string;
   watched: boolean | null;
+  watchedSeconds: number | null;
+  lastWatchedAt: string | null;
 };
 type Note = { id: number; content: string; createdAt: string };
 
@@ -40,6 +43,20 @@ const CAT_COLORS: Record<string, string> = {
   other: "#8e8e93",
 };
 
+/**
+ * YouTube embed URL yasash — agar watchedSeconds > 0 bo'lsa,
+ * ?start= parametri bilan o'sha daqiqadan boshlaydi.
+ * enablejsapi=1 YouTube IFrame API ga ruxsat beradi (currentTime olish uchun).
+ */
+function buildEmbedUrl(videoId: string, startSeconds: number): string {
+  const params = new URLSearchParams();
+  if (startSeconds > 0) params.set("start", String(Math.floor(startSeconds)));
+  params.set("enablejsapi", "1");
+  params.set("rel", "0");
+  const qs = params.toString();
+  return `https://www.youtube-nocookie.com/embed/${videoId}${qs ? `?${qs}` : ""}`;
+}
+
 export default function RivojlanishPage() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [filter, setFilter] = useState<"all" | "unwatched" | "watched">("all");
@@ -50,6 +67,11 @@ export default function RivojlanishPage() {
   const [openNotes, setOpenNotes] = useState<number | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteText, setNoteText] = useState("");
+  // Resume rejimi: qaysi videolar uchun "Davom ettirish" bosilgan
+  const [resumeFrom, setResumeFrom] = useState<Record<number, number>>({});
+  // Har video uchun vaqti-vaqti bilan progress saqlash uchun timer
+  const progressTimers = useRef<Record<number, ReturnType<typeof setInterval>>>({});
+  const iframeRefs = useRef<Record<number, HTMLIFrameElement | null>>({});
 
   async function load() {
     const rows = await fetch("/api/videos").then((r) => r.json());
@@ -77,6 +99,120 @@ export default function RivojlanishPage() {
     setTitle("");
     load();
   }
+
+  /**
+   * YouTube IFrame API dan currentTime olish uchun postMessage yuborish.
+   * Javobni eshitib, DB ga saqlash.
+   */
+  function requestCurrentTime(v: Video) {
+    const iframe = iframeRefs.current[v.id];
+    if (!iframe?.contentWindow) return;
+    try {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          event: "command",
+          func: "getCurrentTime",
+        }),
+        "*"
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveVideoProgress(v: Video, seconds: number) {
+    if (!v.id || seconds < 0) return;
+    const cleanSec = Math.floor(seconds);
+    // DB ga saqlash
+    try {
+      const res = await fetch("/api/videos", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: v.id, watchedSeconds: cleanSec }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setVideos((vs) => vs.map((x) => (x.id === v.id ? updated : x)));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  function startProgressTracking(v: Video) {
+    // Har 5 soniyada currentTime so'rab, DB ga saqlash
+    if (progressTimers.current[v.id]) return;
+    progressTimers.current[v.id] = setInterval(() => {
+      requestCurrentTime(v);
+    }, 5000);
+  }
+
+  function stopProgressTracking(v: Video) {
+    const t = progressTimers.current[v.id];
+    if (t) {
+      clearInterval(t);
+      delete progressTimers.current[v.id];
+    }
+  }
+
+  /**
+   * "Davom ettirish" tugmasi bosilganda: watchedSeconds ni o'qib,
+   * iframe ni shu vaqtdan boshlatish uchun state ga yozamiz.
+   */
+  function resumeVideo(v: Video) {
+    const startAt = Number(v.watchedSeconds || 0);
+    setResumeFrom((m) => ({ ...m, [v.id]: startAt }));
+  }
+
+  /**
+   * Iframe dan kelgan currentTime javobini eshitish (YouTube IFrame API).
+   */
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (typeof e.data !== "string") return;
+      // YouTube "infoDelivery" / "currentTime" javoblari
+      let data: { event?: string; info?: number } | null = null;
+      try {
+        const parsed = JSON.parse(e.data);
+        if (parsed && typeof parsed === "object") data = parsed;
+      } catch {
+        // YouTube ba'zan "getCurrentTime 12.345" kabi raw string yuboradi
+        const m = e.data.match(/(?:^|,)currentTime[":= ]+([\d.]+)/);
+        if (!m) return;
+        // Shu video uchun eng yaqin videoni topamiz
+        for (const v of videos) {
+          if (iframeRefs.current[v.id]?.contentWindow === e.source) {
+            const sec = Number(m[1]);
+            if (!Number.isNaN(sec) && sec > 0) {
+              // Debounced: 2 soniyada bir marta saqlaymiz
+              saveVideoProgress(v, sec);
+            }
+            break;
+          }
+        }
+        return;
+      }
+      if (!data || data.event !== "infoDelivery" || typeof data.info !== "number") {
+        return;
+      }
+      // info = currentTime (soniya)
+      for (const v of videos) {
+        if (iframeRefs.current[v.id]?.contentWindow === e.source) {
+          saveVideoProgress(v, data.info);
+          break;
+        }
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [videos]);
+
+  // Komponent unmount bo'lganda barcha timerlarni tozalash
+  useEffect(() => {
+    return () => {
+      Object.values(progressTimers.current).forEach((t) => clearInterval(t));
+    };
+  }, []);
 
   async function toggleWatched(v: Video) {
     const res = await fetch("/api/videos", {
@@ -235,80 +371,110 @@ export default function RivojlanishPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {filtered.map((v) => (
-            <div
-              key={v.id}
-              className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] overflow-hidden card-hover"
-            >
-              <div className="relative aspect-video bg-black">
-                <iframe
-                  src={`https://www.youtube-nocookie.com/embed/${v.videoId}`}
-                  title={v.title}
-                  className="absolute inset-0 w-full h-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
-              <div className="p-5">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="font-display font-bold text-slate-900 dark:text-slate-100 leading-snug">
-                    {v.title}
-                  </div>
-                  <span
-                    className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full"
-                    style={{
-                      background: `${CAT_COLORS[v.category] || "#8e8e93"}1f`,
-                      color: CAT_COLORS[v.category] || "#8e8e93",
+          {filtered.map((v) => {
+            // Resume rejimi: agar foydalanuvchi "Davom ettirish" ni bosgan bo'lsa
+            // yoki videoda saqlangan vaqt bo'lsa, o'sha vaqtdan boshlaymiz.
+            const startAt = resumeFrom[v.id] !== undefined
+              ? resumeFrom[v.id]
+              : Number(v.watchedSeconds || 0);
+            const hasProgress = Number(v.watchedSeconds || 0) > 5;
+            return (
+              <div
+                key={v.id}
+                className="bg-white dark:bg-slate-900 rounded-3xl border border-black/[0.06] dark:border-white/[0.08] overflow-hidden card-hover"
+              >
+                <div className="relative aspect-video bg-black">
+                  <iframe
+                    ref={(el) => {
+                      iframeRefs.current[v.id] = el;
                     }}
-                  >
-                    {CATEGORIES[v.category] || "Boshqa"}
-                  </span>
+                    src={buildEmbedUrl(v.videoId, startAt)}
+                    title={v.title}
+                    className="absolute inset-0 w-full h-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    onLoad={() => startProgressTracking(v)}
+                  />
                 </div>
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="font-display font-bold text-slate-900 dark:text-slate-100 leading-snug">
+                      {v.title}
+                    </div>
+                    <span
+                      className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full"
+                      style={{
+                        background: `${CAT_COLORS[v.category] || "#8e8e93"}1f`,
+                        color: CAT_COLORS[v.category] || "#8e8e93",
+                      }}
+                    >
+                      {CATEGORIES[v.category] || "Boshqa"}
+                    </span>
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => toggleWatched(v)}
-                    className={`flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-full transition-all active:scale-95 ${
-                      v.watched
-                        ? "text-[#34c759] bg-[#34c759]/12 hover:bg-[#34c759]/20"
-                        : "text-slate-600 dark:text-slate-300 bg-black/[0.04] dark:bg-white/[0.07] hover:bg-black/[0.08] dark:hover:bg-white/[0.12]"
-                    }`}
-                  >
-                    {v.watched ? (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Ko'rildi
-                      </>
-                    ) : (
-                      <>
-                        <Circle className="w-3.5 h-3.5" /> Ko'rilmadi
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => toggleNotes(v)}
-                    className={`flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-full transition-all active:scale-95 ${
-                      openNotes === v.id
-                        ? "text-accent bg-accent-soft"
-                        : "text-slate-600 dark:text-slate-300 bg-black/[0.04] dark:bg-white/[0.07] hover:bg-black/[0.08] dark:hover:bg-white/[0.12]"
-                    }`}
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" /> Fikrlar
-                  </button>
-                  <a
-                    href={v.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs font-semibold text-slate-400 hover:text-accent transition-colors ml-auto"
-                  >
-                    YouTube ↗
-                  </a>
-                  <button
-                    onClick={() => deleteVideo(v.id)}
-                    className="p-1.5 text-slate-400 hover:text-accent transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                  {hasProgress && (
+                    <div className="mb-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      <span>
+                        {Math.floor(Number(v.watchedSeconds || 0) / 60)} daqiqa
+                        {Math.floor(Number(v.watchedSeconds || 0) % 60)} soniya
+                        ko'rilgan
+                      </span>
+                      {resumeFrom[v.id] === undefined && (
+                        <button
+                          onClick={() => resumeVideo(v)}
+                          className="ml-auto flex items-center gap-1 text-[11px] font-bold text-white bg-accent hover:bg-accent-hover px-2.5 py-1 rounded-full transition-all active:scale-95"
+                        >
+                          <PlayCircle className="w-3 h-3" /> Davom ettirish
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleWatched(v)}
+                      className={`flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-full transition-all active:scale-95 ${
+                        v.watched
+                          ? "text-[#34c759] bg-[#34c759]/12 hover:bg-[#34c759]/20"
+                          : "text-slate-600 dark:text-slate-300 bg-black/[0.04] dark:bg-white/[0.07] hover:bg-black/[0.08] dark:hover:bg-white/[0.12]"
+                      }`}
+                    >
+                      {v.watched ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Ko'rildi
+                        </>
+                      ) : (
+                        <>
+                          <Circle className="w-3.5 h-3.5" /> Ko'rilmadi
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => toggleNotes(v)}
+                      className={`flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-full transition-all active:scale-95 ${
+                        openNotes === v.id
+                          ? "text-accent bg-accent-soft"
+                          : "text-slate-600 dark:text-slate-300 bg-black/[0.04] dark:bg-white/[0.07] hover:bg-black/[0.08] dark:hover:bg-white/[0.12]"
+                      }`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" /> Fikrlar
+                    </button>
+                    <a
+                      href={v.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-semibold text-slate-400 hover:text-accent transition-colors ml-auto"
+                    >
+                      YouTube ↗
+                    </a>
+                    <button
+                      onClick={() => deleteVideo(v.id)}
+                      className="p-1.5 text-slate-400 hover:text-accent transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
 
                 {openNotes === v.id && (
                   <div className="mt-4 pt-4 border-t border-black/[0.06] dark:border-white/[0.08] fade-in">
@@ -354,7 +520,8 @@ export default function RivojlanishPage() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

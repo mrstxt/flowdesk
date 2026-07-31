@@ -43,6 +43,13 @@ export async function PUT(req: Request) {
   const body = await req.json();
   const { id, ...rest } = body;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  // watchedSeconds kelgan bo'lsa, lastWatchedAt ni avtomatik yangilash
+  if (rest.watchedSeconds !== undefined) {
+    rest.watchedSeconds = Math.max(0, Math.floor(Number(rest.watchedSeconds)));
+    rest.lastWatchedAt = new Date();
+  }
+
   const [updated] = await db
     .update(videos)
     .set(rest)

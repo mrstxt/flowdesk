@@ -20,6 +20,7 @@ export async function POST(req: Request) {
       totalPages: Number(body.totalPages) || 0,
       currentPage: 0,
       status: body.status || "plan",
+      pdfUrl: body.pdfUrl ? String(body.pdfUrl).trim() || null : null,
     })
     .returning();
   return NextResponse.json(created);

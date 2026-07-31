@@ -8,6 +8,8 @@ import {
   Trash2,
   MessageSquare,
   Play,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import { Modal } from "@/components/Modal";
 
@@ -18,6 +20,7 @@ type Book = {
   totalPages: number;
   currentPage: number;
   status: string;
+  pdfUrl: string | null;
 };
 type Note = { id: number; content: string; page: number | null; createdAt: string };
 
@@ -88,6 +91,7 @@ export default function KitoblarPage() {
         title: fd.get("title"),
         author: fd.get("author") || null,
         totalPages: Number(fd.get("totalPages")) || 0,
+        pdfUrl: fd.get("pdfUrl") || null,
       }),
     });
     setModal(false);
@@ -285,6 +289,17 @@ export default function KitoblarPage() {
                       <MessageSquare className="w-3.5 h-3.5" /> Sharhlar
                     </button>
                   </div>
+                  {b.pdfUrl && (
+                    <a
+                      href={b.pdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 flex items-center gap-1.5 text-xs font-bold text-[#ff2d5d] bg-[#ff2d5d]/10 hover:bg-[#ff2d5d]/20 px-3.5 py-2 rounded-full transition-all active:scale-95 w-fit"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> PDF
+                      <ExternalLink className="w-3 h-3 opacity-70" />
+                    </a>
+                  )}
                 </div>
               </div>
             );
@@ -328,6 +343,17 @@ export default function KitoblarPage() {
                 className="w-full px-4 py-2.5 bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              PDF varianti havolasi <span className="text-slate-400 font-normal">(ixtiyoriy)</span>
+            </label>
+            <input
+              name="pdfUrl"
+              type="url"
+              placeholder="https://.../kitob.pdf"
+              className="w-full px-4 py-2.5 bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] rounded-full text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button

@@ -89,6 +89,8 @@ export const books = pgTable("books", {
   totalPages: integer("total_pages").notNull().default(0),
   currentPage: integer("current_page").notNull().default(0),
   status: varchar("status", { length: 20 }).notNull().default("plan"),
+  // Ixtiyoriy PDF varianti havolasi
+  pdfUrl: text("pdf_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -109,6 +111,9 @@ export const videos = pgTable("videos", {
   videoId: varchar("video_id", { length: 32 }).notNull(),
   category: varchar("category", { length: 50 }).default("other"),
   watched: boolean("watched").default(false),
+  // Pauza qilganda eslab qolish uchun (sekundlarda)
+  watchedSeconds: integer("watched_seconds").default(0),
+  lastWatchedAt: timestamp("last_watched_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

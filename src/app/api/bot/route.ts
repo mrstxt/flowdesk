@@ -28,7 +28,7 @@ const ALLOWED = (process.env.TELEGRAM_ADMIN_CHAT_ID || "")
 
 /* ── Helpers ── */
 
-async function sendMessage(chatId: number, text: string) {
+async function sendMessage(chatId: number, text: string, extra?: Record<string, unknown>) {
   if (!TOKEN) return;
   try {
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
@@ -39,12 +39,77 @@ async function sendMessage(chatId: number, text: string) {
         text,
         parse_mode: "HTML",
         disable_web_page_preview: true,
+        ...extra,
       }),
     });
   } catch (e) {
     console.error("sendMessage:", e);
   }
 }
+
+/**
+ * Asosiy menyu — Reply Keyboard (tugmalar).
+ * Telegramda klaviatura pastda doim ko'rinib turadi.
+ */
+const MAIN_KEYBOARD = {
+  keyboard: [
+    [{ text: "📋 Rejalar" }, { text: "📅 Bugungi vazifalar" }],
+    [{ text: "➕ Buyurtma" }, { text: "💸 Chiqim" }, { text: "💰 Kirim" }],
+    [{ text: "📊 Statistika" }, { text: "📚 Kitob qo'shish" }],
+    [{ text: "🎬 Video qo'shish" }, { text: "🎯 Maqsad" }],
+    [{ text: "🔔 Botni yoqish" }, { text: "🔕 Botni o'chirish" }],
+    [{ text: "🏠 Menyu" }, { text: "❓ Yordam" }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+
+/**
+ * Telefon raqam kiritishni so'rash uchun maxsus klaviatura (keyingi safar ishlatiladi).
+ */
+const REQUEST_CANCEL_KEYBOARD = {
+  keyboard: [[{ text: "❌ Bekor" }]],
+  resize_keyboard: true,
+  one_time_keyboard: true,
+};
+
+/**
+ * Reply keyboardni yashirish (bir martalik suhbatlardan keyin).
+ */
+const REMOVE_KEYBOARD = { remove_keyboard: true, selective: false };
+
+/**
+ * Tugma bosilganda /command ko'rinishiga o'girish.
+ * Reply keyboard bosilganda Telegram text yuboradi, shuning uchun
+ * label -> command mapping kerak.
+ */
+const BUTTON_TO_CMD: Record<string, string> = {
+  "📋 Rejalar": "/rejalarni",
+  "📅 Bugungi vazifalar": "/bugun",
+  "➕ Buyurtma": "/buyurtma_qilish",
+  "💸 Chiqim": "/chiqim_qilish",
+  "💰 Kirim": "/kirim_qilish",
+  "📊 Statistika": "/stat",
+  "📚 Kitob qo'shish": "/kitob_qilish",
+  "🎬 Video qo'shish": "/video_qilish",
+  "🎯 Maqsad": "/maqsad_qilish",
+  "🔔 Botni yoqish": "/bot_yoq",
+  "🔕 Botni o'chirish": "/bot_och",
+  "❓ Yordam": "/yordam",
+  "🏠 Menyu": "/menu",
+  "❌ Bekor": "/bekor",
+};
+
+/**
+ * Foydalanuvchi qaysi "kiritish rejimi"da ekanini vaqtinchalik saqlash.
+ * Process darajasida Map — Vercel'da single instance bo'lsa ishlaydi.
+ * Multi-instance bo'lsa botReminders yoki settings ga saqlash kerak,
+ * lekin soddalik uchun Map yetarli.
+ */
+const userState = new Map<
+  number,
+  { mode: string; step: number; data: Record<string, string | null> }
+>();
 
 async function answerCallback(chatId: number, callbackId: string, text: string) {
   if (!TOKEN) return;
@@ -58,7 +123,7 @@ async function answerCallback(chatId: number, callbackId: string, text: string) 
         show_alert: false,
       }),
     });
-    await sendMessage(chatId, text);
+    await sendMessage(chatId, text, { reply_markup: MAIN_KEYBOARD });
   } catch (e) {
     console.error("answerCallback:", e);
   }
@@ -165,6 +230,306 @@ const HELP = [
   "",
   "Kategoriyalar: ijara, reklama, obuna, shaxsiy, biznes, dasturlash, psixologiya",
 ].join("\n");
+
+/* ── Wizard (kiritish rejimi) handlerlari ── */
+
+async function handleWizardStep(chatId: number, text: string) {
+  const state = userState.get(chatId);
+  if (!state) return;
+  const today = todayDateISO();
+
+  // ── Buyurtma wizard ──
+  if (state.mode === "order") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Summani kiriting (so'mda):");
+      return;
+    }
+    if (state.step === 2) {
+      const amount = parseAmount(text);
+      if (!amount || amount <= 0) {
+        await sendMessage(chatId, "⚠️ Noto'g'ri summa. Qaytadan kiriting:");
+        return;
+      }
+      state.data.amount = String(amount);
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "3️⃣ Muddatni kiriting (YYYY-MM-DD) yoki \"-\" yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 3) {
+      const dl = text.trim();
+      state.data.deadline = dl === "-" || !dl ? null : dl;
+      state.step = 4;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "4️⃣ Mijoz ismini kiriting yoki \"-\" yozing:");
+      return;
+    }
+    if (state.step === 4) {
+      const client = text.trim();
+      state.data.client = client === "-" || !client ? null : client;
+      userState.delete(chatId);
+      await db.insert(orders).values({
+        title: state.data.title ?? "",
+        amount: state.data.amount ?? "0",
+        deadline: state.data.deadline,
+        clientName: state.data.client,
+        stage: "new",
+        paymentType: "cash",
+        archived: false,
+      });
+      await sendMessage(
+        chatId,
+        `<b>✅ Buyurtma qo'shildi:</b>\n${state.data.title}\n💰 ${fmt(
+          Number(state.data.amount)
+        )}${state.data.deadline ? `\n📅 ${state.data.deadline}` : ""}${
+          state.data.client ? `\n👤 ${state.data.client}` : ""
+        }`,
+        { reply_markup: MAIN_KEYBOARD }
+      );
+      return;
+    }
+  }
+
+  // ── Chiqim wizard ──
+  if (state.mode === "expense") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Summani kiriting (so'mda):");
+      return;
+    }
+    if (state.step === 2) {
+      const amount = parseAmount(text);
+      if (!amount || amount <= 0) {
+        await sendMessage(chatId, "⚠️ Noto'g'ri summa. Qaytadan kiriting:");
+        return;
+      }
+      state.data.amount = String(amount);
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "3️⃣ Kategoriya tanlang yoki yozing:\n\nijara / reklama / obuna / shaxsiy / boshqa",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 3) {
+      const cat = EXPENSE_CAT[text.trim().toLowerCase()] || "other";
+      userState.delete(chatId);
+      await db.insert(expenses).values({
+        title: state.data.title ?? "",
+        amount: state.data.amount ?? "0",
+        category: cat,
+        date: today,
+      });
+      await sendMessage(
+        chatId,
+        `<b>📉 Chiqim qo'shildi:</b>\n${state.data.title}\n💸 ${fmt(
+          Number(state.data.amount)
+        )}`,
+        { reply_markup: MAIN_KEYBOARD }
+      );
+      return;
+    }
+  }
+
+  // ── Kirim wizard ──
+  if (state.mode === "income") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Summani kiriting (so'mda):");
+      return;
+    }
+    if (state.step === 2) {
+      const amount = parseAmount(text);
+      if (!amount || amount <= 0) {
+        await sendMessage(chatId, "⚠️ Noto'g'ri summa. Qaytadan kiriting:");
+        return;
+      }
+      state.data.amount = String(amount);
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "3️⃣ To'lov turi: naqd yoki karta yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 3) {
+      const t = text.toLowerCase();
+      const pay = t.includes("karta") || t.includes("card") ? "card" : "cash";
+      userState.delete(chatId);
+      await db.insert(incomes).values({
+        title: state.data.title ?? "",
+        amount: state.data.amount ?? "0",
+        source: "other",
+        date: today,
+        paymentType: pay,
+      });
+      await sendMessage(
+        chatId,
+        `<b>📈 Kirim qo'shildi:</b>\n${state.data.title}\n💰 ${fmt(
+          Number(state.data.amount)
+        )}\n💳 ${pay === "card" ? "Plastik" : "Naqd"}`,
+        { reply_markup: MAIN_KEYBOARD }
+      );
+      return;
+    }
+  }
+
+  // ── Kitob wizard ──
+  if (state.mode === "book") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Muallif ismini yozing (yoki \"-\"):");
+      return;
+    }
+    if (state.step === 2) {
+      state.data.author = text.trim() === "-" ? null : text.trim();
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "3️⃣ Sahifalar sonini yozing (yoki \"-\"):");
+      return;
+    }
+    if (state.step === 3) {
+      const total = text.trim() === "-" ? 0 : parseAmount(text);
+      state.data.totalPages = String(Math.max(0, total));
+      state.step = 4;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "4️⃣ PDF variant havolasini yuboring (yoki \"-\"):",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 4) {
+      const pdf = text.trim();
+      state.data.pdfUrl = pdf === "-" || !pdf ? null : pdf;
+      userState.delete(chatId);
+      await db.insert(books).values({
+        title: state.data.title ?? "",
+        author: state.data.author,
+        totalPages: Number(state.data.totalPages) || 0,
+        currentPage: 0,
+        status: "plan",
+        pdfUrl: state.data.pdfUrl,
+      });
+      let msg = `<b>📚 Kitob qo'shildi:</b>\n${state.data.title}`;
+      if (state.data.author) msg += ` — ${state.data.author}`;
+      if (state.data.totalPages && Number(state.data.totalPages) > 0)
+        msg += `\n📄 ${state.data.totalPages} sahifa`;
+      if (state.data.pdfUrl) msg += `\n📎 PDF saqlandi`;
+      await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
+      return;
+    }
+  }
+
+  // ── Video wizard ──
+  if (state.mode === "video") {
+    if (state.step === 1) {
+      const videoId = parseYouTubeId(text);
+      if (!videoId) {
+        await sendMessage(
+          chatId,
+          "⚠️ YouTube havolasi noto'g'ri. Qaytadan yuboring:"
+        );
+        return;
+      }
+      state.data.url = text.trim();
+      state.data.videoId = videoId;
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Video nomini yozing:");
+      return;
+    }
+    if (state.step === 2) {
+      state.data.title = text.trim() || "YouTube video";
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "3️⃣ Kategoriya tanlang yoki yozing:\n\nbiznes / dasturlash / psixologiya / moliya / boshqa",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 3) {
+      const cat = VIDEO_CAT[text.trim().toLowerCase()] || "other";
+      userState.delete(chatId);
+      await db.insert(videos).values({
+        title: state.data.title ?? "YouTube video",
+        url: state.data.url ?? "",
+        videoId: state.data.videoId ?? "",
+        category: cat,
+        watched: false,
+      });
+      await sendMessage(
+        chatId,
+        `<b>🎬 Video qo'shildi:</b>\n${state.data.title}\nPaneldagi Videolar bo'limida ko'rasiz.`,
+        { reply_markup: MAIN_KEYBOARD }
+      );
+      return;
+    }
+  }
+
+  // ── Maqsad wizard ──
+  if (state.mode === "goal") {
+    if (state.step === 1) {
+      state.data.title = text.trim();
+      state.step = 2;
+      userState.set(chatId, state);
+      await sendMessage(chatId, "2️⃣ Maqsad summasini kiriting (so'mda):");
+      return;
+    }
+    if (state.step === 2) {
+      const amount = parseAmount(text);
+      if (!amount || amount <= 0) {
+        await sendMessage(chatId, "⚠️ Noto'g'ri summa. Qaytadan kiriting:");
+        return;
+      }
+      state.data.amount = String(amount);
+      state.step = 3;
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        "3️⃣ Avtomatik foiz (0-100) — har bir kirimdan qancha % maqsadga tushadi:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+    if (state.step === 3) {
+      const pct = Math.min(100, Math.max(0, parseAmount(text)));
+      userState.delete(chatId);
+      await db.insert(goals).values({
+        title: state.data.title ?? "",
+        targetAmount: state.data.amount ?? "0",
+        savedAmount: "0",
+        autoPercent: pct,
+      });
+      let msg = `<b>🎯 Maqsad yaratildi:</b>\n${state.data.title}\n💰 ${fmt(
+        Number(state.data.amount)
+      )}`;
+      if (pct > 0) msg += `\n🔄 Har bir kirimdan: ${pct}%`;
+      await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
+      return;
+    }
+  }
+}
 
 /* ── Callback handlers (inline buttons from cron) ── */
 
@@ -290,10 +655,121 @@ async function handleCommand(chatId: number, text: string) {
   const cmd = cmdRaw.split("@")[0].toLowerCase();
   const args = rest.join(" ");
 
+  // ── Tugma bosilganda: label -> command ga o'girish ──
+  if (BUTTON_TO_CMD[text]) {
+    await handleCommand(chatId, BUTTON_TO_CMD[text]);
+    return;
+  }
+
   try {
     if (cmd === "/start" || cmd === "/yordam" || cmd === "/help") {
-      await sendMessage(chatId, HELP);
+      await sendMessage(
+        chatId,
+        HELP + "\n\n👇 Quyidagi tugmalar orqali tez foydalaning:",
+        { reply_markup: MAIN_KEYBOARD }
+      );
       return;
+    }
+
+    // ── Asosiy menyuni ko'rsatish ──
+    if (cmd === "/menu") {
+      userState.delete(chatId);
+      await sendMessage(chatId, "🏠 <b>Asosiy menyu</b>", {
+        reply_markup: MAIN_KEYBOARD,
+      });
+      return;
+    }
+
+    // ── Bekor qilish (kiritish rejimidan chiqish) ──
+    if (cmd === "/bekor") {
+      userState.delete(chatId);
+      await sendMessage(chatId, "❌ Bekor qilindi.", { reply_markup: MAIN_KEYBOARD });
+      return;
+    }
+
+    // ── Kiritish rejimlari: tugmalar bosilganda boshlaydi ──
+    if (cmd === "/buyurtma_qilish") {
+      userState.set(chatId, { mode: "order", step: 1, data: {} });
+      await sendMessage(
+        chatId,
+        "🆕 <b>Yangi buyurtma qo'shish</b>\n\n1️⃣ Buyurtma nomini yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    if (cmd === "/chiqim_qilish") {
+      userState.set(chatId, { mode: "expense", step: 1, data: {} });
+      await sendMessage(
+        chatId,
+        "💸 <b>Chiqim qo'shish</b>\n\n1️⃣ Chiqim nomini yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    if (cmd === "/kirim_qilish") {
+      userState.set(chatId, { mode: "income", step: 1, data: {} });
+      await sendMessage(
+        chatId,
+        "💰 <b>Kirim qo'shish</b>\n\n1️⃣ Kirim nomini yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    if (cmd === "/kitob_qilish") {
+      userState.set(chatId, { mode: "book", step: 1, data: {} });
+      await sendMessage(
+        chatId,
+        "📚 <b>Kitob qo'shish</b>\n\n1️⃣ Kitob nomini yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    if (cmd === "/video_qilish") {
+      userState.set(chatId, { mode: "video", step: 1, data: {} });
+      await sendMessage(
+        chatId,
+        "🎬 <b>Video qo'shish</b>\n\n1️⃣ YouTube havolasini yuboring:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    if (cmd === "/maqsad_qilish") {
+      userState.set(chatId, { mode: "goal", step: 1, data: {} });
+      await sendMessage(
+        chatId,
+        "🎯 <b>Maqsad yaratish</b>\n\n1️⃣ Maqsad nomini yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    // ── Kiritish rejimi davom ettirilayotgan bo'lsa ──
+    if (userState.has(chatId) && !cmd.startsWith("/")) {
+      // Avval wake reminder javobini tekshiramiz
+      const todayCheck = todayDateISO();
+      const wakeReminderCheck = await db
+        .select()
+        .from(botReminders)
+        .where(
+          and(
+            eq(botReminders.date, todayCheck),
+            eq(botReminders.type, "wake_up"),
+            eq(botReminders.responded, false)
+          )
+        )
+        .limit(1);
+
+      if (wakeReminderCheck.length === 0) {
+        // Wake reminder yo'q bo'lsa, wizard step ni davom ettiramiz
+        await handleWizardStep(chatId, text);
+        return;
+      }
+      // Aks holda pastdagi wake handler ishlaydi
     }
 
     // ── Bot toggle ──
@@ -304,7 +780,8 @@ async function handleCommand(chatId: number, text: string) {
         .onConflictDoUpdate({ target: settings.key, set: { value: "true" } });
       await sendMessage(
         chatId,
-        "✅ <b>Bot yoqildi!</b>\n\nErtalab uyg'onish vaqtida xabar keladi. Har bir reja vaqtida eslatma yuboriladi. Kechqurun kunlik hisobot olasaniz."
+        "✅ <b>Bot yoqildi!</b>\n\nErtalab uyg'onish vaqtida xabar keladi. Har bir reja vaqtida eslatma yuboriladi. Kechqurun kunlik hisobot olasaniz.",
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -313,7 +790,9 @@ async function handleCommand(chatId: number, text: string) {
         .insert(settings)
         .values({ key: "bot_enabled", value: "false" })
         .onConflictDoUpdate({ target: settings.key, set: { value: "false" } });
-      await sendMessage(chatId, "🔇 Bot o'chirildi. Es-latmalar to'xtatildi.");
+      await sendMessage(chatId, "🔇 Bot o'chirildi. Es-latmalar to'xtatildi.", {
+        reply_markup: MAIN_KEYBOARD,
+      });
       return;
     }
 
@@ -362,7 +841,7 @@ async function handleCommand(chatId: number, text: string) {
         .from(routines)
         .orderBy(asc(routines.time));
       if (allRoutines.length === 0) {
-        await sendMessage(chatId, "📋 Bugungi reja yo'q. Intizom bo'limidan qo'shing.");
+        await sendMessage(chatId, "📋 Bugungi reja yo'q. Intizom bo'limidan qo'shing.", { reply_markup: MAIN_KEYBOARD });
         return;
       }
       const lines = allRoutines.map((r) => {
@@ -382,7 +861,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>📋 Bugungi rejalar (${done}/${allRoutines.length}):</b>\n\n⏰ Turish: ${wake} | 💤 Uxlash: ${sleep}\n\n${lines.join(
           "\n"
-        )}`
+        )}`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -392,7 +872,8 @@ async function handleCommand(chatId: number, text: string) {
       if (p.length < 1) {
         await sendMessage(
           chatId,
-          "Format: /buyurtma Nomi, summa, deadline(YYYY-MM-DD), mijoz"
+          "Format: /buyurtma Nomi, summa, deadline(YYYY-MM-DD), mijoz",
+          { reply_markup: MAIN_KEYBOARD }
         );
         return;
       }
@@ -411,7 +892,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>✅ Buyurtma qo'shildi:</b>\n${p[0]}\n💰 ${fmt(Number(amount))}${
           deadline ? `\n📅 ${deadline}` : ""
-        }${p[3] ? `\n👤 ${p[3]}` : ""}`
+        }${p[3] ? `\n👤 ${p[3]}` : ""}`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -419,7 +901,9 @@ async function handleCommand(chatId: number, text: string) {
     if (cmd === "/chiqim") {
       const p = splitParts(args);
       if (p.length < 2) {
-        await sendMessage(chatId, "Format: /chiqim Nomi, summa, kategoriya");
+        await sendMessage(chatId, "Format: /chiqim Nomi, summa, kategoriya", {
+          reply_markup: MAIN_KEYBOARD,
+        });
         return;
       }
       const cat = EXPENSE_CAT[(p[2] || "").toLowerCase()] || "other";
@@ -429,7 +913,8 @@ async function handleCommand(chatId: number, text: string) {
         .values({ title: p[0], amount, category: cat, date: todayDateISO() });
       await sendMessage(
         chatId,
-        `<b>📉 Chiqim qo'shildi:</b>\n${p[0]}\n💸 ${fmt(Number(amount))}`
+        `<b>📉 Chiqim qo'shildi:</b>\n${p[0]}\n💸 ${fmt(Number(amount))}`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -439,7 +924,8 @@ async function handleCommand(chatId: number, text: string) {
       if (p.length < 2) {
         await sendMessage(
           chatId,
-          "Format: /kirim Nomi, summa, naqd yoki karta"
+          "Format: /kirim Nomi, summa, naqd yoki karta",
+          { reply_markup: MAIN_KEYBOARD }
         );
         return;
       }
@@ -460,7 +946,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>📈 Kirim qo'shildi:</b>\n${p[0]}\n💰 ${fmt(Number(amount))}\n💳 ${
           pay === "card" ? "Plastik" : "Naqd"
-        }`
+        }`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -470,7 +957,8 @@ async function handleCommand(chatId: number, text: string) {
       if (p.length < 1) {
         await sendMessage(
           chatId,
-          "Format: /vazifa Matn, sana(YYYY-MM-DD), kategoriya"
+          "Format: /vazifa Matn, sana(YYYY-MM-DD), kategoriya",
+          { reply_markup: MAIN_KEYBOARD }
         );
         return;
       }
@@ -481,7 +969,8 @@ async function handleCommand(chatId: number, text: string) {
         .values({ title: p[0], date, category, completed: false });
       await sendMessage(
         chatId,
-        `<b>📋 Vazifa qo'shildi:</b>\n${p[0]}\n📅 ${date}`
+        `<b>📋 Vazifa qo'shildi:</b>\n${p[0]}\n📅 ${date}`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -491,7 +980,8 @@ async function handleCommand(chatId: number, text: string) {
       if (p.length < 2) {
         await sendMessage(
           chatId,
-          "Format: /maqsad Nomi, summa, avtomatik foiz"
+          "Format: /maqsad Nomi, summa, avtomatik foiz",
+          { reply_markup: MAIN_KEYBOARD }
         );
         return;
       }
@@ -507,7 +997,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>🎯 Maqsad yaratildi:</b>\n${p[0]}\n💰 ${fmt(Number(amount))}${
           pct > 0 ? `\n🔄 Har buyurtmadan: ${pct}%` : ""
-        }`
+        }`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -515,7 +1006,7 @@ async function handleCommand(chatId: number, text: string) {
     if (cmd === "/kitob") {
       const p = splitParts(args);
       if (p.length < 1) {
-        await sendMessage(chatId, "Format: /kitob Nomi, muallif, sahifalar soni");
+        await sendMessage(chatId, "Format: /kitob Nomi, muallif, sahifalar soni", { reply_markup: MAIN_KEYBOARD });
         return;
       }
       await db.insert(books).values({
@@ -529,7 +1020,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>📚 Kitob qo'shildi:</b>\n${p[0]}${p[1] ? ` — ${p[1]}` : ""}${
           p[2] ? `\n${parseAmount(p[2])} sahifa` : ""
-        }`
+        }`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -540,7 +1032,8 @@ async function handleCommand(chatId: number, text: string) {
       if (!videoId) {
         await sendMessage(
           chatId,
-          "Format: /video YouTube_havola, nomi, kategoriya"
+          "Format: /video YouTube_havola, nomi, kategoriya",
+          { reply_markup: MAIN_KEYBOARD }
         );
         return;
       }
@@ -554,7 +1047,8 @@ async function handleCommand(chatId: number, text: string) {
       });
       await sendMessage(
         chatId,
-        `<b>🎬 Video qo'shildi:</b>\n${p[1] || "YouTube video"}\nPaneldagi Videolar bo'limida ko'rasiz.`
+        `<b>🎬 Video qo'shildi:</b>\n${p[1] || "YouTube video"}\nPaneldagi Videolar bo'limida ko'rasiz.`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -564,13 +1058,14 @@ async function handleCommand(chatId: number, text: string) {
       if (!id) {
         await sendMessage(
           chatId,
-          "Format: /tolov ID\nMisol: /tolov 12\n(ID ni /buyurtmalar dan ko'ring)"
+          "Format: /tolov ID\nMisol: /tolov 12\n(ID ni /buyurtmalar dan ko'ring)",
+          { reply_markup: MAIN_KEYBOARD }
         );
         return;
       }
       const result = await confirmOrder(id, "cash");
       if (!result.ok) {
-        await sendMessage(chatId, result.message);
+        await sendMessage(chatId, result.message, { reply_markup: MAIN_KEYBOARD });
         return;
       }
       const [order] = await db
@@ -582,7 +1077,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>✅ Buyurtma tasdiqlandi va yopildi:</b>\n${order?.title ?? ""}\n💰 ${fmt(
           Number(order?.amount ?? 0)
-        )}\n\nMablag' Kirimlarga yozildi va maqsadlar ulushi avtomatik ajratildi.`
+        )}\n\nMablag' Kirimlarga yozildi va maqsadlar ulushi avtomatik ajratildi.`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -595,7 +1091,7 @@ async function handleCommand(chatId: number, text: string) {
         .limit(15);
       const active = rows.filter((r) => r.stage !== "confirmed" && !r.archived);
       if (active.length === 0) {
-        await sendMessage(chatId, "Faol buyurtmalar yo'q.");
+        await sendMessage(chatId, "Faol buyurtmalar yo'q.", { reply_markup: MAIN_KEYBOARD });
         return;
       }
       const STAGE_LABEL: Record<string, string> = {
@@ -614,7 +1110,8 @@ async function handleCommand(chatId: number, text: string) {
         chatId,
         `<b>Faol buyurtmalar (${active.length}):</b>\n${lines.join(
           "\n"
-        )}\n\n💰 Tasdiqlash: /tolov ID`
+        )}\n\n💰 Tasdiqlash: /tolov ID`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -626,7 +1123,9 @@ async function handleCommand(chatId: number, text: string) {
         .where(eq(tasks.date, todayDateISO()))
         .orderBy(descOrd(tasks.createdAt));
       if (rows.length === 0) {
-        await sendMessage(chatId, "Bugunga vazifa yo'q.");
+        await sendMessage(chatId, "Bugunga vazifa yo'q.", {
+          reply_markup: MAIN_KEYBOARD,
+        });
         return;
       }
       const lines = rows.map(
@@ -635,7 +1134,8 @@ async function handleCommand(chatId: number, text: string) {
       const done = rows.filter((t) => t.completed).length;
       await sendMessage(
         chatId,
-        `<b>Bugungi vazifalar (${done}/${rows.length}):</b>\n${lines.join("\n")}`
+        `<b>Bugungi vazifalar (${done}/${rows.length}):</b>\n${lines.join("\n")}`,
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
@@ -666,15 +1166,18 @@ async function handleCommand(chatId: number, text: string) {
           `📈 Sof foyda: <b>${fmt(totalIn - totalOut)}</b>`,
           `🎯 Maqsadlarda: ${fmt(savedTotal)}`,
           `📋 Faol buyurtmalar: ${active} ta`,
-        ].join("\n")
+        ].join("\n"),
+        { reply_markup: MAIN_KEYBOARD }
       );
       return;
     }
 
-    await sendMessage(chatId, "Noma'lum buyruq.\n\n" + HELP);
+    await sendMessage(chatId, "Noma'lum buyruq.\n\n" + HELP, {
+      reply_markup: MAIN_KEYBOARD,
+    });
   } catch (e) {
     console.error("Bot command error:", e);
-    await sendMessage(chatId, setupErrorMessage(e));
+    await sendMessage(chatId, setupErrorMessage(e), { reply_markup: MAIN_KEYBOARD });
   }
 }
 
