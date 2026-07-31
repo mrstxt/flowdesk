@@ -209,8 +209,9 @@ export default function RivojlanishPage() {
 
   // Komponent unmount bo'lganda barcha timerlarni tozalash
   useEffect(() => {
+    const timersRef = progressTimers;
     return () => {
-      Object.values(progressTimers.current).forEach((t) => clearInterval(t));
+      Object.values(timersRef.current).forEach((t) => clearInterval(t));
     };
   }, []);
 

@@ -80,7 +80,7 @@ export default function IntizomPage() {
     setWake(s.wake_time || "04:30");
     setSleep(s.sleep_time || "21:40");
     setBotEnabled(s.bot_enabled === "true");
-  }, [today, tomorrow]);
+  }, [today]);
 
   useEffect(() => {
     load();
