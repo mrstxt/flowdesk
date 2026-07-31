@@ -71,7 +71,7 @@ function getTashkentTime() {
 }
 
 /**
- * Cron job: har 30 daqiqada yuradi.
+ * Cron job: har 10 daqiqada yuradi (vercel.json bilan bir xil).
  * - Uyg'onish vaqti: "Turingmi?" tugmasi
  * - Reja vaqti kelganda: eslatma
  * - 20:00: kunlik hisobot
@@ -137,7 +137,7 @@ export async function GET(req: Request) {
 
     // ── Wake up reminder ──
     const wakeMin = safeMinutes(wakeTime, 4 * 60 + 30);
-    if (force || nowMin >= wakeMin - 15) {
+    if (force || nowMin >= wakeMin) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -175,7 +175,7 @@ export async function GET(req: Request) {
     // ── Routine reminders ──
     for (const r of allRoutines) {
       const rMin = safeMinutes(r.time, 0);
-      if (force || nowMin >= rMin - 15) {
+      if (force || nowMin >= rMin) {
         const exists = await db
           .select({ id: botReminders.id })
           .from(botReminders)
@@ -216,7 +216,7 @@ export async function GET(req: Request) {
     }
 
     // ── 20:00 — bugungi natija + ertangi reja kiritish so'rovi ──
-    if (force || nowMin >= 20 * 60 - 15) {
+    if (force || nowMin >= 20 * 60) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -290,7 +290,7 @@ export async function GET(req: Request) {
 
     // ── Sleep reminder (uxlash vaqti) ──
     const sleepMin = safeMinutes(sleepTime, 21 * 60 + 40);
-    if (force || (nowMin >= sleepMin - 15 && nowMin >= 18 * 60)) {
+    if (force || (nowMin >= sleepMin && nowMin >= 18 * 60)) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
