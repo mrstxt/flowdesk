@@ -220,8 +220,9 @@ export async function transferBetweenCards(
 export async function addFundsToGoal(
   goalId: number,
   amount: number,
-  fromCardId: number | null
-): Promise<{ ok: boolean; error?: string; cardName?: string }> {
+  fromCardId: number | null,
+  description?: string
+): Promise<{ ok: boolean; error?: string; cardName?: string; targetCardName?: string }> {
   if (amount <= 0) return { ok: false, error: "Summa 0 dan katta bo'lishi kerak" };
   const [goal] = await db
     .select()
@@ -246,54 +247,76 @@ export async function addFundsToGoal(
     sourceCardId = primary.id;
   }
 
-  // Manba karta va maqsad kartasi bir xil bo'lsa, transfer qilmaymiz
+  const [srcCard] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, sourceCardId))
+    .limit(1);
+  const [targetCard] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, goal.cardId))
+    .limit(1);
+
+  if (!srcCard || !targetCard) {
+    return { ok: false, error: "Manba yoki maqsad kartasi topilmadi" };
+  }
+
+  const desc = description || `Maqsadga: ${goal.title}`;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Manba karta va maqsad kartasi bir xil bo'lsa
   if (sourceCardId === goal.cardId) {
-    // Faqat maqsad balance va savedAmount ga qo'shamiz
     await db
       .update(goals)
       .set({
         savedAmount: String(Number(goal.savedAmount) + amount),
       })
       .where(eq(goals.id, goalId));
-    await db
-      .update(cards)
-      .set({ balance: sql`${cards.balance} + ${amount}` })
-      .where(eq(cards.id, goal.cardId));
     await db.insert(cardTransactions).values({
       cardId: goal.cardId,
-      date: new Date().toISOString().slice(0, 10),
+      date: today,
       type: "goal_in",
       amount: String(amount),
-      description: `Maqsadga qo'shish: ${goal.title}`,
+      description: desc,
     });
-    const [srcCard] = await db
-      .select()
-      .from(cards)
-      .where(eq(cards.id, sourceCardId))
-      .limit(1);
-    return { ok: true, cardName: srcCard?.name };
+    return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };
   }
 
-  // 1. Manba kartadan ayiramiz
-  const srcRes = await addCardExpense(
-    sourceCardId,
-    amount,
-    `Maqsadga: ${goal.title}`
-  );
-  if (!srcRes.ok) return srcRes;
+  // Boshqa kartadan maqsad kartasiga (Masalan: Asosiy kartadan Maqsad kartasiga transaksiyadek o'tkazish):
+  if (Number(srcCard.balance) < amount) {
+    return {
+      ok: false,
+      error: `«${srcCard.name}» kartasida mablag' yetarli emas (${srcCard.balance} so'm)`,
+    };
+  }
 
-  // 2. Maqsad kartasiga qo'shamiz
+  // 1. Manba kartadan (Asosiy kartadan) pul ayiramiz
+  await db
+    .update(cards)
+    .set({ balance: sql`${cards.balance} - ${amount}` })
+    .where(eq(cards.id, sourceCardId));
+  await db.insert(cardTransactions).values({
+    cardId: sourceCardId,
+    date: today,
+    type: "transfer_out",
+    amount: String(amount),
+    relatedCardId: goal.cardId,
+    description: desc,
+  });
+
+  // 2. Maqsad kartasiga (Target kartaga) pul qo'shamiz
   await db
     .update(cards)
     .set({ balance: sql`${cards.balance} + ${amount}` })
     .where(eq(cards.id, goal.cardId));
   await db.insert(cardTransactions).values({
     cardId: goal.cardId,
-    date: new Date().toISOString().slice(0, 10),
+    date: today,
     type: "goal_in",
     amount: String(amount),
     relatedCardId: sourceCardId,
-    description: `Maqsadga qo'shish: ${goal.title}`,
+    description: desc,
   });
 
   // 3. goals.savedAmount ga qo'shamiz
@@ -304,20 +327,15 @@ export async function addFundsToGoal(
     })
     .where(eq(goals.id, goalId));
 
-  // 4. Income sifatida ham yozamiz (maqsad kartasiga)
+  // 4. Income sifatida yozamiz (maqsad kartasiga)
   await db.insert(incomes).values({
-    title: `Maqsadga qo'shish: ${goal.title}`,
+    title: desc,
     amount: String(amount),
     source: "goal",
-    date: new Date().toISOString().slice(0, 10),
+    date: today,
     paymentType: "card",
     cardId: goal.cardId,
   });
 
-  const [srcCard] = await db
-    .select()
-    .from(cards)
-    .where(eq(cards.id, sourceCardId))
-    .limit(1);
-  return { ok: true, cardName: srcCard?.name };
+  return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };
 }

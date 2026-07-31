@@ -52,6 +52,9 @@ type Card = {
   bank: string | null;
   last4: string | null;
   color: string;
+  type: string;
+  balance: string;
+  archived: boolean | null;
 };
 
 const EXPENSE_CATS: Record<string, string> = {
@@ -96,6 +99,7 @@ export default function FinancePage() {
     load();
   }, []);
 
+  const primaryCard = cards.find((c) => c.type === "primary") || cards[0];
   const ms = monthStartISO();
   const monthIncomes = incomes.filter((i) => i.date >= ms);
   const monthExpenses = expenses.filter((e) => e.date >= ms);
@@ -568,15 +572,16 @@ export default function FinancePage() {
               </label>
               <select
                 name="cardId"
+                defaultValue={primaryCard ? String(primaryCard.id) : "cash"}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
               >
-                <option value="cash">💵 Naqd pul</option>
                 {cards.map((c) => (
                   <option key={c.id} value={c.id}>
-                    💳 {c.name}
+                    💳 {c.name} {c.type === "primary" ? "(Asosiy karta)" : ""}
                     {c.last4 ? ` •••• ${c.last4}` : ""}
                   </option>
                 ))}
+                <option value="cash">💵 Naqd pul</option>
               </select>
             </div>
             <div>
@@ -676,15 +681,16 @@ export default function FinancePage() {
               </label>
               <select
                 name="cardId"
+                defaultValue={primaryCard ? String(primaryCard.id) : "cash"}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
               >
-                <option value="cash">💵 Naqd pul</option>
                 {cards.map((c) => (
                   <option key={c.id} value={c.id}>
-                    💳 {c.name}
+                    💳 {c.name} {c.type === "primary" ? "(Asosiy karta)" : ""}
                     {c.last4 ? ` •••• ${c.last4}` : ""}
                   </option>
                 ))}
+                <option value="cash">💵 Naqd pul</option>
               </select>
             </div>
           </div>

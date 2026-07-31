@@ -121,6 +121,7 @@ export default function GoalsPage() {
     const amt = parseMoneyInput(fd.get("amount"));
     const fromCardIdRaw = fd.get("fromCardId") as string;
     const fromCardId = fromCardIdRaw ? Number(fromCardIdRaw) : null;
+    const description = (fd.get("description") as string)?.trim() || undefined;
     try {
       const res = await fetch("/api/card-transactions", {
         method: "POST",
@@ -130,6 +131,7 @@ export default function GoalsPage() {
           goalId: addFundsGoal.id,
           amount: amt,
           fromCardId,
+          description,
         }),
       });
       const data = await res.json();
@@ -138,9 +140,11 @@ export default function GoalsPage() {
         return;
       }
       alert(
-        `✅ ${formatCurrency(amt)} maqsadga qo'shildi "${addFundsGoal.title}"\n` +
-          (data.cardName
-            ? `«${data.cardName}» kartasidan yechildi va maqsad kartasiga o'tkazildi.`
+        `✅ ${formatCurrency(amt)} "${addFundsGoal.title}" maqsadi uchun o'tkazildi!\n` +
+          (data.cardName &&
+          data.targetCardName &&
+          data.cardName !== data.targetCardName
+            ? `«${data.cardName}» kartasidan yechildi va «${data.targetCardName}» kartasiga o'tkazildi.`
             : "Maqsad kartasiga qo'shildi.")
       );
       setAddFundsGoal(null);
@@ -797,36 +801,31 @@ export default function GoalsPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
-              Qaysi kartadan yechilsin
+              Tavsif (izoh / description)
+            </label>
+            <input
+              name="description"
+              type="text"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
+              placeholder={`Masalan: Oylikdan ${addFundsGoal?.title || "maqsad"} uchun`}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Qaysi kartadan yechilsin (Manba karta)
             </label>
             <select
               name="fromCardId"
-              defaultValue={
-                primaryCard ? String(primaryCard.id) : addFundsGoal?.cardId
-                  ? String(addFundsGoal.cardId)
-                  : ""
-              }
+              defaultValue={primaryCard ? String(primaryCard.id) : ""}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900"
             >
-              {activeCards
-                .filter((c) => c.id !== addFundsGoal?.cardId)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    💳 {c.name} ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
-                    {formatCurrency(c.balance)}
-                  </option>
-                ))}
-              {addFundsGoal?.cardId &&
-                activeCards.find((c) => c.id === addFundsGoal.cardId) && (
-                  <option value={addFundsGoal.cardId}>
-                    💳{" "}
-                    {
-                      activeCards.find((c) => c.id === addFundsGoal.cardId)
-                        ?.name
-                    }{" "}
-                    (shu kartaga qo'shish, o'tkazishsiz)
-                  </option>
-                )}
+              {activeCards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  💳 {c.name} {c.type === "primary" ? "(Asosiy karta)" : ""}{" "}
+                  ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
+                  {formatCurrency(c.balance)} so'm
+                </option>
+              ))}
             </select>
           </div>
           <p className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded-xl p-2.5">

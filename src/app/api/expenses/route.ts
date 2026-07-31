@@ -13,7 +13,15 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const cardId = body.cardId ? Number(body.cardId) : null;
+  let cardId = body.cardId && body.cardId !== "cash" ? Number(body.cardId) : null;
+  if (!cardId && body.cardId !== "cash" && body.cardId !== null) {
+    const [primary] = await db
+      .select()
+      .from(cards)
+      .where(eq(cards.type, "primary"))
+      .limit(1);
+    if (primary) cardId = primary.id;
+  }
   const amount = String(parseMoneyInput(body.amount));
 
   const [created] = await db
@@ -67,6 +75,19 @@ export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = Number(searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const [existing] = await db
+    .select()
+    .from(expenses)
+    .where(eq(expenses.id, id))
+    .limit(1);
+  if (existing && existing.cardId) {
+    await db
+      .update(cards)
+      .set({
+        balance: sql`${cards.balance} + ${Number(existing.amount)}`,
+      })
+      .where(eq(cards.id, existing.cardId));
+  }
   await db.delete(expenses).where(eq(expenses.id, id));
   return NextResponse.json({ ok: true });
 }

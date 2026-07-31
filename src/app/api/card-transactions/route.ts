@@ -118,7 +118,7 @@ export async function POST(req: Request) {
 
     if (action === "goal_fund") {
       // Maqsadga pul qo'shish (qaysi kartadan)
-      const { goalId, amount, fromCardId } = body;
+      const { goalId, amount, fromCardId, description } = body;
       if (!goalId || !amount) {
         return NextResponse.json(
           { error: "goalId va amount kerak" },
@@ -128,12 +128,17 @@ export async function POST(req: Request) {
       const res = await addFundsToGoal(
         Number(goalId),
         Number(amount),
-        fromCardId ? Number(fromCardId) : null
+        fromCardId ? Number(fromCardId) : null,
+        description
       );
       if (!res.ok) {
         return NextResponse.json({ error: res.error }, { status: 400 });
       }
-      return NextResponse.json({ ok: true, cardName: res.cardName });
+      return NextResponse.json({
+        ok: true,
+        cardName: res.cardName,
+        targetCardName: res.targetCardName,
+      });
     }
 
     return NextResponse.json({ error: "action kerak" }, { status: 400 });
