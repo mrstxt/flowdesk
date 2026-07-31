@@ -4,9 +4,12 @@ import {
   incomes,
   expenses,
   goals,
+  cards,
+  cardTransactions,
 } from "@/db/schema";
 import { eq, gte, sql, and } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
+import { getPrimaryCard } from "@/lib/cardActions";
 
 export function todayDateISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -20,47 +23,15 @@ export function monthStartISO(date?: string): string {
 }
 
 /**
- * Maqsad uchun sof foydadan ajratish.
- * Sof foyda = (Kirim - Chiqim) shu oyda.
- * autoPercent % sof foydadan maqsadga qo'shiladi.
- */
-export async function distributeGoalFromNetProfit(
-  goal: typeof goals.$inferSelect,
-  netProfit: number,
-  excludeOrderId?: number
-): Promise<number> {
-  const pct = Number(goal.autoPercent ?? 0);
-  if (pct <= 0 || netProfit <= 0) return 0;
-  // Bu maqsad uchun allaqachon shu oyda qancha ajratilganini hisoblaymiz
-  // (bu buyurtmani chiqarib tashlab)
-  const ms = monthStartISO();
-  const [existing] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${incomes.amount}), 0)`,
-    })
-    .from(incomes)
-    .where(
-      and(
-        gte(incomes.date, ms),
-        eq(incomes.title, `Maqsadga: ${goal.title}`)
-      )
-    );
-  // Yangi summa: sof foydaning foizi, lekin ortiqcha qismini chegiramiz
-  const target = netProfit * (pct / 100);
-  const current = Number(existing?.total || 0);
-  const addAmount = Math.max(0, target - current);
-  return addAmount;
-}
-
-/**
  * Buyurtmani tasdiqlash:
  * 1) stage -> confirmed, archived=true
- * 2) Kirim yaratish (order source) - tanlangan kartaga
+ * 2) Asosiy kartaga avtomatik kirim
  * 3) Shu oydagi sof foydadan maqsadlarga ajratish
- *    - har bir maqsad uchun shu oyda yig'ilgan sof foydaning
- *      foiziga teng summa goals.savedAmount ga qo'shiladi
- *    - va bu summa "Maqsadga: <nomi>" title bilan income sifatida
- *      yoziladi (qaysi kartaga - maqsad.cardId ga)
+ *    (har bir maqsad uchun shu oyda yig'ilgan sof foydaning
+ *     foiziga teng summa goals.savedAmount ga qo'shiladi)
+ * 4) Maqsadga ajratilgan summa "Maqsadga: <nomi>" title bilan
+ *    income sifatida yoziladi va maqsadning o'ziga tegishli
+ *    kartasiga tushadi
  */
 export async function confirmOrder(
   orderId: number,
@@ -89,18 +60,43 @@ export async function confirmOrder(
 
   const amt = parseMoneyInput(order.amount);
   if (amt > 0) {
-    // 1. Asosiy kirim
-    await db.insert(incomes).values({
-      title: `Buyurtma: ${order.title}`,
-      amount: String(amt),
-      source: "order",
-      date: todayDateISO(),
-      paymentType,
-      cardId: cardId ?? null,
-      orderId,
-    });
+    // Qaysi kartaga tushadi? Agar cardId berilmagan bo'lsa — asosiy karta
+    let targetCardId = cardId;
+    if (!targetCardId) {
+      const primary = await getPrimaryCard();
+      if (primary) targetCardId = primary.id;
+    }
 
-    // 2. Shu oydagi sof foyda = kirim - chiqim
+    // 1. Asosiy kirim (income jadvaliga)
+    const [income] = await db
+      .insert(incomes)
+      .values({
+        title: `Buyurtma: ${order.title}`,
+        amount: String(amt),
+        source: "order",
+        date: todayDateISO(),
+        paymentType,
+        cardId: targetCardId,
+        orderId,
+      })
+      .returning();
+
+    // 2. Karta balance ga qo'shamiz + card_transactions yozamiz
+    if (targetCardId) {
+      await db
+        .update(cards)
+        .set({ balance: sql`${cards.balance} + ${amt}` })
+        .where(eq(cards.id, targetCardId));
+      await db.insert(cardTransactions).values({
+        cardId: targetCardId,
+        date: todayDateISO(),
+        type: "in",
+        amount: String(amt),
+        description: `Buyurtma: ${order.title}`,
+      });
+    }
+
+    // 3. Shu oydagi sof foyda = kirim - chiqim
     const ms = monthStartISO();
     const [incSum, expSum] = await Promise.all([
       db
@@ -120,7 +116,7 @@ export async function confirmOrder(
     const totalOut = Number(expSum[0]?.total || 0);
     const net = totalIn - totalOut;
 
-    // 3. Maqsadlarga ajratish
+    // 4. Maqsadlarga ajratish
     const allGoals = await db.select().from(goals);
     let totalDistributed = 0;
     for (const g of allGoals) {
@@ -143,7 +139,6 @@ export async function confirmOrder(
       const alreadyAllocated = Number(existingRows?.total || 0);
 
       // Shu oy uchun maqsadga ajratilishi kerak bo'lgan summa
-      // (sof foydaning foizi minus allaqachon ajratilgan)
       const targetAlloc = (net * pct) / 100;
       const remainingAlloc = Math.max(0, targetAlloc - alreadyAllocated);
       if (remainingAlloc <= 0) continue;
@@ -156,14 +151,27 @@ export async function confirmOrder(
         })
         .where(eq(goals.id, g.id));
 
-      // Shu ajratmani income sifatida ham yozamiz (qaysi kartaga - g.cardId)
+      // Shu ajratmani income sifatida yozamiz (maqsad.cardId ga)
+      if (g.cardId) {
+        await db
+          .update(cards)
+          .set({ balance: sql`${cards.balance} + ${remainingAlloc}` })
+          .where(eq(cards.id, g.cardId));
+        await db.insert(cardTransactions).values({
+          cardId: g.cardId,
+          date: todayDateISO(),
+          type: "goal_in",
+          amount: String(remainingAlloc),
+          description: `Maqsadga: ${g.title}`,
+        });
+      }
       await db.insert(incomes).values({
         title: `Maqsadga: ${g.title}`,
         amount: String(remainingAlloc),
         source: "goal",
         date: todayDateISO(),
         paymentType,
-        cardId: g.cardId ?? null,
+        cardId: g.cardId,
       });
 
       totalDistributed += remainingAlloc;

@@ -19,7 +19,29 @@ export const cards = pgTable("cards", {
   bank: varchar("bank", { length: 100 }),
   last4: varchar("last4", { length: 4 }),
   color: varchar("color", { length: 20 }).default("#0a84ff"),
+  // "primary" = asosiy karta (1 ta bo'ladi), "additional" = qo'shimcha
+  type: varchar("type", { length: 20 }).notNull().default("additional"),
+  // Hozirgi qoldiq (so'm) — real-time yangilanadi
+  balance: numeric("balance", { precision: 14, scale: 2 })
+    .notNull()
+    .default("0"),
   archived: boolean("archived").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/* ── Karta harakatlari (audit log) ── */
+
+export const cardTransactions = pgTable("card_transactions", {
+  id: serial("id").primaryKey(),
+  cardId: integer("card_id").notNull(),
+  date: date("date").notNull(),
+  // "in" = kirim, "out" = chiqim, "transfer_in" = boshqa kartadan tushdi,
+  // "transfer_out" = boshqa kartaga o'tdi, "goal_in" = maqsadga ajratildi
+  type: varchar("type", { length: 30 }).notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  // Transfer uchun — qaysi kartaga/papkan o'tgani
+  relatedCardId: integer("related_card_id"),
+  description: text("description"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -55,6 +77,8 @@ export const incomes = pgTable("incomes", {
   paymentType: varchar("payment_type", { length: 50 }).default("cash"),
   // Qaysi kartaga tushgan (nullable — naqd pul uchun)
   cardId: integer("card_id"),
+  // card_transactions bilan bog'lash
+  transactionId: integer("transaction_id"),
   orderId: integer("order_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -67,6 +91,7 @@ export const expenses = pgTable("expenses", {
   date: date("date").notNull(),
   // Qaysi kartadan chiqqan (nullable)
   cardId: integer("card_id"),
+  transactionId: integer("transaction_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

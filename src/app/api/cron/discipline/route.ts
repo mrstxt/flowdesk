@@ -107,8 +107,11 @@ export async function GET(req: Request) {
     let messagesSent = 0;
 
     // ── Wake up reminder ──
+    // Cron har 10 daqiqada yuradi. Vaqtdan 5 daqiqa oldin va 25 daqiqa keyin
+    // ichida trigger qilinadi (botReminders yozuvi orqali dublikat
+    // oldini olamiz).
     const wakeMin = safeMinutes(wakeTime, 4 * 60 + 30);
-    if (nowMin >= wakeMin && nowMin < wakeMin + 35) {
+    if (nowMin >= wakeMin - 5 && nowMin < wakeMin + 25) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -144,7 +147,8 @@ export async function GET(req: Request) {
     // ── Routine reminders ──
     for (const r of allRoutines) {
       const rMin = safeMinutes(r.time, 0);
-      if (nowMin >= rMin && nowMin < rMin + 35) {
+      // Cron har 10 daqiqada yuradi. Vaqtdan 5 daqiqa oldin va 25 daqiqa keyin
+      if (nowMin >= rMin - 5 && nowMin < rMin + 25) {
         const exists = await db
           .select({ id: botReminders.id })
           .from(botReminders)
@@ -183,7 +187,8 @@ export async function GET(req: Request) {
     }
 
     // ── 20:00 — bugungi natija + ertangi reja kiritish so'rovi ──
-    if (nowMin === 20 * 60 || nowMin === 20 * 60 + 30) {
+    // Cron har 10 daqiqada yuradi. 20:00 dan 20:29 gacha trigger.
+    if (nowMin >= 20 * 60 && nowMin < 20 * 60 + 30) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -254,10 +259,10 @@ export async function GET(req: Request) {
     }
 
     // ── Sleep reminder (uxlash vaqti) ──
-    // 20:00 dan keyin uxlanadi (default 21:40)
+    // Cron har 10 daqiqada yuradi. Vaqtdan 5 daqiqa oldin va 25 daqiqa keyin
+    // ichida trigger qilinadi. 18:00 dan oldin yuborilmaydi.
     const sleepMin = safeMinutes(sleepTime, 21 * 60 + 40);
-    // Eslatma faqat 18:00 dan keyingi vaqtlarda yuboriladi
-    if (sleepMin > 18 * 60 && nowMin >= sleepMin && nowMin < sleepMin + 35) {
+    if (sleepMin > 18 * 60 && nowMin >= sleepMin - 5 && nowMin < sleepMin + 25) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)

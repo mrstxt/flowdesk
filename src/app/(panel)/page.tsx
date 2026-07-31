@@ -15,6 +15,9 @@ import {
   Kanban,
   AlarmClock,
   Flame,
+  CreditCard,
+  Lock,
+  Wallet,
 } from "lucide-react";
 import { formatCurrency, monthStartISO, parseMoneyInput, todayISO } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
@@ -28,13 +31,14 @@ type Order = {
   archived: boolean | null;
 };
 type Task = { id: number; title: string; completed: boolean; date: string };
-type Income = { id: number; amount: string; date: string };
-type Expense = { id: number; amount: string; date: string };
+type Income = { id: number; amount: string; date: string; cardId: number | null };
+type Expense = { id: number; amount: string; date: string; cardId: number | null };
 type Goal = {
   id: number;
   title: string;
   targetAmount: string;
   savedAmount: string;
+  cardId: number | null;
 };
 type Routine = {
   id: number;
@@ -51,6 +55,15 @@ type Book = {
   currentPage: number;
   status: string;
 };
+type Card = {
+  id: number;
+  name: string;
+  bank: string | null;
+  last4: string | null;
+  color: string;
+  type: string;
+  balance: string;
+};
 
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -60,13 +73,14 @@ export default function Dashboard() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
+  const [cards, setCards] = useState<Card[]>([]);
   const [settings, setSettings] = useState({ wake: "04:30", sleep: "21:40" });
 
   const [orderModal, setOrderModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
 
   async function load() {
-    const [o, t, i, e, g, r, b, s] = await Promise.all([
+    const [o, t, i, e, g, r, b, s, c] = await Promise.all([
       fetch("/api/orders").then((r) => r.json()),
       fetch(`/api/tasks?from=${todayISO()}&to=${todayISO()}`).then((r) =>
         r.json()
@@ -77,6 +91,7 @@ export default function Dashboard() {
       fetch("/api/routines").then((r) => r.json()),
       fetch("/api/books").then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()),
+      fetch("/api/cards").then((r) => r.json()),
     ]);
     setOrders(o);
     setTasks(t);
@@ -89,6 +104,7 @@ export default function Dashboard() {
       wake: s.wake_time || "04:30",
       sleep: s.sleep_time || "21:40",
     });
+    setCards(c);
   }
 
   useEffect(() => {
@@ -242,6 +258,63 @@ export default function Dashboard() {
           tone="blue"
         />
       </div>
+
+      {/* Cards */}
+      {cards.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+          {cards.map((c) => (
+            <Link
+              key={c.id}
+              href="/goals"
+              className={`p-5 bg-white rounded-3xl border-2 card-hover relative overflow-hidden block ${
+                c.type === "primary"
+                  ? "border-blue-200"
+                  : "border-slate-100"
+              }`}
+            >
+              <div
+                className="absolute top-0 left-0 right-0 h-1"
+                style={{ background: c.color }}
+              />
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div
+                    className="w-9 h-7 rounded-md shrink-0"
+                    style={{ background: c.color }}
+                  />
+                  <div className="min-w-0">
+                    <div className="font-display font-bold text-slate-900 text-sm truncate flex items-center gap-1">
+                      {c.name}
+                      {c.type === "primary" && (
+                        <Lock className="w-3 h-3 text-blue-600 shrink-0" />
+                      )}
+                    </div>
+                    {c.bank && (
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {c.bank}
+                        {c.last4 ? ` •••• ${c.last4}` : ""}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {c.type === "primary" ? (
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full shrink-0">
+                    ASOSIY
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-full shrink-0">
+                    QO'SHIMCHA
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500 mb-0.5">Qoldiq</div>
+              <div className="font-display text-2xl font-extrabold text-slate-900 tabular-nums">
+                {formatCurrency(c.balance)}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: intizom + vazifalar */}

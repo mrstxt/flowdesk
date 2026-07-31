@@ -172,14 +172,33 @@ https://api.telegram.org/bot123456:ABC/setWebhook?url=https://flowdesk.vercel.ap
 
 ## Cron Sozlash
 
-Vercel Project → Settings → Cron Jobs:
+`vercel.json` faylida cron schedule allaqachon sozlangan — har 10 daqiqada yuradi:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/discipline",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
+```
+
+Vercel Project → Settings → Cron Jobs bo'limida avtomatik ko'rinadi. Qo'shimcha sozlash kerak emas.
+
+Cron endpoint `VERCEL_CRON_SECRET` orqali himoyalanadi. Agar Vercel Cron header yubormasa, endpoint public ishlamasligi uchun secretni to'g'ri sozlang.
+
+**Muhim:** `vercel.json` fayli repozitoriyda bo'lishi kerak. Agar o'chirib tashlangan bo'lsa, qo'lda qayta yarating yoki Vercel Dashboard → Settings → Cron Jobs bo'limida qo'lda schedule qo'shing:
 
 | Field | Qiymat |
 |---|---|
 | URL | `/api/cron/discipline` |
-| Schedule | `*/30 * * * *` |
+| Schedule | `*/10 * * * *` (har 10 daqiqada) |
 
-Cron endpoint `VERCEL_CRON_SECRET` orqali himoyalanadi. Agar Vercel Cron header yubormasa, endpoint public ishlamasligi uchun secretni to'g'ri sozlang.
+Nima uchun har 10 daqiqada? Chunki uyg'onish (masalan 04:30) va uxlash (masalan 21:40) vaqtlariga aniq tushishi uchun har 30 daqiqada yetarli emas. 10 daqiqalik interval bilan har qanday vaqt oralig'ida trigger qilinadi.
+
+**Eslatma:** Cron ishga tushganda, Vercel Logs ichida `/api/cron/discipline` GET so'rovlari ko'rinadi. Xato bo'lsa `error` maydoni bilan 500 qaytadi va `console.error` xabarlari chiqadi.
 
 ## Foydali Komandalar
 

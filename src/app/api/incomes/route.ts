@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { incomes } from "@/db/schema";
+import { incomes, cardTransactions, cards } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
+import { sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -13,17 +14,36 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
+  const cardId = body.cardId ? Number(body.cardId) : null;
+  const amount = String(parseMoneyInput(body.amount));
+
   const [created] = await db
     .insert(incomes)
     .values({
       title: body.title,
-      amount: String(parseMoneyInput(body.amount)),
+      amount,
       source: body.source || "other",
       date: body.date,
       paymentType: body.paymentType || "cash",
-      cardId: body.cardId ? Number(body.cardId) : null,
+      cardId,
     })
     .returning();
+
+  // Agar karta tanlangan bo'lsa, karta balance ga qo'shamiz
+  if (cardId) {
+    await db
+      .update(cards)
+      .set({ balance: sql`${cards.balance} + ${Number(amount)}` })
+      .where(eq(cards.id, cardId));
+    await db.insert(cardTransactions).values({
+      cardId,
+      date: body.date,
+      type: "in",
+      amount,
+      description: `Kirim: ${body.title}`,
+    });
+  }
+
   return NextResponse.json(created);
 }
 
