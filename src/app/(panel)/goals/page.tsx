@@ -147,7 +147,8 @@ export default function GoalsPage() {
 
   async function createGoal(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const cardIdRaw = fd.get("cardId") as string;
     await fetch("/api/goals", {
       method: "POST",
@@ -160,7 +161,7 @@ export default function GoalsPage() {
       }),
     });
     setGoalModal(false);
-    e.currentTarget.reset();
+    form.reset();
     load();
   }
 
@@ -173,7 +174,8 @@ export default function GoalsPage() {
   async function addFundsToGoal(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!addFundsGoal) return;
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const amt = parseMoneyInput(fd.get("amount"));
     const description = (fd.get("description") as string)?.trim() || undefined;
     try {
@@ -201,7 +203,7 @@ export default function GoalsPage() {
             : "Maqsad kartasiga qo'shildi.")
       );
       setAddFundsGoal(null);
-      e.currentTarget.reset();
+      form.reset();
       load();
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
@@ -210,7 +212,8 @@ export default function GoalsPage() {
 
   async function saveCard(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const body: Record<string, unknown> = {
       name: fd.get("name"),
       bank: fd.get("bank") || null,
@@ -236,7 +239,7 @@ export default function GoalsPage() {
     }
     setCardModal(false);
     setEditingCard(null);
-    e.currentTarget.reset();
+    form.reset();
     load();
   }
 
@@ -254,7 +257,8 @@ export default function GoalsPage() {
   async function topUpCard(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!topUpModal) return;
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const amt = parseMoneyInput(fd.get("amount"));
     try {
       const res = await fetch("/api/card-transactions", {
@@ -274,7 +278,7 @@ export default function GoalsPage() {
       }
       alert(`✅ ${formatCurrency(amt)} «${topUpModal.cardName}» kartasiga qo'shildi`);
       setTopUpModal(null);
-      e.currentTarget.reset();
+      form.reset();
       load();
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
@@ -284,7 +288,8 @@ export default function GoalsPage() {
   async function cardSpending(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!cardSpendingModal) return;
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const amt = parseMoneyInput(fd.get("amount"));
     try {
       const res = await fetch("/api/card-transactions", {
@@ -304,7 +309,7 @@ export default function GoalsPage() {
       }
       alert(`✅ ${formatCurrency(amt)} «${cardSpendingModal.cardName}» kartasidan chiqarildi`);
       setCardSpendingModal(null);
-      e.currentTarget.reset();
+      form.reset();
       load();
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
@@ -313,7 +318,8 @@ export default function GoalsPage() {
 
   async function transfer(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const fromCardId = Number(fd.get("fromCardId"));
     const toCardId = Number(fd.get("toCardId"));
     const amount = parseMoneyInput(fd.get("amount"));
@@ -335,7 +341,7 @@ export default function GoalsPage() {
       }
       alert("✅ Transfer amalga oshirildi");
       setTransferModal(false);
-      e.currentTarget.reset();
+      form.reset();
       load();
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));

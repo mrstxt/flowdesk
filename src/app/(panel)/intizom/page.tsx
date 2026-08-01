@@ -169,7 +169,8 @@ export default function IntizomPage() {
 
   async function addTask(e: React.FormEvent<HTMLFormElement>, date: string) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -179,7 +180,7 @@ export default function IntizomPage() {
         category: fd.get("category") || "personal",
       }),
     });
-    e.currentTarget.reset();
+    form.reset();
     load();
   }
 

@@ -184,7 +184,8 @@ export default function OrdersPage() {
 
   async function createOrder(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
 
     try {
       await fetch("/api/orders", {
@@ -200,7 +201,7 @@ export default function OrdersPage() {
       });
 
       setModal(false);
-      e.currentTarget.reset();
+      form.reset();
       await load();
     } catch (error) {
       console.error("Failed to create order:", error);

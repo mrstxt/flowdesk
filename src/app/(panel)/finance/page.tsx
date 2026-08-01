@@ -254,7 +254,8 @@ export default function FinancePage() {
 
   async function addIncome(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const cardIdRaw = fd.get("cardId") as string;
     await fetch("/api/incomes", {
       method: "POST",
@@ -269,13 +270,14 @@ export default function FinancePage() {
       }),
     });
     setModal(null);
-    e.currentTarget.reset();
+    form.reset();
     load();
   }
 
   async function addExpense(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     await fetch("/api/expenses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -287,7 +289,7 @@ export default function FinancePage() {
       }),
     });
     setModal(null);
-    e.currentTarget.reset();
+    form.reset();
     load();
   }
 
