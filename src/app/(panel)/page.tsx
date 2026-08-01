@@ -136,6 +136,21 @@ export default function Dashboard() {
   // Shu pul asosiy kartada to'planadi, shuning uchun kartada umumiy
   // summa ko'rinishi kerak (ichki goal transferlar kirmaydi).
   const totalProfitAll = totalProfit(incomes, expenses);
+  // O'tgan oy sof foydasi — asosiy kartadagi pulning bir qismi sifatida
+  // alohida ko'rsatiladi (masalan: avgustda 20.000 qolgan bo'lsa).
+  const prevMonth = new Date();
+  prevMonth.setDate(1);
+  prevMonth.setMonth(prevMonth.getMonth() - 1);
+  const prevKey = `${prevMonth.getFullYear()}-${String(
+    prevMonth.getMonth() + 1
+  ).padStart(2, "0")}`;
+  const prevIn = incomes
+    .filter((i) => i.date.startsWith(prevKey) && i.source !== "goal")
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  const prevOut = expenses
+    .filter((e) => e.date.startsWith(prevKey))
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+  const prevNet = prevIn - prevOut;
   const activeOrders = orders.filter(
     (o) => o.stage !== "confirmed" && !o.archived
   );
@@ -324,9 +339,13 @@ export default function Dashboard() {
                   </span>
                 )}
               </div>
-              <div className="text-[11px] text-slate-500 mb-0.5">Qoldiq</div>
+              <div className="text-[11px] text-slate-500 mb-0.5">
+                {c.type === "primary" ? "Asosiy kartadagi pul" : "Qoldiq"}
+              </div>
               <div className="font-display text-2xl font-extrabold text-slate-900 tabular-nums">
-                {formatCurrency(c.balance)}
+                {formatCurrency(
+                  c.type === "primary" ? totalProfitAll : c.balance
+                )}
               </div>
               {c.type === "primary" && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -336,7 +355,7 @@ export default function Dashboard() {
                   </span>
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
                     <Wallet className="w-3 h-3" />
-                    Umumiy foyda: {formatCurrency(totalProfitAll)}
+                    O'tgan oy: {formatCurrency(prevNet)}
                   </span>
                 </div>
               )}
