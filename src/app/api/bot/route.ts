@@ -89,9 +89,18 @@ async function sendMessage(
     }
     const data = await res.json();
     const messageId = data?.result?.message_id as number | undefined;
-    // Wizard davom etayotgan bo'lsa — bot xabarini ham tozalash ro'yxatiga
-    // qo'shamiz (keyinchalik chatni tozalash uchun).
-    if (typeof messageId === "number") trackMessage(chatId, messageId);
+    if (typeof messageId === "number") {
+      const postIds = postFinishDeletes.get(chatId);
+      if (postIds && !text.startsWith("❌")) {
+        // Wizard yakunida yuborilgan tasdiqlash xabari — ham o'chiriladi.
+        // ❌ bilan boshlanadigan xatoliklar esa qoldiriladi (foydalanuvchi ko'rishi kerak).
+        postIds.push(messageId);
+      } else {
+        // Wizard davom etayotgan bo'lsa — bot xabarini ham tozalash
+        // ro'yxatiga qo'shamiz (keyinchalik chatni tozalash uchun).
+        trackMessage(chatId, messageId);
+      }
+    }
     return typeof messageId === "number" ? messageId : null;
   } catch (e) {
     console.error("sendMessage error:", e);
@@ -133,7 +142,7 @@ function trackMessage(chatId: number, messageId: number) {
 
 // Wizard tugagach (yoki bekor qilinganda): barcha oraliq xabarlarni
 // (savollar + javoblar) chatdan o'chiramiz va holatni tozalaymiz.
-async function finishWizard(chatId: number) {
+async function finishWizard(chatId: number, opts?: { keepFollowing?: boolean }) {
   const st = userState.get(chatId);
   if (st) {
     let ids: number[] = [];
@@ -146,6 +155,10 @@ async function finishWizard(chatId: number) {
     for (const id of ids) await deleteMessage(chatId, id);
   }
   userState.delete(chatId);
+  // Wizard tugagach yuboriladigan yakuniy tasdiqlash xabarlari ham
+  // o'chirilishi uchun chatni "post-finish" rejimiga o'tkazamiz.
+  // keepFollowing=true bo'lsa (masalan /menu, /bekor) keyingi xabarlar saqlanadi.
+  if (!opts?.keepFollowing) postFinishDeletes.set(chatId, []);
 }
 
 // Yangi wizard state yaratishda eski pendingDelete ro'yxatini saqlaymiz —
@@ -154,7 +167,8 @@ function setWizardState(
   chatId: number,
   mode: string,
   step: number,
-  data: Record<string, string | null> = {}
+  data: Record<string, string | null> = {},
+  triggerMessageId?: number
 ) {
   const prev = userState.get(chatId);
   let pendingDelete: string | null = null;
@@ -167,6 +181,8 @@ function setWizardState(
   }
   if (pendingDelete) data.pendingDelete = pendingDelete;
   userState.set(chatId, { mode, step, data });
+  // Wizardni boshlagan foydalanuvchi xabari ham tozalanishi uchun
+  if (triggerMessageId) trackMessage(chatId, triggerMessageId);
 }
 
 const MAIN_KEYBOARD = {
@@ -223,6 +239,10 @@ const userState = new Map<number, UserState>();
 // o'chirish amalini bajaramiz. Aks holda vaqtinchalik xatolikda
 // mavjud holatni yo'qotib qo'yishimiz mumkin.
 const stateExistsInDb = new Set<number>();
+
+// Wizard tugagach yuboriladigan yakuniy tasdiqlash xabarlari ham
+// chatdan o'chirilishi uchun ro'yxat (chatId -> message id lar).
+const postFinishDeletes = new Map<number, number[]>();
 
 async function loadUserState(chatId: number): Promise<void> {
   try {
@@ -1582,13 +1602,17 @@ async function handleCallback(
 
 /* ── Text command handlers ── */
 
-async function handleCommand(chatId: number, text: string) {
+async function handleCommand(
+  chatId: number,
+  text: string,
+  triggerMessageId?: number
+) {
   const [cmdRaw, ...rest] = text.split(/\s+/);
   const cmd = cmdRaw.split("@")[0].toLowerCase();
   const args = rest.join(" ");
 
   if (BUTTON_TO_CMD[text]) {
-    await handleCommand(chatId, BUTTON_TO_CMD[text]);
+    await handleCommand(chatId, BUTTON_TO_CMD[text], triggerMessageId);
     return;
   }
 
@@ -1604,7 +1628,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/menu") {
-      await finishWizard(chatId);
+      await finishWizard(chatId, { keepFollowing: true });
       await sendMessage(chatId, "🏠 <b>Asosiy menyu</b>", {
         reply_markup: MAIN_KEYBOARD,
       });
@@ -1612,7 +1636,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/uyg_onish") {
-      setWizardState(chatId, "set_wake_time", 1);
+      setWizardState(chatId, "set_wake_time", 1, {}, triggerMessageId);
       const settingsMap = await loadSettingsMap();
       const cur = getSetting(settingsMap, "wake_time", "04:30");
       await sendMessage(
@@ -1624,7 +1648,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/uxlash") {
-      setWizardState(chatId, "set_sleep_time", 1);
+      setWizardState(chatId, "set_sleep_time", 1, {}, triggerMessageId);
       const settingsMap = await loadSettingsMap();
       const cur = getSetting(settingsMap, "sleep_time", "21:40");
       await sendMessage(
@@ -1636,7 +1660,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/bekor") {
-      await finishWizard(chatId);
+      await finishWizard(chatId, { keepFollowing: true });
       await sendMessage(chatId, "❌ Bekor qilindi.", {
         reply_markup: MAIN_KEYBOARD,
       });
@@ -1644,7 +1668,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/buyurtma_qilish") {
-      setWizardState(chatId, "order", 1);
+      setWizardState(chatId, "order", 1, {}, triggerMessageId);
       await sendMessage(
         chatId,
         "🆕 <b>Yangi buyurtma qo'shish</b>\n\n1️⃣ Buyurtma nomini yozing:",
@@ -1654,7 +1678,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/chiqim_qilish") {
-      setWizardState(chatId, "expense", 1);
+      setWizardState(chatId, "expense", 1, {}, triggerMessageId);
       await sendMessage(
         chatId,
         "💸 <b>Chiqim qo'shish</b>\n\n1️⃣ Chiqim nomini yozing:",
@@ -1664,7 +1688,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/kirim_qilish") {
-      setWizardState(chatId, "income", 1);
+      setWizardState(chatId, "income", 1, {}, triggerMessageId);
       await sendMessage(
         chatId,
         "💰 <b>Kirim qo'shish</b>\n\n1️⃣ Kirim nomini yozing:",
@@ -1674,7 +1698,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/kitob_qilish") {
-      setWizardState(chatId, "book", 1);
+      setWizardState(chatId, "book", 1, {}, triggerMessageId);
       await sendMessage(
         chatId,
         "📚 <b>Kitob qo'shish</b>\n\n1️⃣ Kitob nomini yozing:",
@@ -1684,7 +1708,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/video_qilish") {
-      setWizardState(chatId, "video", 1);
+      setWizardState(chatId, "video", 1, {}, triggerMessageId);
       await sendMessage(
         chatId,
         "🎬 <b>Video qo'shish</b>\n\n1️⃣ YouTube havolasini yuboring:",
@@ -1694,7 +1718,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/maqsad_qilish") {
-      setWizardState(chatId, "goal", 1);
+      setWizardState(chatId, "goal", 1, {}, triggerMessageId);
       await sendMessage(
         chatId,
         "🎯 <b>Maqsad yaratish</b>\n\n1️⃣ Maqsad nomini yozing:",
@@ -2330,11 +2354,17 @@ export async function POST(req: Request) {
 
       if (!msg.text) return NextResponse.json({ ok: true });
 
-      await handleCommand(chatId, msg.text.trim());
+      await handleCommand(chatId, msg.text.trim(), msg.message_id);
     } finally {
       // Wizard holatini DB ga saqlaymiz (keyingi so'rovda tiklash uchun)
       if (chatId != null) {
         await saveUserState(chatId);
+        // Wizard yakunidagi tasdiqlash xabarlarini ham o'chirib tashlaymiz
+        const postIds = postFinishDeletes.get(chatId);
+        if (postIds && postIds.length > 0) {
+          for (const id of postIds) await deleteMessage(chatId, id);
+        }
+        postFinishDeletes.delete(chatId);
       }
     }
   } catch (e) {
