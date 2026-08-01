@@ -78,33 +78,50 @@ function getTashkentTime() {
 }
 
 /**
- * Cron job: vercel.json dagi bir nechta kunlik schedule'lar orqali ishlaydi
- * (Hobby planda 10 daqiqalik interval ishlamaydi — kunga 1 marta cheklangan).
+ * REAL-TIME ogohlantirishlar (Toshkent vaqti bo'yicha)
+ * ─────────────────────────────────────────────────────
+ * Vercel Hobby rejasida cron kuniga 1 marta cheklangan, shuning uchun
+ * asosiy "harakatlantiruvchi" sifatida bepul tashqi xizmat ishlatiladi:
  *
- * Schedule'lar (UTC -> Toshkent):
- * - 23:30 UTC -> 04:30 Toshkent: uyg'onish eslatmasi
- * - 05:00 UTC -> 10:00 Toshkent: kechikkan uyg'onish uchun qayta urinish
- * - 15:00 UTC -> 20:00 Toshkent: kunlik hisobot
- * - 16:40 UTC -> 21:40 Toshkent: uxlash eslatmasi
- * - 18:00 UTC -> 23:00 Toshkent: kechikkan uxlash uchun qayta urinish
+ *   cron-job.org  →  har 5 daqiqada  /api/cron/discipline?tick=SECRET
  *
- * Har bir cron yuganda barcha shartlar tekshiriladi; `bot_reminders`
- * jadvali orqali xabar kuniga faqat 1 marta yuboriladi.
+ * Har bir chaqiruvda hozirgi Toshkent vaqti ANIQ belgilangan vaqtga
+ * solishtiriladi (masalan uxlash 20:00 bo'lsa → 20:00 da yuboriladi).
+ * 5 daqiqalik polling tufayli eslatma belgilangan vaqtga ±5 daqiqa
+ * ichida real-time yuboriladi. Qo'shimcha +59 daqiqalik oyna — agar
+ * bitta tick o'tkazib yuborilsa ham xabar yo'qolmaydi (masalan Vercel
+ * cron backup sifatida ishlasa). `bot_reminders` jadvali kuniga faqat
+ * 1 marta yuborilishini kafolatlaydi.
+ *
+ * Vercel'ning vercel.json dagi kundalik crons hali ham backup sifatida
+ * qoladi — ular ham xuddi shu aniq-vaqt mantiqi bilan ishlaydi.
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const force =
     searchParams.get("force") === "true" || searchParams.get("test") === "true";
 
-  // Vercel Cron secret (agar force test bo'lmasa va header berilsa tekshiramiz)
+  // ── Auth ──
+  // 1) Vercel Cron: x-vercel-cron-secret header
+  // 2) cron-job.org: ?tick=SECRET yoki x-cron-secret header
+  // 3) Hech qanday secret konfiguratsiya qilinmagan bo'lsa — ochiq (dev rejim)
+  // force ham auth'dan o'tishi shart — aks holda har kim spam yuborishi mumkin.
   const headerSecret = req.headers.get("x-vercel-cron-secret");
-  if (
-    !force &&
-    process.env.VERCEL_CRON_SECRET &&
-    headerSecret &&
-    headerSecret !== process.env.VERCEL_CRON_SECRET
-  ) {
-    return NextResponse.json({ ok: true });
+  const cronSecretHeader = req.headers.get("x-cron-secret");
+  const tickParam = searchParams.get("tick") || "";
+
+  const hasVercelSecret = !!process.env.VERCEL_CRON_SECRET;
+  const hasTickSecret = !!process.env.CRON_JOB_SECRET;
+  const isVercelCron =
+    hasVercelSecret && headerSecret === process.env.VERCEL_CRON_SECRET;
+  const isTick =
+    hasTickSecret &&
+    (tickParam === process.env.CRON_JOB_SECRET ||
+      cronSecretHeader === process.env.CRON_JOB_SECRET);
+  const noSecrets = !hasVercelSecret && !hasTickSecret;
+  const authorized = noSecrets || isVercelCron || isTick;
+  if (!authorized) {
+    return NextResponse.json({ ok: false }, { status: 401 });
   }
 
   if (!TOKEN) {
@@ -115,8 +132,11 @@ export async function GET(req: Request) {
   if (!chatIdStr) {
     return NextResponse.json({ ok: true, error: "no chat id" });
   }
-  const chatId = Number(chatIdStr.split(",")[0]);
-  if (!chatId) {
+  const chatIds = chatIdStr
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (chatIds.length === 0) {
     return NextResponse.json({ ok: true, error: "invalid chat id" });
   }
 
@@ -147,21 +167,20 @@ export async function GET(req: Request) {
 
     let messagesSent = 0;
 
-    // ── Wake up reminder (eng yaqin ertalabki cron da) ──
+    // Eslatma vaqti kelganini tekshirish:
+    // - cron-job.org (tick): ANIQ vaqt oynasi (+59 daqiqa) — real-time (±5 daqiqa)
+    // - Vercel cron (backup): vaqt o'tib ketgan bo'lsa ham yuboriladi (catch-up) —
+    //   shunda cron-job.org ishlamay qolsa ham eslatmalar yo'qolmaydi
+    // - force: hammasini yuboradi (test)
+    const reminderDue = (targetMin: number): boolean => {
+      if (force) return true;
+      if (isVercelCron) return nowMin >= targetMin;
+      return nowMin >= targetMin && nowMin <= targetMin + 59;
+    };
+
+    // ── Wake up reminder (ANIQ wakeTime da) ──
     const wakeMin = safeMinutes(wakeTime, 4 * 60 + 30);
-    // Vercel Hobby: kuniga 2 ta ertalabki cron bor (04:30 va 10:00 Toshkent).
-    // Uyg'onish vaqtiga eng yaqin cron tanlanadi — aks holda 06:00-09:00 gacha
-    // bo'lgan uyg'onishlar 4+ soat kechikib yuborilardi.
-    const WAKE_CRON_EARLY = 4 * 60 + 30; // 04:30 Toshkent
-    const WAKE_CRON_LATE = 10 * 60; // 10:00 Toshkent
-    const wakeCronMin =
-      wakeMin <= WAKE_CRON_EARLY + (WAKE_CRON_LATE - WAKE_CRON_EARLY) / 2
-        ? WAKE_CRON_EARLY
-        : WAKE_CRON_LATE;
-    // ±59: Vercel Hobby cronni soat oralig'ida ishga tushiradi
-    const inWakeWindow =
-      nowMin >= wakeCronMin - 59 && nowMin <= wakeCronMin + 59;
-    if (force || inWakeWindow) {
+    if (reminderDue(wakeMin)) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -171,22 +190,27 @@ export async function GET(req: Request) {
         .limit(1);
 
       if (force || exists.length === 0) {
-        const sent = await botSend("sendMessage", {
-          chat_id: chatId,
-          text: `☀️ <b>SALOM! ${wakeTime} da turing!</b>\n\nYengillik bilan ko'zni oching, birinchi ishi suv iching 💧`,
-          parse_mode: "HTML",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "✅ Ha, turdim!", callback_data: "woke_yes" },
-                { text: "😴 Uxlab qoldim", callback_data: "woke_no" },
+        let anyOk = false;
+        for (const chatId of chatIds) {
+          const sent = await botSend("sendMessage", {
+            chat_id: chatId,
+            text: `☀️ <b>SALOM! ${wakeTime} da turing!</b>\n\nYengillik bilan ko'zni oching, birinchi ishi suv iching 💧`,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ Ha, turdim!", callback_data: "woke_yes" },
+                  { text: "😴 Uxlab qoldim", callback_data: "woke_no" },
+                ],
               ],
-            ],
-          },
-        });
+            },
+          });
+          if (sent.ok) anyOk = true;
+          else console.error(`wake_up (${chatId}) yuborilmadi:`, sent.error);
+        }
         // Xabar muvaffaqiyatli yuborilgandagina "sent" deb belgilaymiz.
-        // Aks holda keyingi cron da qayta uriniladi.
-        if (sent.ok) {
+        // Aks holda keyingi tick/cron da qayta uriniladi.
+        if (anyOk) {
           if (exists.length === 0) {
             await db.insert(botReminders).values({
               routineId: null,
@@ -196,16 +220,14 @@ export async function GET(req: Request) {
             });
           }
           messagesSent++;
-        } else {
-          console.error("wake_up reminder yuborilmadi:", sent.error);
         }
       }
     }
 
-    // ── Routine reminders ──
+    // ── Routine reminders (ANIQ r.time da) ──
     for (const r of allRoutines) {
       const rMin = safeMinutes(r.time, 0);
-      if (force || nowMin >= rMin) {
+      if (reminderDue(rMin)) {
         const exists = await db
           .select({ id: botReminders.id })
           .from(botReminders)
@@ -216,25 +238,34 @@ export async function GET(req: Request) {
 
         if (force || exists.length === 0) {
           const endInfo = r.endTime ? ` (deadline: ${escapeHtml(r.endTime)})` : "";
-          const sent = await botSend("sendMessage", {
-            chat_id: chatId,
-            text: `⏰ <b>${escapeHtml(r.time)} — ${escapeHtml(
-              r.title
-            )}</b>${endInfo}\n\nVaqti keldi! Boshlang 💪`,
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "✅ Bajarildi", callback_data: `routine_yes_${r.id}` }],
-                [
-                  {
-                    text: "⏭ Hozircha emas",
-                    callback_data: `routine_no_${r.id}`,
-                  },
+          let anyOk = false;
+          for (const chatId of chatIds) {
+            const sent = await botSend("sendMessage", {
+              chat_id: chatId,
+              text: `⏰ <b>${escapeHtml(r.time)} — ${escapeHtml(
+                r.title
+              )}</b>${endInfo}\n\nVaqti keldi! Boshlang 💪`,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: "✅ Bajarildi", callback_data: `routine_yes_${r.id}` }],
+                  [
+                    {
+                      text: "⏭ Hozircha emas",
+                      callback_data: `routine_no_${r.id}`,
+                    },
+                  ],
                 ],
-              ],
-            },
-          });
-          if (sent.ok) {
+              },
+            });
+            if (sent.ok) anyOk = true;
+            else
+              console.error(
+                `routine ${r.id} (${chatId}) yuborilmadi:`,
+                sent.error
+              );
+          }
+          if (anyOk) {
             if (exists.length === 0) {
               await db.insert(botReminders).values({
                 routineId: r.id,
@@ -244,15 +275,13 @@ export async function GET(req: Request) {
               });
             }
             messagesSent++;
-          } else {
-            console.error(`routine ${r.id} reminder yuborilmadi:`, sent.error);
           }
         }
       }
     }
 
     // ── 20:00 — bugungi natija + ertangi reja kiritish so'rovi ──
-    if (force || (nowMin >= 20 * 60 - 45 && nowMin < 24 * 60)) {
+    if (reminderDue(20 * 60)) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -286,32 +315,38 @@ export async function GET(req: Request) {
             ? "👏 Yaxshi kun! Asosiy qismi bajarildi."
             : "💪 Ertaga yanada kuchliroq bo'ling.";
 
-        const sent = await botSend("sendMessage", {
-          chat_id: chatId,
-          text:
-            `🌆 <b>KUN YAKUNI (20:00)</b>\n\n` +
-            `✅ Rejalar: <b>${doneRoutines}/${totalRoutines}</b> (${routinePct}%)\n` +
-            `📋 Ishlar: <b>${doneTasks}/${totalTasks}</b> (${taskPct}%)\n\n` +
-            `${summary}\n\n` +
-            `📌 <b>Ertangi kun uchun reja va ishlarni</b> shu yerga yozib qo'ying — ertalab uyg'onganda ko'rasiz.\n\n` +
-            `💡 Quyidagi tugmalar orqali qo'shing:`,
-          parse_mode: "HTML",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: "📋 Ertangi ish qo'shish",
-                  callback_data: "tomorrow_task",
-                },
-                {
-                  text: "🎯 Ertangi reja",
-                  callback_data: "tomorrow_routine",
-                },
+        let anyOk = false;
+        for (const chatId of chatIds) {
+          const sent = await botSend("sendMessage", {
+            chat_id: chatId,
+            text:
+              `🌆 <b>KUN YAKUNI (20:00)</b>\n\n` +
+              `✅ Rejalar: <b>${doneRoutines}/${totalRoutines}</b> (${routinePct}%)\n` +
+              `📋 Ishlar: <b>${doneTasks}/${totalTasks}</b> (${taskPct}%)\n\n` +
+              `${summary}\n\n` +
+              `📌 <b>Ertangi kun uchun reja va ishlarni</b> shu yerga yozib qo'ying — ertalab uyg'onganda ko'rasiz.\n\n` +
+              `💡 Quyidagi tugmalar orqali qo'shing:`,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: "📋 Ertangi ish qo'shish",
+                    callback_data: "tomorrow_task",
+                  },
+                  {
+                    text: "🎯 Ertangi reja",
+                    callback_data: "tomorrow_routine",
+                  },
+                ],
               ],
-            ],
-          },
-        });
-        if (sent.ok) {
+            },
+          });
+          if (sent.ok) anyOk = true;
+          else
+            console.error(`evening report (${chatId}) yuborilmadi:`, sent.error);
+        }
+        if (anyOk) {
           if (exists.length === 0) {
             await db.insert(botReminders).values({
               routineId: null,
@@ -322,15 +357,13 @@ export async function GET(req: Request) {
             });
           }
           messagesSent++;
-        } else {
-          console.error("evening report yuborilmadi:", sent.error);
         }
       }
     }
 
-    // ── Sleep reminder (uxlash vaqti, faqat kechqurun) ──
+    // ── Sleep reminder (ANIQ sleepTime da, faqat kechqurun) ──
     const sleepMin = safeMinutes(sleepTime, 21 * 60 + 40);
-    if (force || (nowMin >= sleepMin - 45 && nowMin >= 18 * 60)) {
+    if (reminderDue(sleepMin) && nowMin >= 18 * 60) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
@@ -340,57 +373,62 @@ export async function GET(req: Request) {
         .limit(1);
 
       if (force || exists.length === 0) {
-        const sent = await botSend("sendMessage", {
-          chat_id: chatId,
-          text:
-            `🌙 <b>Yotish vaqti: ${sleepTime}</b>\n\n` +
-            `📝 <b>Ertangi kun uchun</b> reja va ishlarni shu yerga yozib qo'ying — ertalab uyg'onganda ko'rasiz.\n\n` +
-            `📊 <b>Bugungi natijani</b> ham belgilab qo'ying:\n` +
-            `1️⃣ Bugungi ishlarni bajardingizmi?\n` +
-            `2️⃣ Bugungi kirim-chiqimni yozdingizmi?`,
-          parse_mode: "HTML",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: "📋 Ertangi ish",
-                  callback_data: "tomorrow_task",
-                },
-                {
-                  text: "🎯 Ertangi reja",
-                  callback_data: "tomorrow_routine",
-                },
+        let anyOk = false;
+        for (const chatId of chatIds) {
+          const sent = await botSend("sendMessage", {
+            chat_id: chatId,
+            text:
+              `🌙 <b>Yotish vaqti: ${sleepTime}</b>\n\n` +
+              `📝 <b>Ertangi kun uchun</b> reja va ishlarni shu yerga yozib qo'ying — ertalab uyg'onganda ko'rasiz.\n\n` +
+              `📊 <b>Bugungi natijani</b> ham belgilab qo'ying:\n` +
+              `1️⃣ Bugungi ishlarni bajardingizmi?\n` +
+              `2️⃣ Bugungi kirim-chiqimni yozdingizmi?`,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: "📋 Ertangi ish",
+                    callback_data: "tomorrow_task",
+                  },
+                  {
+                    text: "🎯 Ertangi reja",
+                    callback_data: "tomorrow_routine",
+                  },
+                ],
+                [
+                  {
+                    text: "✅ Ha, bajardim",
+                    callback_data: "result_done_yes",
+                  },
+                  {
+                    text: "❌ Yo'q",
+                    callback_data: "result_done_no",
+                  },
+                ],
+                [
+                  {
+                    text: "✅ Hisob yozdim",
+                    callback_data: "result_finance_yes",
+                  },
+                  {
+                    text: "❌ Yozmadim",
+                    callback_data: "result_finance_no",
+                  },
+                ],
+                [
+                  {
+                    text: "🌙 Hammasi tayyor, yotaman",
+                    callback_data: "sleep_ack",
+                  },
+                ],
               ],
-              [
-                {
-                  text: "✅ Ha, bajardim",
-                  callback_data: "result_done_yes",
-                },
-                {
-                  text: "❌ Yo'q",
-                  callback_data: "result_done_no",
-                },
-              ],
-              [
-                {
-                  text: "✅ Hisob yozdim",
-                  callback_data: "result_finance_yes",
-                },
-                {
-                  text: "❌ Yozmadim",
-                  callback_data: "result_finance_no",
-                },
-              ],
-              [
-                {
-                  text: "🌙 Hammasi tayyor, yotaman",
-                  callback_data: "sleep_ack",
-                },
-              ],
-            ],
-          },
-        });
-        if (sent.ok) {
+            },
+          });
+          if (sent.ok) anyOk = true;
+          else console.error(`sleep (${chatId}) yuborilmadi:`, sent.error);
+        }
+        if (anyOk) {
           if (exists.length === 0) {
             await db.insert(botReminders).values({
               routineId: null,
@@ -400,8 +438,6 @@ export async function GET(req: Request) {
             });
           }
           messagesSent++;
-        } else {
-          console.error("sleep reminder yuborilmadi:", sent.error);
         }
       }
     }

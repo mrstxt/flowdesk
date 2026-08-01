@@ -111,7 +111,8 @@ ADMIN_PASSWORD="siz-kiritadigan-parol"
 | `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | @BotFather bergan bot token |
 | `TELEGRAM_ADMIN_CHAT_ID` | `123456789` | Sizning Telegram chat ID. @userinfobot orqali olinadi |
 | `BOT_WEBHOOK_SECRET` | `random-webhook-secret` | Telegram webhook so'rovlarini tekshirish uchun maxfiy satr |
-| `VERCEL_CRON_SECRET` | `random-cron-secret` | Cron endpointni himoya qilish uchun maxfiy satr |
+| `VERCEL_CRON_SECRET` | `random-cron-secret` | Vercel Cron endpointini himoya qilish uchun maxfiy satr |
+| `CRON_JOB_SECRET` | `random-cron-job-secret` | cron-job.org real-time tekshiruvlarini himoya qilish uchun maxfiy satr (`?tick=` parametri) |
 
 ### Local Postgres Misol
 
@@ -204,9 +205,43 @@ Masalan:
 https://api.telegram.org/bot123456:ABC/setWebhook?url=https://flowdesk.vercel.app/api/bot&secret_token=my-secret
 ```
 
-## Cron Sozlash
+## Cron Sozlash (Real-Time Ogohlantirishlar)
 
-`vercel.json` faylida cron schedule allaqachon sozlangan. **Muhim:** Vercel Hobby (bepul) planda cron kuniga ko'pi bilan 1 marta ishlaydi — `*/10 * * * *` kabi tez-tez ishlaydigan schedule Hobby planda **deploy xatosi beradi** yoki ishlamaydi. Shu sababli bir nechta kunlik schedule ishlatilgan (har biri kunga 1 marta, Toshkent vaqtiga moslangan):
+Ogohlantirishlar (uyg'onish, uxlash, rejalar) **Toshkent vaqti bo'yicha real-time** yuboriladi. Endi ular cronning qat'iy vaqtiga bog'liq emas — **belgilangan vaqt kelishi bilan** xabar ketadi (masalan uxlash 20:00 qilingan bo'lsa, Toshkentda 20:00 bo'lishi bilan).
+
+### Qanday ishlaydi
+
+1. **Asosiy haydovchi — [cron-job.org](https://cron-job.org)** (bepul): har **5 daqiqada** quyidagi URL'ni chaqiradi:
+
+```text
+https://SIZNING_DOMEN/api/cron/discipline?tick=CRON_JOB_SECRET
+```
+
+2. Endpoint har safar Toshkent vaqtini hisoblab, har bir eslatma uchun belgilangan vaqtga solishtiradi. Vaqt keldimi — xabar yuboriladi (±5 daqiqa aniqlik).
+
+3. `bot_reminders` jadvali kuniga har bir eslatma **faqat 1 marta** yuborilishini kafolatlaydi (takrorlanmaydi).
+
+4. `vercel.json` dagi kunlik crons endi **backup** vazifasini bajaradi — agar cron-job.org biror sabab bilan ishlamay qolsa ham eslatmalar yo'qolmaydi.
+
+### cron-job.org sozlash (2 daqiqa)
+
+1. `CRON_JOB_SECRET` uchun uzun random satr yarating va Vercel env'ga qo'ying (masalan `8f3a...uzun`).
+
+2. [cron-job.org](https://cron-job.org) da bepul akkaunt oching.
+
+3. **Create cronjob** tugmasini bosing va to'ldiring:
+   - **Title:** `FlowDesk reminders`
+   - **URL:** `https://SIZNING_DOMEN/api/cron/discipline?tick=SIZNING_CRON_JOB_SECRET`
+   - **Execution schedule:** har 5 daqiqa (`*/5 * * * *`)
+   - **HTTP method:** GET (default)
+
+4. **Create** tugmasini bosing — ishlay boshlaydi.
+
+Test: endpointni brauzerda `https://SIZNING_DOMEN/api/cron/discipline?force=true&tick=SIZNING_CRON_JOB_SECRET` ochib, barcha eslatmalar darhol yuborilishini tekshirishingiz mumkin. (Production'da secretlar o'rnatilgan bo'lsa `force` ham auth'dan o'tishi shart — `tick` parametrini qo'shing. Local'da secretlar bo'lmasa `?force=true` o'zi ham ishlaydi.)
+
+### Vercel Cron (backup)
+
+`vercel.json` faylidagi kunlik crons backup sifatida qoladi. Vercel Hobby (bepul) planda cron kuniga ko'pi bilan 1 marta ishlaydi, shuning uchun bir nechta kunlik schedule ishlatilgan:
 
 ```json
 {
@@ -220,23 +255,9 @@ https://api.telegram.org/bot123456:ABC/setWebhook?url=https://flowdesk.vercel.ap
 }
 ```
 
-Vaqtlar UTC da — Toshkent vaqti bo'yicha mos kelishi:
+Endpoint auth: `VERCEL_CRON_SECRET` (Vercel Cron header) yoki `CRON_JOB_SECRET` (`?tick=` parametri) orqali himoyalanadi. Ikkalasi ham bo'lmasa — dev rejimi (ochiq).
 
-| UTC | Toshkent | Nima yuboriladi |
-|---|---|---|
-| `23:30` | 04:30 | Uyg'onish eslatmasi |
-| `05:00` | 10:00 | Kechikkan uyg'onish uchun qayta urinish |
-| `15:00` | 20:00 | Kunlik hisobot (20:00) |
-| `16:40` | 21:40 | Uxlash eslatmasi |
-| `18:00` | 23:00 | Kechikkan uxlash uchun qayta urinish |
-
-Vercel Project → Settings → Cron Jobs bo'limida avtomatik ko'rinadi. Qo'shimcha sozlash kerak emas.
-
-Cron endpoint `VERCEL_CRON_SECRET` orqali himoyalanadi. Agar Vercel Cron header yubormasa, endpoint public ishlamasligi uchun secretni to'g'ri sozlang.
-
-**Muhim:** `vercel.json` fayli repozitoriyda bo'lishi kerak. Agar o'chirib tashlangan bo'lsa, qo'lda qayta yarating yoki Vercel Dashboard → Settings → Cron Jobs bo'limida qo'lda schedule qo'shing.
-
-**Eslatma:** Cron ishga tushganda, Vercel Logs ichida `/api/cron/discipline` GET so'rovlari ko'rinadi. Xato bo'lsa `error` maydoni bilan 500 qaytadi va `console.error` xabarlari chiqadi. Test qilish uchun `https://SIZNING_DOMEN/api/cron/discipline?force=true` ni ochishingiz mumkin — u barcha eslatmalarni darhol yuboradi.
+**Eslatma:** Cron ishga tushganda, Vercel Logs ichida `/api/cron/discipline` GET so'rovlari ko'rinadi. Xato bo'lsa `error` maydoni bilan 500 qaytadi va `console.error` xabarlari chiqadi.
 
 ## Foydali Komandalar
 
