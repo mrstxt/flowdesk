@@ -36,6 +36,30 @@ export async function getPrimaryCard() {
   return c || null;
 }
 
+/**
+ * Karta uchun REAL mavjud pul miqdori.
+ * - Asosiy karta: umumiy foyda = barcha real kirimlar (goal kirmaydi) − barcha chiqimlar.
+ *   (UI asosiy kartada shu pulni ko'rsatadi, DB balance esa odatda 0 bo'ladi)
+ * - Qo'shimcha kartalar: DB balance.
+ */
+export async function getCardAvailableBalance(cardId: number): Promise<number> {
+  const [c] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, cardId))
+    .limit(1);
+  if (!c) return 0;
+  if (c.type !== "primary") return Number(c.balance);
+  const inRows = await db
+    .select()
+    .from(incomes)
+    .where(ne(incomes.source, "goal"));
+  const outRows = await db.select().from(expenses);
+  const totalIn = inRows.reduce((s, r) => s + Number(r.amount), 0);
+  const totalOut = outRows.reduce((s, r) => s + Number(r.amount), 0);
+  return totalIn - totalOut;
+}
+
 /** Barcha faol kartalarni qaytaradi (arxivlanmagan) */
 export async function getAllActiveCards() {
   return db
@@ -124,9 +148,13 @@ export async function addCardExpense(
     .where(eq(cards.id, cardId))
     .limit(1);
   if (!c) return { ok: false, error: "Karta topilmadi" };
-  const bal = Number(c.balance);
-  if (bal < amount) {
-    return { ok: false, error: `Kartada mablag' yetarli emas (${bal} so'm)` };
+  // Real mavjud pul: asosiy karta = umumiy foyda, qolgani = DB balance
+  const available = await getCardAvailableBalance(cardId);
+  if (available < amount) {
+    return {
+      ok: false,
+      error: `Kartada mablag' yetarli emas (${available} so'm)`,
+    };
   }
   await db
     .update(cards)
@@ -168,10 +196,12 @@ export async function transferBetweenCards(
     .where(eq(cards.id, toCardId))
     .limit(1);
   if (!from || !to) return { ok: false, error: "Karta topilmadi" };
-  if (Number(from.balance) < amount) {
+  // Real mavjud pul (asosiy karta = umumiy foyda)
+  const fromAvailable = await getCardAvailableBalance(fromCardId);
+  if (fromAvailable < amount) {
     return {
       ok: false,
-      error: `«${from.name}» kartasida mablag' yetarli emas (${from.balance} so'm)`,
+      error: `«${from.name}» kartasida mablag' yetarli emas (${fromAvailable} so'm)`,
     };
   }
 
@@ -283,10 +313,12 @@ export async function addFundsToGoal(
   }
 
   // Boshqa kartadan maqsad kartasiga (Masalan: Asosiy kartadan Maqsad kartasiga transaksiyadek o'tkazish):
-  if (Number(srcCard.balance) < amount) {
+  // Real mavjud pul tekshiriladi (asosiy karta = umumiy foyda)
+  const srcAvailable = await getCardAvailableBalance(sourceCardId);
+  if (srcAvailable < amount) {
     return {
       ok: false,
-      error: `«${srcCard.name}» kartasida mablag' yetarli emas (${srcCard.balance} so'm)`,
+      error: `«${srcCard.name}» kartasida mablag' yetarli emas (${srcAvailable} so'm)`,
     };
   }
 

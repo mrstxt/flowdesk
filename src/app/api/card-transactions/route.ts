@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { cardTransactions, cards } from "@/db/schema";
+import { cardTransactions, cards, incomes, expenses } from "@/db/schema";
 import { eq, desc, gte, lte, and, asc } from "drizzle-orm";
 import {
   addCardIncome,
@@ -67,11 +67,28 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      await addCardIncome(
-        Number(cardId),
-        Number(amount),
-        description || "Qo'shimcha kirim"
-      );
+      const desc = description || "Qo'shimcha kirim";
+      const amt = Number(amount);
+      await addCardIncome(Number(cardId), amt, desc);
+
+      // Asosiy karta: UI umumiy foydani (totalProfitAll) ko'rsatadi, shuning
+      // uchun incomes jadvaliga ham yozamiz — aks holda pul ko'rinmaydi.
+      const [card] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, Number(cardId)))
+        .limit(1);
+      if (card && card.type === "primary") {
+        await db.insert(incomes).values({
+          title: desc,
+          amount: String(amt),
+          source: "other",
+          date: new Date().toISOString().slice(0, 10),
+          paymentType: "card",
+          cardId: card.id,
+        });
+      }
+
       return NextResponse.json({ ok: true });
     }
 
@@ -84,14 +101,30 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      const res = await addCardExpense(
-        Number(cardId),
-        Number(amount),
-        description || "Chiqim"
-      );
+      const desc = description || "Chiqim";
+      const amt = Number(amount);
+      const res = await addCardExpense(Number(cardId), amt, desc);
       if (!res.ok) {
         return NextResponse.json({ error: res.error }, { status: 400 });
       }
+
+      // Asosiy karta: UI umumiy foydani (totalProfitAll) ko'rsatadi, shuning
+      // uchun expenses jadvaliga ham yozamiz — aks holda chiqim ko'rinmaydi.
+      const [card] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, Number(cardId)))
+        .limit(1);
+      if (card && card.type === "primary") {
+        await db.insert(expenses).values({
+          title: desc,
+          amount: String(amt),
+          category: "other",
+          date: new Date().toISOString().slice(0, 10),
+          cardId: card.id,
+        });
+      }
+
       return NextResponse.json({ ok: true });
     }
 
