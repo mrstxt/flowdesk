@@ -85,11 +85,18 @@ export async function DELETE(req: Request) {
     .from(incomes)
     .where(eq(incomes.id, id))
     .limit(1);
-  if (existing && existing.cardId) {
+  // source="goal" / "transfer" — ichki o'tkazmalar, balans allaqachon
+  // transferBetweenCards/addFundsToGoal orqali tuzatilgan, qayta tuzatilmaydi.
+  if (
+    existing &&
+    existing.cardId &&
+    existing.source !== "goal" &&
+    existing.source !== "transfer"
+  ) {
     await db
       .update(cards)
       .set({
-        balance: sql`${cards.balance} - ${Number(existing.amount)}`,
+        balance: sql`GREATEST(${cards.balance} - ${Number(existing.amount)}, 0)`,
       })
       .where(eq(cards.id, existing.cardId));
   }

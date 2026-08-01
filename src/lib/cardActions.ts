@@ -158,7 +158,7 @@ export async function addCardExpense(
   }
   await db
     .update(cards)
-    .set({ balance: sql`${cards.balance} - ${amount}` })
+    .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
     .where(eq(cards.id, cardId));
   await db.insert(cardTransactions).values({
     cardId,
@@ -208,10 +208,10 @@ export async function transferBetweenCards(
   const today = new Date().toISOString().slice(0, 10);
   const desc = description || `Transfer: ${from.name} → ${to.name}`;
 
-  // 1. fromCardId dan ayiramiz
+  // 1. fromCardId dan ayiramiz (manfiy bo'lmasligi uchun 0 bilan cheklaymiz)
   await db
     .update(cards)
-    .set({ balance: sql`${cards.balance} - ${amount}` })
+    .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
     .where(eq(cards.id, fromCardId));
   await db.insert(cardTransactions).values({
     cardId: fromCardId,
@@ -346,10 +346,10 @@ export async function addFundsToGoal(
     };
   }
 
-  // 1. Manba kartadan (Asosiy kartadan) pul ayiramiz
+  // 1. Manba kartadan (Asosiy kartadan) pul ayiramiz (manfiy bo'lmasligi uchun)
   await db
     .update(cards)
-    .set({ balance: sql`${cards.balance} - ${amount}` })
+    .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
     .where(eq(cards.id, sourceCardId));
   await db.insert(cardTransactions).values({
     cardId: sourceCardId,
@@ -390,6 +390,19 @@ export async function addFundsToGoal(
     date: today,
     paymentType: "card",
     cardId: goal.cardId,
+  });
+
+  // 5. Asosiy kartadan pul chiqqanini ko'rsatamiz — UI asosiy kartani
+  //    totalProfitAll (incomes − expenses) orqali ko'rsatadi, shuning uchun
+  //    expense yozilmasa pul asosiy kartadan "ayirilmagandek" ko'rinadi.
+  //    (source="goal" income totalProfitAll dan chiqarilgani uchun
+  //    faqat bu expense hisobga olinadi — natija to'g'ri bo'ladi.)
+  await db.insert(expenses).values({
+    title: desc,
+    amount: String(amount),
+    category: "transfer",
+    date: today,
+    cardId: sourceCardId,
   });
 
   return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };

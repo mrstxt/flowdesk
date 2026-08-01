@@ -36,11 +36,11 @@ export async function POST(req: Request) {
     })
     .returning();
 
-  // Asosiy karta balance dan ayiramiz
+  // Asosiy karta balance dan ayiramiz (manfiy bo'lmasligi uchun)
   if (cardId) {
     await db
       .update(cards)
-      .set({ balance: sql`${cards.balance} - ${Number(amount)}` })
+      .set({ balance: sql`GREATEST(${cards.balance} - ${Number(amount)}, 0)` })
       .where(eq(cards.id, cardId));
     await db.insert(cardTransactions).values({
       cardId,
@@ -81,7 +81,9 @@ export async function DELETE(req: Request) {
     .from(expenses)
     .where(eq(expenses.id, id))
     .limit(1);
-  if (existing && existing.cardId) {
+  // category="transfer" — ichki o'tkazma, balans allaqachon tuzatilgan,
+  // qayta tuzatilmaydi (aks holda ikki marta qo'shiladi).
+  if (existing && existing.cardId && existing.category !== "transfer") {
     await db
       .update(cards)
       .set({
