@@ -456,6 +456,24 @@ async function sendCardSelectionButtons(
   });
 }
 
+/**
+ * Karta uchun "💳 {nomi} balansi: ..." qatorini qaytaradi (mavjud bo'lmasa "").
+ * Asosiy karta uchun real umumiy foyda (getCardAvailableBalance), qolgani uchun DB balance.
+ */
+async function cardBalanceLine(cardId: number): Promise<string> {
+  const [fresh] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, cardId))
+    .limit(1);
+  if (!fresh) return "";
+  const bal =
+    fresh.type === "primary"
+      ? await getCardAvailableBalance(fresh.id)
+      : Number(fresh.balance);
+  return `\n💳 ${fresh.name} balansi: ${fmt(bal)}`;
+}
+
 async function findCardByText(text: string) {
   const t = text.trim().toLowerCase();
   if (t === "naqd" || t === "cash" || t === "-") return null;
@@ -666,11 +684,13 @@ async function handleWizardStep(chatId: number, text: string) {
           paymentType: c ? "card" : "cash",
           cardId: c ? c.id : null,
         });
+        // Kartaning yangilangan balansini ko'rsatamiz
+        const balLine = c ? await cardBalanceLine(c.id) : "";
         await sendMessage(
           chatId,
           `<b>📈 Kirim qo'shildi:</b>\n${state.data.title}\n💰 ${fmt(
             Number(state.data.amount)
-          )}\nTo'lov turi: ${cardLabel}`,
+          )}\nTo'lov turi: ${cardLabel}${balLine}`,
           { reply_markup: MAIN_KEYBOARD }
         );
       } catch (e) {
@@ -1186,11 +1206,13 @@ async function handleCallback(
       cardId,
     });
     await answerCallback(chatId, callbackId, "✅ Kirim saqlandi!");
+    // Kartaning yangilangan balansini ko'rsatamiz
+    const balLine = cardId ? await cardBalanceLine(cardId) : "";
     await sendMessage(
       chatId,
       `<b>📈 Kirim qo'shildi:</b>\n${state.data.title}\n💰 ${fmt(
         Number(state.data.amount)
-      )}\nTo'lov turi: ${cardLabel}`,
+      )}\nTo'lov turi: ${cardLabel}${balLine}`,
       { reply_markup: MAIN_KEYBOARD }
     );
     return;
