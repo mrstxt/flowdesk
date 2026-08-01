@@ -187,6 +187,18 @@ export const botReminders = pgTable("bot_reminders", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/* ── Bot foydalanuvchi holati (wizard) — serverless uchun DB da saqlanadi ── */
+
+export const botStates = pgTable("bot_states", {
+  chatId: integer("chat_id").primaryKey(),
+  // mode: order, expense, income, book, video, goal, wake_reason, tomorrow_task, ...
+  mode: varchar("mode", { length: 50 }).notNull(),
+  step: integer("step").notNull().default(1),
+  // data JSON string ko'rinishida saqlanadi
+  data: text("data"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const sleepLogs = pgTable("sleep_logs", {
   id: serial("id").primaryKey(),
   date: date("date").notNull(),

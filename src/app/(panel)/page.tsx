@@ -19,7 +19,13 @@ import {
   Lock,
   Wallet,
 } from "lucide-react";
-import { formatCurrency, monthStartISO, parseMoneyInput, todayISO } from "@/lib/utils";
+import {
+  formatCurrency,
+  monthStartISO,
+  parseMoneyInput,
+  todayISO,
+  totalProfit,
+} from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Order = {
@@ -31,7 +37,13 @@ type Order = {
   archived: boolean | null;
 };
 type Task = { id: number; title: string; completed: boolean; date: string };
-type Income = { id: number; amount: string; date: string; cardId: number | null };
+type Income = {
+  id: number;
+  amount: string;
+  date: string;
+  source: string;
+  cardId: number | null;
+};
 type Expense = { id: number; amount: string; date: string; cardId: number | null };
 type Goal = {
   id: number;
@@ -112,13 +124,18 @@ export default function Dashboard() {
   }, []);
 
   const ms = monthStartISO();
+  // source="goal" — ichki maqsad transferi, real kirim emas (analitika bilan mos)
   const totalIn = incomes
-    .filter((i) => i.date >= ms)
+    .filter((i) => i.date >= ms && i.source !== "goal")
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const totalOut = expenses
     .filter((e) => e.date >= ms)
     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
+  // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...).
+  // Shu pul asosiy kartada to'planadi, shuning uchun kartada umumiy
+  // summa ko'rinishi kerak (ichki goal transferlar kirmaydi).
+  const totalProfitAll = totalProfit(incomes, expenses);
   const activeOrders = orders.filter(
     (o) => o.stage !== "confirmed" && !o.archived
   );
@@ -246,7 +263,7 @@ export default function Dashboard() {
           tone="red"
         />
         <Kpi
-          label="Sof foyda"
+          label="Sof foyda (oy)"
           value={formatCurrency(net)}
           icon={TrendingUp}
           tone="accent"
@@ -311,6 +328,18 @@ export default function Dashboard() {
               <div className="font-display text-2xl font-extrabold text-slate-900 tabular-nums">
                 {formatCurrency(c.balance)}
               </div>
+              {c.type === "primary" && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full">
+                    <TrendingUp className="w-3 h-3" />
+                    Sof foyda (oy): {formatCurrency(net)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
+                    <Wallet className="w-3 h-3" />
+                    Umumiy foyda: {formatCurrency(totalProfitAll)}
+                  </span>
+                </div>
+              )}
             </Link>
           ))}
         </div>

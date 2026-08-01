@@ -6,19 +6,21 @@ import { todayDateISO } from "@/lib/orderActions";
 
 export const dynamic = "force-dynamic";
 
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function yesterdayISO(): string {
-  return new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  return addDaysISO(todayDateISO(), -1);
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const filter = searchParams.get("filter") || "today"; // "today" | "tomorrow"
   const today = todayDateISO();
-  const tomorrowDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
+  const tomorrowDate = addDaysISO(today, 1);
 
   if (filter === "tomorrow") {
     // Ertangi kun uchun: targetDate = tomorrow yoki NULL (har kuni, doim ko'rinadi)

@@ -14,6 +14,7 @@ import {
   dailyResults,
   settings,
   cards,
+  botStates,
 } from "@/db/schema";
 import { desc, eq, gte, and, asc, sql, desc as descOrd } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
@@ -129,10 +130,74 @@ const BUTTON_TO_CMD: Record<string, string> = {
   "❌ Bekor": "/bekor",
 };
 
-const userState = new Map<
-  number,
-  { mode: string; step: number; data: Record<string, string | null> }
->();
+type UserState = {
+  mode: string;
+  step: number;
+  data: Record<string, string | null>;
+};
+
+// Vercel serverless'da har bir so'rov boshqa instansiyaga tushishi mumkin,
+// shuning uchun wizard holatini DB (bot_states) da saqlaymiz.
+// Map faqat joriy so'rov ichida cache sifatida ishlatiladi.
+const userState = new Map<number, UserState>();
+
+// Qaysi chat uchun DB da holat borligi ma'lum — shu chatlargagina
+// o'chirish amalini bajaramiz. Aks holda vaqtinchalik xatolikda
+// mavjud holatni yo'qotib qo'yishimiz mumkin.
+const stateExistsInDb = new Set<number>();
+
+async function loadUserState(chatId: number): Promise<void> {
+  try {
+    const [row] = await db
+      .select()
+      .from(botStates)
+      .where(eq(botStates.chatId, chatId))
+      .limit(1);
+    if (row && row.mode) {
+      let data: Record<string, string | null> = {};
+      try {
+        data = JSON.parse(row.data || "{}");
+      } catch {
+        data = {};
+      }
+      userState.set(chatId, { mode: row.mode, step: row.step, data });
+      stateExistsInDb.add(chatId);
+    }
+  } catch (e) {
+    console.error("loadUserState error:", e);
+  }
+}
+
+async function saveUserState(chatId: number): Promise<void> {
+  const s = userState.get(chatId);
+  try {
+    if (s) {
+      await db
+        .insert(botStates)
+        .values({
+          chatId,
+          mode: s.mode,
+          step: s.step,
+          data: JSON.stringify(s.data ?? {}),
+        })
+        .onConflictDoUpdate({
+          target: botStates.chatId,
+          set: {
+            mode: s.mode,
+            step: s.step,
+            data: JSON.stringify(s.data ?? {}),
+            updatedAt: new Date(),
+          },
+        });
+      stateExistsInDb.add(chatId);
+    } else if (stateExistsInDb.has(chatId)) {
+      await db.delete(botStates).where(eq(botStates.chatId, chatId));
+      stateExistsInDb.delete(chatId);
+    }
+  } catch (e) {
+    console.error("saveUserState error:", e);
+  }
+}
 
 async function answerCallback(
   chatId: number,
@@ -149,8 +214,7 @@ async function answerCallback(
         text,
         show_alert: false,
       }),
-    });
-    await sendMessage(chatId, text, { reply_markup: MAIN_KEYBOARD });
+    }  );
   } catch (e) {
     console.error("answerCallback:", e);
   }
@@ -173,6 +237,18 @@ function getTashkentTimeString(): string {
   if (hour === 24) hour = 0;
   const min = Number(parts.find((p) => p.type === "minute")?.value || 0);
   return `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+/**
+ * Ertangi kun sanasi (Toshkent vaqti bo'yicha).
+ * `toISOString` UTC ga asoslanadi — Toshkentda yarim tunda noto'g'ri
+ * sana qaytarishi mumkin, shuning uchun Toshkent vaqti bilan hisoblaymiz.
+ */
+function tomorrowTashkentISO(): string {
+  const today = todayDateISO();
+  const d = new Date(today + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function parseAmount(raw: string): number {
@@ -382,25 +458,16 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 3) {
       const cat = EXPENSE_CAT[text.trim().toLowerCase()] || "other";
-      state.data.category = cat;
-      state.step = 4;
-      userState.set(chatId, state);
-      await sendCardSelectionButtons(
-        chatId,
-        "wizard_card_exp_",
-        "4️⃣ Qaysi kartadan yechildi? Kartalardan tanlang (yoki naqd deb yozing):",
-        true
-      );
-      return;
-    }
-    if (state.step === 4) {
-      const c = await findCardByText(text);
       userState.delete(chatId);
+      // Chiqim har doim ASOSIY kartadan olinadi (user talabi)
+      const primary = await getPrimaryCard();
       let cardLabel = "💵 Naqd pul";
-      if (c) {
-        cardLabel = `💳 ${c.name}`;
+      let cardId: number | null = null;
+      if (primary) {
+        cardId = primary.id;
+        cardLabel = `💳 ${primary.name} (asosiy)`;
         const res = await addCardExpense(
-          c.id,
+          primary.id,
           Number(state.data.amount),
           `Chiqim: ${state.data.title}`
         );
@@ -417,9 +484,9 @@ async function handleWizardStep(chatId: number, text: string) {
         await db.insert(expenses).values({
           title: state.data.title ?? "",
           amount: state.data.amount ?? "0",
-          category: state.data.category ?? "other",
+          category: cat,
           date: today,
-          cardId: c ? c.id : null,
+          cardId,
         });
         await sendMessage(
           chatId,
@@ -701,7 +768,7 @@ async function handleWizardStep(chatId: number, text: string) {
     userState.delete(chatId);
     const settingsMap = await loadSettingsMap();
     const expectedWake = getSetting(settingsMap, "wake_time", "04:30");
-    const actualWake = new Date().toTimeString().slice(0, 5);
+    const actualWake = getTashkentTimeString();
     try {
       const [existing] = await db
         .select()
@@ -1018,41 +1085,36 @@ async function handleCallback(
   }
 
   if (data.startsWith("wizard_card_exp_")) {
-    const val = data.replace("wizard_card_exp_", "");
+    // Eski tugma bosilgan bo'lsa ham — chiqim har doim asosiy kartadan
     const state = userState.get(chatId);
     if (!state || state.mode !== "expense") {
       await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
       return;
     }
     userState.delete(chatId);
-    const cardId = val === "cash" ? null : Number(val);
+    const primary = await getPrimaryCard();
     let cardLabel = "💵 Naqd pul";
-    if (cardId) {
-      const [c] = await db
-        .select()
-        .from(cards)
-        .where(eq(cards.id, cardId))
-        .limit(1);
-      if (c) {
-        cardLabel = `💳 ${c.name}`;
-        const res = await addCardExpense(
-          c.id,
-          Number(state.data.amount),
-          `Chiqim: ${state.data.title}`
+    let cardId: number | null = null;
+    if (primary) {
+      cardId = primary.id;
+      cardLabel = `💳 ${primary.name} (asosiy)`;
+      const res = await addCardExpense(
+        primary.id,
+        Number(state.data.amount),
+        `Chiqim: ${state.data.title}`
+      );
+      if (!res.ok) {
+        await answerCallback(
+          chatId,
+          callbackId,
+          res.error || "❌ Mablag' yetarli emas"
         );
-        if (!res.ok) {
-          await answerCallback(
-            chatId,
-            callbackId,
-            res.error || "❌ Mablag' yetarli emas"
-          );
-          await sendMessage(
-            chatId,
-            `❌ <b>Chiqim amalga oshmadi:</b>\n${res.error}`,
-            { reply_markup: MAIN_KEYBOARD }
-          );
-          return;
-        }
+        await sendMessage(
+          chatId,
+          `❌ <b>Chiqim amalga oshmadi:</b>\n${res.error}`,
+          { reply_markup: MAIN_KEYBOARD }
+        );
+        return;
       }
     }
     await db.insert(expenses).values({
@@ -1248,11 +1310,7 @@ async function handleCallback(
   }
 
   if (data === "tomorrow_task") {
-    const tomorrow = (() => {
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      return d.toISOString().slice(0, 10);
-    })();
+    const tomorrow = tomorrowTashkentISO();
     userState.set(chatId, {
       mode: "tomorrow_task",
       step: 1,
@@ -1268,11 +1326,7 @@ async function handleCallback(
   }
 
   if (data === "tomorrow_routine") {
-    const tomorrow = (() => {
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      return d.toISOString().slice(0, 10);
-    })();
+    const tomorrow = tomorrowTashkentISO();
     userState.set(chatId, {
       mode: "tomorrow_routine",
       step: 1,
@@ -1587,24 +1641,8 @@ async function handleCommand(chatId: number, text: string) {
 
     // ── Kiritish rejimi davom ettirilayotgan bo'lsa ──
     if (userState.has(chatId) && !cmd.startsWith("/")) {
-      // Avval wake reminder javobini tekshiramiz
-      const todayCheck = todayDateISO();
-      const wakeReminderCheck = await db
-        .select()
-        .from(botReminders)
-        .where(
-          and(
-            eq(botReminders.date, todayCheck),
-            eq(botReminders.type, "wake_up"),
-            eq(botReminders.responded, false)
-          )
-        )
-        .limit(1);
-
-      if (wakeReminderCheck.length === 0) {
-        await handleWizardStep(chatId, text);
-        return;
-      }
+      await handleWizardStep(chatId, text);
+      return;
     }
 
     if (cmd === "/bot_yoq") {
@@ -1737,11 +1775,31 @@ async function handleCommand(chatId: number, text: string) {
       const cat = EXPENSE_CAT[(p[2] || "").toLowerCase()] || "other";
       const amount = String(parseAmount(p[1]));
       try {
+        // Chiqim har doim asosiy kartadan olinadi (user talabi)
+        const primary = await getPrimaryCard();
+        let cardId: number | null = null;
+        if (primary) {
+          cardId = primary.id;
+          const res = await addCardExpense(
+            primary.id,
+            Number(amount),
+            `Chiqim: ${p[0]}`
+          );
+          if (!res.ok) {
+            await sendMessage(
+              chatId,
+              `❌ <b>Chiqim amalga oshmadi:</b>\n${res.error}`,
+              { reply_markup: MAIN_KEYBOARD }
+            );
+            return;
+          }
+        }
         await db.insert(expenses).values({
           title: p[0],
           amount,
           category: cat,
           date: todayDateISO(),
+          cardId,
         });
         await sendMessage(
           chatId,
@@ -2086,76 +2144,86 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  let chatId: number | null = null;
   try {
     const update = await req.json();
 
     const cb = update?.callback_query;
-    if (cb) {
-      const chatId: number = cb.message?.chat?.id || cb.from?.id;
-      if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
-        await answerCallback(chatId, cb.id, "Ruxsat yo'q.");
-        return NextResponse.json({ ok: true });
-      }
-      await handleCallback(chatId, cb.id, cb.data || "");
-      return NextResponse.json({ ok: true });
-    }
-
     const msg = update?.message;
-    if (!msg) return NextResponse.json({ ok: true });
+    if (cb) chatId = cb.message?.chat?.id || cb.from?.id || null;
+    else if (msg) chatId = msg.chat?.id || null;
 
-    const chatId: number = msg.chat.id;
-    if (!TOKEN) {
-      console.error("TELEGRAM_BOT_TOKEN not set");
-      return NextResponse.json({ ok: true });
+    // Serverless (Vercel) da wizard holatini DB dan yuklaymiz
+    if (chatId != null) {
+      await loadUserState(chatId);
     }
 
-    if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
-      await sendMessage(
-        chatId,
-        "Ruxsat yo'q. Bu bot faqat administrator uchun."
-      );
-      return NextResponse.json({ ok: true });
-    }
-
-    // Video note (dumaloq video)
-    if (msg.video_note) {
-      const state = userState.get(chatId);
-      if (state?.mode === "result_response") {
-        const fileId = msg.video_note.file_id;
-        const today = todayDateISO();
-        try {
-          const [existing] = await db
-            .select()
-            .from(dailyResults)
-            .where(eq(dailyResults.date, today))
-            .limit(1);
-          if (existing) {
-            await db
-              .update(dailyResults)
-              .set({ videoFileId: fileId, responseType: "video" })
-              .where(eq(dailyResults.id, existing.id));
-          } else {
-            await db.insert(dailyResults).values({
-              date: today,
-              videoFileId: fileId,
-              responseType: "video",
-            });
-          }
-          userState.delete(chatId);
-          await sendMessage(
-            chatId,
-            "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
-            { reply_markup: MAIN_KEYBOARD }
-          );
-        } catch (e) {
-          console.error("video_note save error:", e);
+    try {
+      if (cb) {
+        if (chatId == null) return NextResponse.json({ ok: true });
+        if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
+          await answerCallback(chatId, cb.id, "Ruxsat yo'q.");
+          return NextResponse.json({ ok: true });
         }
+        await handleCallback(chatId, cb.id, cb.data || "");
         return NextResponse.json({ ok: true });
       }
-    }
 
-    if (msg.video && !msg.video_note) {
-      const state = userState.get(chatId);
+      if (!msg) return NextResponse.json({ ok: true });
+      if (chatId == null) return NextResponse.json({ ok: true });
+
+      if (!TOKEN) {
+        console.error("TELEGRAM_BOT_TOKEN not set");
+        return NextResponse.json({ ok: true });
+      }
+
+      if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
+        await sendMessage(
+          chatId,
+          "Ruxsat yo'q. Bu bot faqat administrator uchun."
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Video note (dumaloq video)
+      if (msg.video_note) {
+        const state = userState.get(chatId);
+        if (state?.mode === "result_response") {
+          const fileId = msg.video_note.file_id;
+          const today = todayDateISO();
+          try {
+            const [existing] = await db
+              .select()
+              .from(dailyResults)
+              .where(eq(dailyResults.date, today))
+              .limit(1);
+            if (existing) {
+              await db
+                .update(dailyResults)
+                .set({ videoFileId: fileId, responseType: "video" })
+                .where(eq(dailyResults.id, existing.id));
+            } else {
+              await db.insert(dailyResults).values({
+                date: today,
+                videoFileId: fileId,
+                responseType: "video",
+              });
+            }
+            userState.delete(chatId);
+            await sendMessage(
+              chatId,
+              "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
+              { reply_markup: MAIN_KEYBOARD }
+            );
+          } catch (e) {
+            console.error("video_note save error:", e);
+          }
+          return NextResponse.json({ ok: true });
+        }
+      }
+
+      if (msg.video && !msg.video_note) {
+        const state = userState.get(chatId);
       if (state?.mode === "result_response") {
         const fileId = msg.video.file_id;
         const today = todayDateISO();
@@ -2190,9 +2258,15 @@ export async function POST(req: Request) {
       }
     }
 
-    if (!msg.text) return NextResponse.json({ ok: true });
+      if (!msg.text) return NextResponse.json({ ok: true });
 
-    await handleCommand(chatId, msg.text.trim());
+      await handleCommand(chatId, msg.text.trim());
+    } finally {
+      // Wizard holatini DB ga saqlaymiz (keyingi so'rovda tiklash uchun)
+      if (chatId != null) {
+        await saveUserState(chatId);
+      }
+    }
   } catch (e) {
     console.error("Webhook error:", e);
   }

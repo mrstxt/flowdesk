@@ -8,7 +8,10 @@ import { sql } from "drizzle-orm";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const rows = await db.select().from(incomes).orderBy(desc(incomes.date));
+  const rows = await db
+    .select()
+    .from(incomes)
+    .orderBy(desc(incomes.date), desc(incomes.createdAt));
   return NextResponse.json(rows);
 }
 

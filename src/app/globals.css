@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* MUHIM: `dark:` varianti klass-asosli bo'ladi (OS prefers-color-scheme emas).
+   FlowDesk doim LIGHT rejimda ishlaydi — `.dark` klassi hech qachon
+   qo'shilmaydi, shuning uchun dark mode'li kompyuterda ham loyiha
+   light ko'rinishda bo'ladi. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, ui-sans-serif,
     system-ui, sans-serif;

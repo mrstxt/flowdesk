@@ -1,20 +1,54 @@
 # FlowDesk
 
-FlowDesk — shaxsiy admin panel: buyurtmalar, moliya, maqsadlar, intizom, kitoblar, rivojlanish videolari va Telegram intizom bot.
+FlowDesk — shaxsiy admin panel: buyurtmalar, moliya, maqsadlar, intizom, kitoblar, rivojlanish videolari va Telegram intizom bot. **Vercel'ga deploy qilingan** va **doim Light (yorug') rejimda** ishlaydi.
+
+> ☀️ **Light mode majburiy.** Kompyuter/telefon dark mode'da bo'lsa ham loyiha doim yorug' ko'rinishda chiqadi. Buning sababi: `dark:` Tailwind varianti klass-asosli qilingan (`.dark` klassi hech qachon qo'shilmaydi), OS `prefers-color-scheme` e'tiborga olinmaydi.
 
 ## Imkoniyatlar
 
 | Bo'lim | Nima qiladi |
 |---|---|
-| Dashboard | KPI, bugungi vazifalar, intizom, maqsad va kitob progressi |
+| Dashboard | KPI, sof foyda (asosiy kartada), vazifalar, intizom, maqsad progressi |
 | Buyurtmalar | Kanban uslubida buyurtmalarni yuritish |
-| Hisob-kitob | Kirim/chiqim va oylik grafiklar |
-| Maqsadlar | Jamg'arma va avtomatik foiz hisoblash |
+| Hisob-kitob | Kirim/chiqim, **Transaksiyalar** (kunlar bo'yicha), oylik grafiklar |
+| Maqsadlar | Jamg'arma, avtomatik foiz va karta balansini boshqarish |
 | Intizom | Uyg'onish/uxlash va kunlik reja nazorati |
-| Kitoblar | O'qish progressi va qaydlar |
-| Rivojlanish | YouTube video ro'yxati va fikrlar |
+| Kitoblar | O'qish progressi, qaydlar va PDF variant |
+| Rivojlanish | YouTube video ro'yxati, fikrlar va resume |
 | Analitika | Oylik taqqoslash va tavsiyalar |
-| Telegram bot | Buyurtma, kirim, chiqim, vazifa va intizom buyruqlari |
+| Telegram bot | Buyurtma, kirim, chiqim, vazifa, maqsad va intizom buyruqlari |
+
+## Pul oqimi (muhim tushuncha)
+
+Barcha pul oqimi **asosiy karta** (`primary` tipidagi karta) orqali ishlaydi:
+
+- Buyurtma tasdiqlanganda pul **asosiy kartaga** tushadi
+- Buyurtma foizi (avtomatik %) **asosiy kartadan maqsad kartasiga** tranzaksiya bo'lib o'tadi
+- Chiqim har doim **asosiy kartadan** yechiladi
+- Maqsadga qo'lda pul ajratish ham **asosiy kartadan** olinadi
+- `source="goal"` (ichki transfer) kirimlar sof foyda hisobiga kirmaydi — sof foyda real daromadni ko'rsatadi
+- Dashboardda asosiy karta yonida **"Sof foyda (oy)"** ko'rsatiladi
+
+## Loyiha tuzilishi
+
+```text
+src/
+├── app/
+│   ├── (panel)/          # Login bo'lgandan keyingi sahifalar (dashboard, orders, finance, goals, ...)
+│   ├── api/              # Next.js API route'lar (bot, cron, incomes, expenses, goals, cards, ...)
+│   ├── login/            # Login sahifasi
+│   ├── layout.tsx        # Root layout (ThemeProvider bilan)
+│   └── globals.css       # Tailwind v4 + dark variant sozlamasi
+├── components/           # Sidebar, Modal, ThemeProvider
+├── db/
+│   ├── schema.ts         # Drizzle schema (barcha jadvallar)
+│   └── index.ts          # DB ulanish
+└── lib/
+    ├── cardActions.ts    # Karta operatsiyalari (transfer, maqsadga pul qo'shish)
+    ├── orderActions.ts   # Buyurtma tasdiqlash + avtomatik foiz taqsimoti
+    ├── auth.ts           # Sessiya autentifikatsiyasi
+    └── utils.ts          # Valyuta/sana yordamchilari
+```
 
 ## Install paytidagi warning haqida
 
@@ -172,33 +206,37 @@ https://api.telegram.org/bot123456:ABC/setWebhook?url=https://flowdesk.vercel.ap
 
 ## Cron Sozlash
 
-`vercel.json` faylida cron schedule allaqachon sozlangan — har 10 daqiqada yuradi:
+`vercel.json` faylida cron schedule allaqachon sozlangan. **Muhim:** Vercel Hobby (bepul) planda cron kuniga ko'pi bilan 1 marta ishlaydi — `*/10 * * * *` kabi tez-tez ishlaydigan schedule Hobby planda **deploy xatosi beradi** yoki ishlamaydi. Shu sababli bir nechta kunlik schedule ishlatilgan (har biri kunga 1 marta, Toshkent vaqtiga moslangan):
 
 ```json
 {
   "crons": [
-    {
-      "path": "/api/cron/discipline",
-      "schedule": "*/10 * * * *"
-    }
+    { "path": "/api/cron/discipline", "schedule": "30 23 * * *" },
+    { "path": "/api/cron/discipline", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/discipline", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/discipline", "schedule": "40 16 * * *" },
+    { "path": "/api/cron/discipline", "schedule": "0 18 * * *" }
   ]
 }
 ```
+
+Vaqtlar UTC da — Toshkent vaqti bo'yicha mos kelishi:
+
+| UTC | Toshkent | Nima yuboriladi |
+|---|---|---|
+| `23:30` | 04:30 | Uyg'onish eslatmasi |
+| `05:00` | 10:00 | Kechikkan uyg'onish uchun qayta urinish |
+| `15:00` | 20:00 | Kunlik hisobot (20:00) |
+| `16:40` | 21:40 | Uxlash eslatmasi |
+| `18:00` | 23:00 | Kechikkan uxlash uchun qayta urinish |
 
 Vercel Project → Settings → Cron Jobs bo'limida avtomatik ko'rinadi. Qo'shimcha sozlash kerak emas.
 
 Cron endpoint `VERCEL_CRON_SECRET` orqali himoyalanadi. Agar Vercel Cron header yubormasa, endpoint public ishlamasligi uchun secretni to'g'ri sozlang.
 
-**Muhim:** `vercel.json` fayli repozitoriyda bo'lishi kerak. Agar o'chirib tashlangan bo'lsa, qo'lda qayta yarating yoki Vercel Dashboard → Settings → Cron Jobs bo'limida qo'lda schedule qo'shing:
+**Muhim:** `vercel.json` fayli repozitoriyda bo'lishi kerak. Agar o'chirib tashlangan bo'lsa, qo'lda qayta yarating yoki Vercel Dashboard → Settings → Cron Jobs bo'limida qo'lda schedule qo'shing.
 
-| Field | Qiymat |
-|---|---|
-| URL | `/api/cron/discipline` |
-| Schedule | `*/10 * * * *` (har 10 daqiqada) |
-
-Nima uchun har 10 daqiqada? Chunki uyg'onish (masalan 04:30) va uxlash (masalan 21:40) vaqtlariga aniq tushishi uchun har 30 daqiqada yetarli emas. 10 daqiqalik interval bilan har qanday vaqt oralig'ida trigger qilinadi.
-
-**Eslatma:** Cron ishga tushganda, Vercel Logs ichida `/api/cron/discipline` GET so'rovlari ko'rinadi. Xato bo'lsa `error` maydoni bilan 500 qaytadi va `console.error` xabarlari chiqadi.
+**Eslatma:** Cron ishga tushganda, Vercel Logs ichida `/api/cron/discipline` GET so'rovlari ko'rinadi. Xato bo'lsa `error` maydoni bilan 500 qaytadi va `console.error` xabarlari chiqadi. Test qilish uchun `https://SIZNING_DOMEN/api/cron/discipline?force=true` ni ochishingiz mumkin — u barcha eslatmalarni darhol yuboradi.
 
 ## Foydali Komandalar
 

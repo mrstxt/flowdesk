@@ -119,8 +119,6 @@ export default function GoalsPage() {
     if (!addFundsGoal) return;
     const fd = new FormData(e.currentTarget);
     const amt = parseMoneyInput(fd.get("amount"));
-    const fromCardIdRaw = fd.get("fromCardId") as string;
-    const fromCardId = fromCardIdRaw ? Number(fromCardIdRaw) : null;
     const description = (fd.get("description") as string)?.trim() || undefined;
     try {
       const res = await fetch("/api/card-transactions", {
@@ -130,7 +128,6 @@ export default function GoalsPage() {
           action: "goal_fund",
           goalId: addFundsGoal.id,
           amount: amt,
-          fromCardId,
           description,
         }),
       });
@@ -810,28 +807,11 @@ export default function GoalsPage() {
               placeholder={`Masalan: Oylikdan ${addFundsGoal?.title || "maqsad"} uchun`}
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Qaysi kartadan yechilsin (Manba karta)
-            </label>
-            <select
-              name="fromCardId"
-              defaultValue={primaryCard ? String(primaryCard.id) : ""}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900"
-            >
-              {activeCards.map((c) => (
-                <option key={c.id} value={c.id}>
-                  💳 {c.name} {c.type === "primary" ? "(Asosiy karta)" : ""}{" "}
-                  ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
-                  {formatCurrency(c.balance)} so'm
-                </option>
-              ))}
-            </select>
-          </div>
           <p className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded-xl p-2.5">
-            💡 Maqsadga pul faqat <b>kirim</b> bo'ladi. Manba kartadan yechiladi
-            va maqsad kartasiga o'tkaziladi. Qoldiq kam bo'lsa xatolik
-            chiqadi.
+            💡 Maqsadga pul faqat <b>kirim</b> bo'ladi. Pul <b>asosiy kartadan</b>{" "}
+            ({primaryCard ? primaryCard.name : "asosiy karta"}) yechiladi va maqsad
+            kartasiga tranzaksiyadek o'tkaziladi. Asosiy karta qoldig'i kam
+            bo'lsa xatolik chiqadi.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button

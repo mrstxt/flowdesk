@@ -2,7 +2,23 @@
   "crons": [
     {
       "path": "/api/cron/discipline",
-      "schedule": "*/10 * * * *"
+      "schedule": "30 23 * * *"
+    },
+    {
+      "path": "/api/cron/discipline",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/discipline",
+      "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/cron/discipline",
+      "schedule": "40 16 * * *"
+    },
+    {
+      "path": "/api/cron/discipline",
+      "schedule": "0 18 * * *"
     }
   ]
 }

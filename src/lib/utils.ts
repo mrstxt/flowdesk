@@ -61,6 +61,22 @@ export function monthStartISO(): string {
   return `${y}-${m}-01`;
 }
 
+/**
+ * Umumiy (kumulyativ) foyda — barcha davrlar bo'yicha:
+ * real kirimlar (source != "goal", ichki transferlar kirmaydi) minus chiqimlar.
+ * Shu pul asosiy kartada to'planadi.
+ */
+export function totalProfit(
+  incomes: { amount: string; source: string }[],
+  expenses: { amount: string }[]
+): number {
+  const totalIn = incomes
+    .filter((i) => i.source !== "goal")
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  const totalOut = expenses.reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+  return totalIn - totalOut;
+}
+
 export function formatDateDisplay(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00");
   return d.toLocaleDateString("uz-UZ", {

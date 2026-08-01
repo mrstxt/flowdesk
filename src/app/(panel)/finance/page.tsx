@@ -18,7 +18,13 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { formatCurrency, monthStartISO, parseMoneyInput, todayISO } from "@/lib/utils";
+import {
+  formatCurrency,
+  monthStartISO,
+  parseMoneyInput,
+  todayISO,
+  totalProfit,
+} from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Income = {
@@ -29,6 +35,7 @@ type Income = {
   date: string;
   paymentType: string;
   cardId: number | null;
+  createdAt: string;
 };
 type Expense = {
   id: number;
@@ -36,6 +43,18 @@ type Expense = {
   amount: string;
   category: string;
   date: string;
+  cardId: number | null;
+  createdAt: string;
+};
+type Tx = {
+  id: number;
+  title: string;
+  amount: string;
+  kind: "in" | "out";
+  date: string;
+  createdAt: string;
+  source: string;
+  category: string;
   cardId: number | null;
 };
 type Goal = {
@@ -65,12 +84,81 @@ const EXPENSE_CATS: Record<string, string> = {
   other: "Boshqa",
 };
 
+function formatTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("uz-UZ", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Tashkent",
+    });
+  } catch {
+    return "";
+  }
+}
+
+type DayGroup<T> = {
+  date: string;
+  label: string;
+  monthLabel: string;
+  items: T[];
+  total: number;
+};
+
+function groupByDay<T extends { date: string; amount: string; createdAt?: string | null }>(
+  items: T[]
+): DayGroup<T>[] {
+  const today = todayISO();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(yesterday.getDate()).padStart(2, "0")}`;
+
+  const sorted = [...items].sort((a, b) => {
+    const dc = b.date.localeCompare(a.date);
+    if (dc !== 0) return dc;
+    return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  });
+
+  const groups: DayGroup<T>[] = [];
+  for (const it of sorted) {
+    let g = groups[groups.length - 1];
+    if (!g || g.date !== it.date) {
+      const d = new Date(it.date + "T00:00:00");
+      let label: string;
+      if (it.date === today) label = "Bugun";
+      else if (it.date === yKey) label = "Kecha";
+      else
+        label = d.toLocaleDateString("uz-UZ", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        });
+      const monthLabel = d.toLocaleDateString("uz-UZ", {
+        month: "long",
+        year: "numeric",
+      });
+      g = { date: it.date, label, monthLabel, items: [], total: 0 };
+      groups.push(g);
+    }
+    g.items.push(it);
+    g.total += parseMoneyInput(it.amount);
+  }
+  return groups;
+}
+
 export default function FinancePage() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
-  const [tab, setTab] = useState<"incomes" | "expenses" | "report">("report");
+  const [tab, setTab] = useState<"incomes" | "expenses" | "report" | "transactions">(
+  "report"
+);
   const [modal, setModal] = useState<"income" | "expense" | null>(null);
 
   async function load() {
@@ -101,11 +189,46 @@ export default function FinancePage() {
 
   const primaryCard = cards.find((c) => c.type === "primary") || cards[0];
   const ms = monthStartISO();
+  // Barcha oy kirimlari (karta taqsimoti hisoboti uchun goal transferlar ham kerak)
   const monthIncomes = incomes.filter((i) => i.date >= ms);
   const monthExpenses = expenses.filter((e) => e.date >= ms);
-  const totalIn = monthIncomes.reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  // source="goal" — ichki maqsad transferi, sof foydaga kirmaydi (analitika bilan mos)
+  const totalIn = monthIncomes
+    .filter((i) => i.source !== "goal")
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const totalOut = monthExpenses.reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
+  // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...). Asosiy kartada
+  // shu pul turadi, shuning uchun panelda ham ko'rinishi kerak.
+  const totalProfitAll = totalProfit(incomes, expenses);
+
+  const incomeGroups = groupByDay(incomes);
+  const expenseGroups = groupByDay(expenses);
+  const allTx: Tx[] = [
+    ...incomes.map((i) => ({
+      id: i.id,
+      title: i.title,
+      amount: i.amount,
+      kind: "in" as const,
+      date: i.date,
+      createdAt: i.createdAt,
+      source: i.source,
+      category: "",
+      cardId: i.cardId,
+    })),
+    ...expenses.map((e) => ({
+      id: e.id,
+      title: e.title,
+      amount: e.amount,
+      kind: "out" as const,
+      date: e.date,
+      createdAt: e.createdAt,
+      source: "",
+      category: e.category,
+      cardId: e.cardId,
+    })),
+  ];
+  const txGroups = groupByDay(allTx);
 
   // Build monthly chart data (last 6 months)
   const chartData = Array.from({ length: 6 }, (_, i) => {
@@ -114,8 +237,9 @@ export default function FinancePage() {
     const y = d.getFullYear();
     const m = d.getMonth();
     const key = `${y}-${String(m + 1).padStart(2, "0")}`;
+    // source="goal" — ichki maqsad transferi, grafikda ham sof kirimga kirmaydi
     const inSum = incomes
-      .filter((x) => x.date.startsWith(key))
+      .filter((x) => x.date.startsWith(key) && x.source !== "goal")
       .reduce((s, x) => s + parseMoneyInput(x.amount), 0);
     const outSum = expenses
       .filter((x) => x.date.startsWith(key))
@@ -152,7 +276,6 @@ export default function FinancePage() {
   async function addExpense(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const cardIdRaw = fd.get("cardId") as string;
     await fetch("/api/expenses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -161,7 +284,6 @@ export default function FinancePage() {
         amount: String(parseMoneyInput(fd.get("amount"))),
         category: fd.get("category"),
         date: fd.get("date") || todayISO(),
-        cardId: cardIdRaw && cardIdRaw !== "cash" ? Number(cardIdRaw) : null,
       }),
     });
     setModal(null);
@@ -229,10 +351,11 @@ export default function FinancePage() {
           tone="blue"
         />
         <StatCard
-          label="Sof foyda"
+          label="Sof foyda (oy)"
           value={formatCurrency(net)}
           icon={TrendingUp}
           tone={net >= 0 ? "green" : "red"}
+          sub={`Umumiy: ${formatCurrency(totalProfitAll)}`}
         />
       </div>
 
@@ -240,6 +363,7 @@ export default function FinancePage() {
       <div className="flex gap-1 mb-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-full p-1 w-fit">
         {[
           { id: "report", label: "Hisobot" },
+          { id: "transactions", label: "Transaksiyalar" },
           { id: "incomes", label: "Kirimlar" },
           { id: "expenses", label: "Chiqimlar" },
         ].map((t) => (
@@ -406,58 +530,49 @@ export default function FinancePage() {
               Kirimlar ({incomes.length})
             </h2>
           </div>
-          <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {incomes.length === 0 && (
-              <div className="p-12 text-center text-sm text-slate-500">
-                Kirimlar yo'q
-              </div>
-            )}
-            {incomes.map((i) => (
-              <div
-                key={i.id}
-                className="px-6 py-3 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
-                    {i.title}
-                  </div>
-                  <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
-                    <span>{i.date}</span>
-                    <span>·</span>
-                    <span>{i.source === "order" ? "Buyurtma" : i.source === "goal" ? "Maqsadga" : i.source === "bonus" ? "Bonus" : "Boshqa"}</span>
-                    {i.cardId && (
-                      <>
-                        <span>·</span>
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                          style={{
-                            background: `${cardColor(i.cardId)}20`,
-                            color: cardColor(i.cardId),
-                          }}
-                        >
-                          💳 {cardName(i.cardId)}
-                        </span>
-                      </>
-                    )}
-                    {!i.cardId && (
-                      <span className="text-[10px] text-slate-400">💵 Naqd</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="text-sm font-semibold text-green-600">
-                    +{formatCurrency(i.amount)}
-                  </div>
-                  <button
-                    onClick={() => deleteIncome(i.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          {incomeGroups.length === 0 ? (
+            <div className="p-12 text-center text-sm text-slate-500">
+              Kirimlar yo'q
+            </div>
+          ) : (
+            <DayGroupedList
+              groups={incomeGroups}
+              keyOf={(i) => `in-${i.id}`}
+              tone="green"
+              renderMeta={(i) => (
+                <>
+                  <span>
+                    {i.source === "order"
+                      ? "Buyurtma"
+                      : i.source === "goal"
+                      ? "Maqsadga"
+                      : i.source === "bonus"
+                      ? "Bonus"
+                      : "Boshqa"}
+                  </span>
+                  {i.cardId ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                      style={{
+                        background: `${cardColor(i.cardId)}20`,
+                        color: cardColor(i.cardId),
+                      }}
+                    >
+                      💳 {cardName(i.cardId)}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400">💵 Naqd</span>
+                  )}
+                </>
+              )}
+              renderAmount={(i) => (
+                <span className="text-green-600">
+                  +{formatCurrency(i.amount)}
+                </span>
+              )}
+              onDelete={(i) => deleteIncome(i.id)}
+            />
+          )}
         </div>
       )}
 
@@ -468,58 +583,112 @@ export default function FinancePage() {
               Chiqimlar ({expenses.length})
             </h2>
           </div>
-          <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {expenses.length === 0 && (
-              <div className="p-12 text-center text-sm text-slate-500">
-                Chiqimlar yo'q
-              </div>
-            )}
-            {expenses.map((e) => (
-              <div
-                key={e.id}
-                className="px-6 py-3 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
-                    {e.title}
-                  </div>
-                  <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
-                    <span>{e.date}</span>
-                    <span>·</span>
-                    <span>{EXPENSE_CATS[e.category] || e.category}</span>
-                    {e.cardId && (
-                      <>
-                        <span>·</span>
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                          style={{
-                            background: `${cardColor(e.cardId)}20`,
-                            color: cardColor(e.cardId),
-                          }}
-                        >
-                          💳 {cardName(e.cardId)}
-                        </span>
-                      </>
-                    )}
-                    {!e.cardId && (
-                      <span className="text-[10px] text-slate-400">💵 Naqd</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="text-sm font-semibold text-red-600">
-                    -{formatCurrency(e.amount)}
-                  </div>
-                  <button
-                    onClick={() => deleteExpense(e.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+          {expenseGroups.length === 0 ? (
+            <div className="p-12 text-center text-sm text-slate-500">
+              Chiqimlar yo'q
+            </div>
+          ) : (
+            <DayGroupedList
+              groups={expenseGroups}
+              keyOf={(e) => `out-${e.id}`}
+              tone="red"
+              renderMeta={(e) => (
+                <>
+                  <span>{EXPENSE_CATS[e.category] || e.category}</span>
+                  {e.cardId ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                      style={{
+                        background: `${cardColor(e.cardId)}20`,
+                        color: cardColor(e.cardId),
+                      }}
+                    >
+                      💳 {cardName(e.cardId)}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400">💵 Naqd</span>
+                  )}
+                </>
+              )}
+              renderAmount={(e) => (
+                <span className="text-red-600">
+                  -{formatCurrency(e.amount)}
+                </span>
+              )}
+              onDelete={(e) => deleteExpense(e.id)}
+            />
+          )}
+        </div>
+      )}
+
+      {tab === "transactions" && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              Transaksiyalar ({allTx.length})
+            </h2>
           </div>
+          {txGroups.length === 0 ? (
+            <div className="p-12 text-center text-sm text-slate-500">
+              Transaksiyalar yo'q
+            </div>
+          ) : (
+            <DayGroupedList
+              groups={txGroups}
+              keyOf={(t) => `${t.kind}-${t.id}`}
+              tone="neutral"
+              renderMeta={(t) => (
+                <>
+                  <span
+                    className={
+                      t.kind === "in" ? "text-green-600" : "text-red-600"
+                    }
+                  >
+                    {t.kind === "in" ? "Kirim" : "Chiqim"}
+                  </span>
+                  <span>·</span>
+                  <span>
+                    {t.kind === "in"
+                      ? t.source === "order"
+                        ? "Buyurtma"
+                        : t.source === "goal"
+                        ? "Maqsadga"
+                        : t.source === "bonus"
+                        ? "Bonus"
+                        : "Boshqa"
+                      : EXPENSE_CATS[t.category] || t.category}
+                  </span>
+                  {t.cardId ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                      style={{
+                        background: `${cardColor(t.cardId)}20`,
+                        color: cardColor(t.cardId),
+                      }}
+                    >
+                      💳 {cardName(t.cardId)}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400">💵 Naqd</span>
+                  )}
+                </>
+              )}
+              renderAmount={(t) =>
+                t.kind === "in" ? (
+                  <span className="text-green-600">
+                    +{formatCurrency(t.amount)}
+                  </span>
+                ) : (
+                  <span className="text-red-600">
+                    -{formatCurrency(t.amount)}
+                  </span>
+                )
+              }
+              onDelete={(t) =>
+                t.kind === "in" ? deleteIncome(t.id) : deleteExpense(t.id)
+              }
+            />
+          )}
         </div>
       )}
 
@@ -659,41 +828,25 @@ export default function FinancePage() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                Kategoriya
-              </label>
-              <select
-                name="category"
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
-              >
-                <option value="rent">Ijara</option>
-                <option value="ads">Reklama</option>
-                <option value="subscriptions">Abonent to'lovlar</option>
-                <option value="personal">Shaxsiy</option>
-                <option value="other">Boshqa</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                Qaysi kartadan
-              </label>
-              <select
-                name="cardId"
-                defaultValue={primaryCard ? String(primaryCard.id) : "cash"}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
-              >
-                {cards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    💳 {c.name} {c.type === "primary" ? "(Asosiy karta)" : ""}
-                    {c.last4 ? ` •••• ${c.last4}` : ""}
-                  </option>
-                ))}
-                <option value="cash">💵 Naqd pul</option>
-              </select>
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Kategoriya
+            </label>
+            <select
+              name="category"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm text-slate-900 dark:text-slate-100"
+            >
+              <option value="rent">Ijara</option>
+              <option value="ads">Reklama</option>
+              <option value="subscriptions">Abonent to'lovlar</option>
+              <option value="personal">Shaxsiy</option>
+              <option value="other">Boshqa</option>
+            </select>
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-2.5">
+            💡 Chiqim har doim <b>asosiy kartadan</b> yechiladi (
+            {primaryCard ? primaryCard.name : "asosiy karta"}).
+          </p>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -715,16 +868,116 @@ export default function FinancePage() {
   );
 }
 
+function DayGroupedList<T extends {
+  id: number;
+  title: string;
+  amount: string;
+  createdAt?: string | null;
+  cardId: number | null;
+}>({
+  groups,
+  keyOf,
+  tone,
+  renderMeta,
+  renderAmount,
+  onDelete,
+}: {
+  groups: DayGroup<T>[];
+  keyOf: (it: T) => string;
+  tone: "green" | "red" | "neutral";
+  renderMeta: (it: T) => React.ReactNode;
+  renderAmount: (it: T) => React.ReactNode;
+  onDelete: (it: T) => void;
+}) {
+  const toneCls =
+    tone === "green"
+      ? "text-green-600"
+      : tone === "red"
+      ? "text-red-600"
+      : "text-slate-900 dark:text-slate-100";
+  const totalText = (g: DayGroup<T>) => {
+    if (tone === "green") return `+${formatCurrency(g.total)}`;
+    if (tone === "red") return `-${formatCurrency(g.total)}`;
+    const net = g.total;
+    return net === 0
+      ? formatCurrency(0)
+      : `${net > 0 ? "+" : "-"}${formatCurrency(Math.abs(net))}`;
+  };
+  return (
+    <div className="divide-y divide-slate-200 dark:divide-slate-800">
+      {groups.map((g, gi) => {
+        const prev = groups[gi - 1];
+        const showMonth = !prev || prev.monthLabel !== g.monthLabel;
+        return (
+          <div key={g.date}>
+            {showMonth && (
+              <div className="px-6 pt-5 pb-1 text-[11px] font-bold uppercase tracking-wider text-accent">
+                {g.monthLabel}
+              </div>
+            )}
+            <div className="px-6 pt-3 pb-1 flex items-center justify-between">
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                {g.label}
+                {g.label !== "Bugun" && g.label !== "Kecha" && (
+                  <span className="ml-2 text-xs font-normal text-slate-400">
+                    {g.date}
+                  </span>
+                )}
+              </div>
+              <div className={`text-xs font-semibold ${toneCls}`}>
+                {g.items.length} ta · {totalText(g)}
+              </div>
+            </div>
+            {g.items.map((it) => (
+              <div
+                key={keyOf(it)}
+                className="px-6 py-2.5 flex items-center justify-between group hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-14 shrink-0 text-right font-mono text-[11px] text-slate-400 tabular-nums">
+                    {formatTime(it.createdAt)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
+                      {it.title}
+                    </div>
+                    <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                      {renderMeta(it)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-sm font-semibold">
+                    {renderAmount(it)}
+                  </div>
+                  <button
+                    onClick={() => onDelete(it)}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
   icon: Icon,
   tone,
+  sub,
 }: {
   label: string;
   value: string;
   icon: React.ComponentType<{ className?: string }>;
   tone: "green" | "red" | "blue";
+  sub?: string;
 }) {
   const tones = {
     green: "text-green-600 bg-green-50 dark:bg-green-900/30",
@@ -742,6 +995,11 @@ function StatCard({
       <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
         {value}
       </div>
+      {sub && (
+        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          {sub}
+        </div>
+      )}
     </div>
   );
 }

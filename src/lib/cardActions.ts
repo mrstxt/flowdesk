@@ -234,18 +234,17 @@ export async function addFundsToGoal(
     return { ok: false, error: "Maqsadga karta biriktirilmagan" };
   }
 
-  // Manba karta (default: asosiy karta)
-  let sourceCardId = fromCardId;
-  if (!sourceCardId) {
-    const primary = await getPrimaryCard();
-    if (!primary) {
-      return {
-        ok: false,
-        error: "Asosiy karta topilmadi. Avval asosiy karta yarating.",
-      };
-    }
-    sourceCardId = primary.id;
+  // Manba karta har doim ASOSIY karta bo'ladi (user talabi).
+  // fromCardId parametri eski mijozlar uchun saqlanadi, lekin e'tiborga
+  // olinmaydi — maqsadga ajratilgan pul doim asosiy kartadan yechiladi.
+  const primary = await getPrimaryCard();
+  if (!primary) {
+    return {
+      ok: false,
+      error: "Asosiy karta topilmadi. Avval asosiy karta yarating.",
+    };
   }
+  const sourceCardId = primary.id;
 
   const [srcCard] = await db
     .select()

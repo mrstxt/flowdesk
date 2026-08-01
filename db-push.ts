@@ -162,6 +162,15 @@ CREATE TABLE IF NOT EXISTS bot_reminders (
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
 
+-- 12b. bot_states (wizard holati — serverless uchun)
+CREATE TABLE IF NOT EXISTS bot_states (
+  chat_id INTEGER PRIMARY KEY,
+  mode VARCHAR(50) NOT NULL,
+  step INTEGER DEFAULT 1,
+  data TEXT,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
 -- 13. books
 CREATE TABLE IF NOT EXISTS books (
   id SERIAL PRIMARY KEY,

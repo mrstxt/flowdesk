@@ -7,21 +7,22 @@ import { parseMoneyInput } from "@/lib/utils";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const rows = await db.select().from(expenses).orderBy(desc(expenses.date));
+  const rows = await db
+    .select()
+    .from(expenses)
+    .orderBy(desc(expenses.date), desc(expenses.createdAt));
   return NextResponse.json(rows);
 }
 
 export async function POST(req: Request) {
   const body = await req.json();
-  let cardId = body.cardId && body.cardId !== "cash" ? Number(body.cardId) : null;
-  if (!cardId && body.cardId !== "cash" && body.cardId !== null) {
-    const [primary] = await db
-      .select()
-      .from(cards)
-      .where(eq(cards.type, "primary"))
-      .limit(1);
-    if (primary) cardId = primary.id;
-  }
+  // Chiqim har doim ASOSIY kartadan olinadi (user talabi)
+  const [primary] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.type, "primary"))
+    .limit(1);
+  const cardId = primary?.id ?? null;
   const amount = String(parseMoneyInput(body.amount));
 
   const [created] = await db
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
     })
     .returning();
 
-  // Agar karta tanlangan bo'lsa, karta balance dan ayiramiz
+  // Asosiy karta balance dan ayiramiz
   if (cardId) {
     await db
       .update(cards)

@@ -7,7 +7,7 @@ import {
   cards,
   cardTransactions,
 } from "@/db/schema";
-import { eq, gte, sql, and } from "drizzle-orm";
+import { eq, gte, sql, and, ne } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 import { getPrimaryCard } from "@/lib/cardActions";
 
@@ -108,6 +108,9 @@ export async function confirmOrder(
     }
 
     // 3. Shu oydagi sof foyda = kirim - chiqim
+    // MUHIM: source="goal" (ichki maqsad transferi) kirimga qo'shilmaydi,
+    // aks holda maqsadga ajratilgan pul yana "sof foyda" bo'lib hisoblanib,
+    // avtomatik foiz oshib ketardi (feedback loop).
     const ms = monthStartISO();
     const [incSum, expSum] = await Promise.all([
       db
@@ -115,7 +118,7 @@ export async function confirmOrder(
           total: sql<string>`COALESCE(SUM(${incomes.amount}), 0)`,
         })
         .from(incomes)
-        .where(gte(incomes.date, ms)),
+        .where(and(gte(incomes.date, ms), ne(incomes.source, "goal"))),
       db
         .select({
           total: sql<string>`COALESCE(SUM(${expenses.amount}), 0)`,
@@ -162,17 +165,42 @@ export async function confirmOrder(
         })
         .where(eq(goals.id, g.id));
 
-      // Shu ajratmani income sifatida yozamiz (maqsad.cardId ga)
+      // Maqsadga ajratish: pul buyurtma tushgan kartadan (asosan asosiy
+      // kartadan) olinadi va maqsad kartasiga tranzaksiyadek o'tkaziladi.
+      const sourceCardId = targetCardId; // buyurtma puli tushgan karta
       if (g.cardId) {
-        await db
-          .update(cards)
-          .set({ balance: sql`${cards.balance} + ${remainingAlloc}` })
-          .where(eq(cards.id, g.cardId));
+        // Maqsad kartasi manba kartadan FARQLI bo'lsa — haqiqiy tranzaksiya:
+        // manbadan ayiramiz, maqsad kartasiga qo'shamiz.
+        // Agar maqsad kartasi manba (asosiy) karta bilan bir xil bo'lsa,
+        // pul shu kartada allaqachon — balance o'zgartirilmaydi (duplikat
+        // qo'shish xatosi bo'lmasligi uchun).
+        if (sourceCardId && sourceCardId !== g.cardId) {
+          // 1. Manba kartadan (asosiy karta) ayiramiz
+          await db
+            .update(cards)
+            .set({ balance: sql`${cards.balance} - ${remainingAlloc}` })
+            .where(eq(cards.id, sourceCardId));
+          await db.insert(cardTransactions).values({
+            cardId: sourceCardId,
+            date: todayDateISO(),
+            type: "transfer_out",
+            amount: String(remainingAlloc),
+            relatedCardId: g.cardId,
+            description: `Maqsadga: ${g.title}`,
+          });
+          // 2. Maqsad kartasiga qo'shamiz
+          await db
+            .update(cards)
+            .set({ balance: sql`${cards.balance} + ${remainingAlloc}` })
+            .where(eq(cards.id, g.cardId));
+        }
+        // Audit: maqsad kartasiga tushganini qayd qilamiz
         await db.insert(cardTransactions).values({
           cardId: g.cardId,
           date: todayDateISO(),
           type: "goal_in",
           amount: String(remainingAlloc),
+          relatedCardId: sourceCardId ?? null,
           description: `Maqsadga: ${g.title}`,
         });
       }
