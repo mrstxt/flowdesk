@@ -384,9 +384,14 @@ export default function FinancePage() {
       {tab === "report" && (
         <div className="space-y-6">
           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">
-              Kartalar bo'yicha taqsimot (shu oy)
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                Kartalar bo'yicha taqsimot
+              </h2>
+              <span className="text-[11px] font-medium text-slate-500 bg-black/[0.04] dark:bg-white/[0.06] px-2.5 py-1 rounded-full">
+                Shu oy + Umumiy
+              </span>
+            </div>
             {cards.length === 0 ? (
               <div className="text-sm text-slate-500 text-center py-8">
                 Kartalar yo'q. Maqsadlar sahifasidan karta qo'shing.
@@ -394,6 +399,7 @@ export default function FinancePage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {cards.map((c) => {
+                  // Shu oy
                   const cardIn = monthIncomes
                     .filter((i) => i.cardId === c.id)
                     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
@@ -401,23 +407,31 @@ export default function FinancePage() {
                     .filter((e) => e.cardId === c.id)
                     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
                   const cardNet = cardIn - cardOut;
+                  // Umumiy (barcha davrlar)
+                  const allCardIn = incomes
+                    .filter((i) => i.cardId === c.id)
+                    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+                  const allCardOut = expenses
+                    .filter((e) => e.cardId === c.id)
+                    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+                  const allCardNet = allCardIn - allCardOut;
                   return (
                     <div
                       key={c.id}
                       className="p-4 border-2 border-slate-100 rounded-2xl"
                       style={{ borderLeftColor: c.color, borderLeftWidth: 4 }}
                     >
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-3">
                         <div
                           className="w-8 h-6 rounded"
                           style={{ background: c.color }}
                         />
-                        <div>
-                          <div className="font-semibold text-sm text-slate-900">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-slate-900 truncate">
                             {c.name}
                           </div>
                           {c.bank && (
-                            <div className="text-[11px] text-slate-500">
+                            <div className="text-[11px] text-slate-500 truncate">
                               {c.bank}
                               {c.last4 ? ` •••• ${c.last4}` : ""}
                             </div>
@@ -426,25 +440,51 @@ export default function FinancePage() {
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
-                          <div className="text-slate-500">Kirim</div>
+                          <div className="text-slate-400">Kirim (oy)</div>
                           <div className="font-bold text-green-600">
                             {formatCurrency(cardIn)}
                           </div>
                         </div>
                         <div>
-                          <div className="text-slate-500">Chiqim</div>
+                          <div className="text-slate-400">Chiqim (oy)</div>
                           <div className="font-bold text-red-600">
                             {formatCurrency(cardOut)}
                           </div>
                         </div>
                         <div>
-                          <div className="text-slate-500">Sof</div>
+                          <div className="text-slate-400">Sof (oy)</div>
                           <div
                             className={`font-bold ${
                               cardNet >= 0 ? "text-slate-900" : "text-red-600"
                             }`}
                           >
                             {formatCurrency(cardNet)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-dashed border-slate-200 grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <div className="text-slate-400">Kirim (umumiy)</div>
+                          <div className="font-bold text-green-600">
+                            {formatCurrency(allCardIn)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-400">Chiqim (umumiy)</div>
+                          <div className="font-bold text-red-600">
+                            {formatCurrency(allCardOut)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-400">Sof (umumiy)</div>
+                          <div
+                            className={`font-bold ${
+                              allCardNet >= 0
+                                ? "text-slate-900"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {formatCurrency(allCardNet)}
                           </div>
                         </div>
                       </div>

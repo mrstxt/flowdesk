@@ -15,7 +15,12 @@ import {
   Lock,
   PiggyBank,
 } from "lucide-react";
-import { formatCurrency, parseMoneyInput } from "@/lib/utils";
+import {
+  formatCurrency,
+  monthStartISO,
+  parseMoneyInput,
+  totalProfit,
+} from "@/lib/utils";
 import { Modal } from "@/components/Modal";
 
 type Goal = {
@@ -36,6 +41,19 @@ type Card = {
   balance: string;
   archived: boolean | null;
 };
+type Income = {
+  id: number;
+  amount: string;
+  date: string;
+  source: string;
+  cardId: number | null;
+};
+type Expense = {
+  id: number;
+  amount: string;
+  date: string;
+  cardId: number | null;
+};
 
 const CARD_COLORS = [
   "#0a84ff",
@@ -50,6 +68,8 @@ const CARD_COLORS = [
 export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
+  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [goalModal, setGoalModal] = useState(false);
   const [cardModal, setCardModal] = useState(false);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
@@ -65,12 +85,16 @@ export default function GoalsPage() {
   } | null>(null);
 
   async function load() {
-    const [g, c] = await Promise.all([
+    const [g, c, i, e] = await Promise.all([
       fetch("/api/goals").then((r) => r.json()),
       fetch("/api/cards?includeArchived=true").then((r) => r.json()),
+      fetch("/api/incomes").then((r) => r.json()),
+      fetch("/api/expenses").then((r) => r.json()),
     ]);
     setGoals(g);
     setCards(c);
+    setIncomes(i);
+    setExpenses(e);
   }
 
   useEffect(() => {
@@ -79,6 +103,38 @@ export default function GoalsPage() {
 
   const primaryCard = cards.find((c) => c.type === "primary" && !c.archived);
   const activeCards = cards.filter((c) => !c.archived);
+
+  // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...).
+  // Shu pul asosiy kartada to'planadi (ichki goal transferlar kirmaydi).
+  const totalProfitAll = totalProfit(incomes, expenses);
+  const ms = monthStartISO();
+  const netIn = incomes
+    .filter((i) => i.date >= ms && i.source !== "goal")
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  const netOut = expenses
+    .filter((e) => e.date >= ms)
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+  const net = netIn - netOut;
+  // O'tgan oy sof foydasi
+  const prevMonth = new Date();
+  prevMonth.setDate(1);
+  prevMonth.setMonth(prevMonth.getMonth() - 1);
+  const prevKey = `${prevMonth.getFullYear()}-${String(
+    prevMonth.getMonth() + 1
+  ).padStart(2, "0")}`;
+  const prevIn = incomes
+    .filter((i) => i.date.startsWith(prevKey) && i.source !== "goal")
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  const prevOut = expenses
+    .filter((e) => e.date.startsWith(prevKey))
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+  const prevNet = prevIn - prevOut;
+
+  // Karta ko'rsatiladigan pul: asosiy karta uchun umumiy foyda (barcha davr),
+  // qolgan kartalar uchun DB qoldiq.
+  function cardDisplayBalance(c: (typeof cards)[number]): number {
+    return c.type === "primary" ? totalProfitAll : parseMoneyInput(c.balance);
+  }
 
   function cardName(id: number | null | undefined): string {
     if (!id) return "—";
@@ -399,11 +455,25 @@ export default function GoalsPage() {
                 </div>
                 <div className="mb-3">
                   <div className="text-[11px] text-slate-500 mb-0.5">
-                    Qoldiq
+                    {c.type === "primary" ? "Asosiy kartadagi pul" : "Qoldiq"}
                   </div>
                   <div className="font-display text-2xl font-extrabold text-slate-900 tabular-nums">
-                    {formatCurrency(c.balance)}
+                    {formatCurrency(
+                      c.type === "primary" ? totalProfitAll : c.balance
+                    )}
                   </div>
+                  {c.type === "primary" && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full">
+                        <TrendingUp className="w-3 h-3" />
+                        Sof foyda (oy): {formatCurrency(net)}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
+                        <Wallet className="w-3 h-3" />
+                        O'tgan oy: {formatCurrency(prevNet)}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <button
@@ -610,7 +680,7 @@ export default function GoalsPage() {
               {activeCards.map((c) => (
                 <option key={c.id} value={c.id}>
                   💳 {c.name} ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
-                  {formatCurrency(c.balance)}
+                  {formatCurrency(cardDisplayBalance(c))}
                 </option>
               ))}
             </select>
@@ -723,7 +793,7 @@ export default function GoalsPage() {
           )}
           {editingCard && (
             <div className="text-xs text-slate-500 bg-slate-50 px-3 py-2 rounded-xl">
-              Hozirgi qoldiq: <b>{formatCurrency(editingCard.balance)}</b> —
+              Hozirgi qoldiq: <b>{formatCurrency(cardDisplayBalance(editingCard))}</b> —
               qoldiqni faqat "Pul kiritish" / "Chiqarish" tugmalari orqali
               o'zgartiring.
             </div>
@@ -952,7 +1022,7 @@ export default function GoalsPage() {
               {activeCards.map((c) => (
                 <option key={c.id} value={c.id}>
                   💳 {c.name} ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
-                  {formatCurrency(c.balance)}
+                  {formatCurrency(cardDisplayBalance(c))}
                 </option>
               ))}
             </select>
@@ -969,7 +1039,7 @@ export default function GoalsPage() {
               {activeCards.map((c) => (
                 <option key={c.id} value={c.id}>
                   💳 {c.name} ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
-                  {formatCurrency(c.balance)}
+                  {formatCurrency(cardDisplayBalance(c))}
                 </option>
               ))}
             </select>
