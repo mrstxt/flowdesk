@@ -81,6 +81,7 @@ const EXPENSE_CATS: Record<string, string> = {
   ads: "Reklama",
   subscriptions: "Abonent to'lovlar",
   personal: "Shaxsiy",
+  transfer: "Transfer",
   other: "Boshqa",
 };
 
@@ -588,6 +589,8 @@ export default function FinancePage() {
                       ? "Buyurtma"
                       : i.source === "goal"
                       ? "Maqsadga"
+                      : i.source === "transfer"
+                      ? "Transfer"
                       : i.source === "bonus"
                       ? "Bonus"
                       : "Boshqa"}
@@ -695,6 +698,8 @@ export default function FinancePage() {
                         ? "Buyurtma"
                         : t.source === "goal"
                         ? "Maqsadga"
+                        : t.source === "transfer"
+                        ? "Transfer"
                         : t.source === "bonus"
                         ? "Bonus"
                         : "Boshqa"

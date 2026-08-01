@@ -23,6 +23,7 @@ import {
   addCardIncome,
   addCardExpense,
   getPrimaryCard,
+  getCardAvailableBalance,
 } from "@/lib/cardActions";
 
 export const dynamic = "force-dynamic";
@@ -91,7 +92,11 @@ async function sendMessage(
     const messageId = data?.result?.message_id as number | undefined;
     if (typeof messageId === "number") {
       const postIds = postFinishDeletes.get(chatId);
-      if (postIds && !text.startsWith("❌")) {
+      // MAIN_KEYBOARD (reply tugmalar) bilan yuborilgan xabarni o'chirmaymiz —
+      // aks holda tugmalar ham yo'qolib qoladi.
+      const carriesMainKeyboard =
+        extra && (extra as { reply_markup?: unknown }).reply_markup === MAIN_KEYBOARD;
+      if (postIds && !text.startsWith("❌") && !carriesMainKeyboard) {
         // Wizard yakunida yuborilgan tasdiqlash xabari — ham o'chiriladi.
         // ❌ bilan boshlanadigan xatoliklar esa qoldiriladi (foydalanuvchi ko'rishi kerak).
         postIds.push(messageId);
@@ -189,8 +194,8 @@ const MAIN_KEYBOARD = {
   keyboard: [
     [{ text: "📋 Rejalar" }, { text: "📅 Bugungi vazifalar" }],
     [{ text: "➕ Buyurtma" }, { text: "💸 Chiqim" }, { text: "💰 Kirim" }],
-    [{ text: "📊 Statistika" }, { text: "📚 Kitob qo'shish" }],
-    [{ text: "🎬 Video qo'shish" }, { text: "🎯 Maqsad" }],
+    [{ text: "💳 Kartalarim" }, { text: "📊 Statistika" }],
+    [{ text: "📚 Kitob qo'shish" }, { text: "🎬 Video qo'shish" }, { text: "🎯 Maqsad" }],
     [{ text: "☀️ Uyg'onish vaqti" }, { text: "🌙 Uxlash vaqti" }],
     [{ text: "🔔 Botni yoqish" }, { text: "🔕 Botni o'chirish" }],
     [{ text: "🏠 Menyu" }, { text: "❓ Yordam" }],
@@ -211,6 +216,7 @@ const BUTTON_TO_CMD: Record<string, string> = {
   "➕ Buyurtma": "/buyurtma_qilish",
   "💸 Chiqim": "/chiqim_qilish",
   "💰 Kirim": "/kirim_qilish",
+  "💳 Kartalarim": "/kartalarim",
   "📊 Statistika": "/stat",
   "📚 Kitob qo'shish": "/kitob_qilish",
   "🎬 Video qo'shish": "/video_qilish",
@@ -405,6 +411,7 @@ const HELP = [
   "/vazifa Matn, sana, kategoriya",
   "/rejalarni — bugungi rejalarni ko'rish",
   "/stat — oylik statistika",
+  "/kartalarim — kartalarim va qoldiqlar",
   "",
   "<b>Rivojlanish:</b>",
   "/kitob Nomi, muallif, sahifalar, PDF",
@@ -426,12 +433,19 @@ async function sendCardSelectionButtons(
     .select()
     .from(cards)
     .where(eq(cards.archived, false));
-  const cardButtons = activeCards.map((c) => [
-    {
-      text: `💳 ${c.name} ${c.type === "primary" ? "(Asosiy karta)" : ""}`,
-      callback_data: `${prefix}${c.id}`,
-    },
-  ]);
+  const cardButtons = [];
+  for (const c of activeCards) {
+    const bal =
+      c.type === "primary"
+        ? await getCardAvailableBalance(c.id)
+        : Number(c.balance);
+    cardButtons.push([
+      {
+        text: `💳 ${c.name} ${c.type === "primary" ? "(Asosiy)" : ""} — ${fmt(bal)}`,
+        callback_data: `${prefix}${c.id}`,
+      },
+    ]);
+  }
   if (includeCash) {
     cardButtons.push([
       { text: "💵 Naqd pul", callback_data: `${prefix}cash` },
@@ -1632,6 +1646,39 @@ async function handleCommand(
       await sendMessage(chatId, "🏠 <b>Asosiy menyu</b>", {
         reply_markup: MAIN_KEYBOARD,
       });
+      return;
+    }
+
+    if (cmd === "/kartalarim") {
+      const allCards = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.archived, false));
+      if (allCards.length === 0) {
+        await sendMessage(
+          chatId,
+          "💳 <b>Kartalar yo'q.</b>\n\nPanel → Maqsadlar & Kartalar bo'limida karta qo'shing.",
+          { reply_markup: MAIN_KEYBOARD }
+        );
+        return;
+      }
+      const lines: string[] = [];
+      for (const c of allCards) {
+        const bal =
+          c.type === "primary"
+            ? await getCardAvailableBalance(c.id)
+            : Number(c.balance);
+        const typeLabel =
+          c.type === "primary" ? "🔒 Asosiy karta" : "💳 Qo'shimcha karta";
+        lines.push(
+          `${typeLabel} <b>${c.name}</b>${c.last4 ? ` •••• ${c.last4}` : ""}\n💰 ${fmt(bal)}`
+        );
+      }
+      await sendMessage(
+        chatId,
+        `💳 <b>Kartalarim (${allCards.length})</b>\n\n${lines.join("\n\n")}`,
+        { reply_markup: MAIN_KEYBOARD }
+      );
       return;
     }
 

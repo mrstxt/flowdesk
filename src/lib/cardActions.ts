@@ -236,6 +236,30 @@ export async function transferBetweenCards(
     description: desc,
   });
 
+  // Asosiy karta ishtirok etsa — umumiy foyda (totalProfitAll) ham o'zgarishi
+  // kerak, chunki UI asosiy kartani totalProfitAll orqali ko'rsatadi:
+  // - Asosiy kartadan chiqsa → expense (foyda kamayadi)
+  // - Asosiy kartaga tushsa → income (foyda oshadi)
+  if (from.type === "primary") {
+    await db.insert(expenses).values({
+      title: desc,
+      amount: String(amount),
+      category: "transfer",
+      date: today,
+      cardId: fromCardId,
+    });
+  }
+  if (to.type === "primary") {
+    await db.insert(incomes).values({
+      title: desc,
+      amount: String(amount),
+      source: "transfer",
+      date: today,
+      paymentType: "card",
+      cardId: toCardId,
+    });
+  }
+
   return { ok: true };
 }
 
