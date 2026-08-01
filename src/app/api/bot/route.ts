@@ -65,8 +65,8 @@ async function sendMessage(
   chatId: number,
   text: string,
   extra?: Record<string, unknown>
-) {
-  if (!TOKEN) return;
+): Promise<number | null> {
+  if (!TOKEN) return null;
   try {
     const res = await fetch(
       `https://api.telegram.org/bot${TOKEN}/sendMessage`,
@@ -85,10 +85,88 @@ async function sendMessage(
     if (!res.ok) {
       const t = await res.text();
       console.error("sendMessage failed:", res.status, t);
+      return null;
     }
+    const data = await res.json();
+    const messageId = data?.result?.message_id as number | undefined;
+    // Wizard davom etayotgan bo'lsa — bot xabarini ham tozalash ro'yxatiga
+    // qo'shamiz (keyinchalik chatni tozalash uchun).
+    if (typeof messageId === "number") trackMessage(chatId, messageId);
+    return typeof messageId === "number" ? messageId : null;
   } catch (e) {
     console.error("sendMessage error:", e);
+    return null;
   }
+}
+
+/* ── Wizard chat tozalash ── */
+
+async function deleteMessage(chatId: number, messageId: number) {
+  if (!TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${TOKEN}/deleteMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+    });
+  } catch (e) {
+    console.error("deleteMessage error:", e);
+  }
+}
+
+// Wizard paytida yuborilgan bot xabari yoki kelgan user xabarini
+// tozalash ro'yxatiga qo'shamiz (state.data.pendingDelete).
+function trackMessage(chatId: number, messageId: number) {
+  const st = userState.get(chatId);
+  if (!st) return;
+  let ids: number[] = [];
+  try {
+    const raw = st.data.pendingDelete;
+    if (raw) ids = JSON.parse(raw);
+  } catch {
+    ids = [];
+  }
+  ids.push(messageId);
+  st.data.pendingDelete = JSON.stringify(ids);
+  userState.set(chatId, st);
+}
+
+// Wizard tugagach (yoki bekor qilinganda): barcha oraliq xabarlarni
+// (savollar + javoblar) chatdan o'chiramiz va holatni tozalaymiz.
+async function finishWizard(chatId: number) {
+  const st = userState.get(chatId);
+  if (st) {
+    let ids: number[] = [];
+    try {
+      const raw = st.data.pendingDelete;
+      if (raw) ids = JSON.parse(raw);
+    } catch {
+      ids = [];
+    }
+    for (const id of ids) await deleteMessage(chatId, id);
+  }
+  userState.delete(chatId);
+}
+
+// Yangi wizard state yaratishda eski pendingDelete ro'yxatini saqlaymiz —
+// aks holda avvalgi wizard'dagi xabarlar tozalanmay qolardi.
+function setWizardState(
+  chatId: number,
+  mode: string,
+  step: number,
+  data: Record<string, string | null> = {}
+) {
+  const prev = userState.get(chatId);
+  let pendingDelete: string | null = null;
+  if (prev) {
+    try {
+      pendingDelete = prev.data.pendingDelete ?? null;
+    } catch {
+      pendingDelete = null;
+    }
+  }
+  if (pendingDelete) data.pendingDelete = pendingDelete;
+  userState.set(chatId, { mode, step, data });
 }
 
 const MAIN_KEYBOARD = {
@@ -399,7 +477,7 @@ async function handleWizardStep(chatId: number, text: string) {
     if (state.step === 4) {
       const client = text.trim();
       state.data.client = client === "-" || !client ? null : client;
-      userState.delete(chatId);
+      await finishWizard(chatId);
       try {
         await db.insert(orders).values({
           title: state.data.title ?? "",
@@ -458,7 +536,7 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 3) {
       const cat = EXPENSE_CAT[text.trim().toLowerCase()] || "other";
-      userState.delete(chatId);
+      await finishWizard(chatId);
       // Chiqim har doim ASOSIY kartadan olinadi (user talabi)
       const primary = await getPrimaryCard();
       let cardLabel = "💵 Naqd pul";
@@ -535,7 +613,7 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 3) {
       const c = await findCardByText(text);
-      userState.delete(chatId);
+      await finishWizard(chatId);
       let cardLabel = "💵 Naqd pul";
       if (c) {
         cardLabel = `💳 ${c.name}`;
@@ -604,7 +682,7 @@ async function handleWizardStep(chatId: number, text: string) {
     if (state.step === 4) {
       const pdf = text.trim();
       state.data.pdfUrl = pdf === "-" || !pdf ? null : pdf;
-      userState.delete(chatId);
+      await finishWizard(chatId);
       try {
         await db.insert(books).values({
           title: state.data.title ?? "",
@@ -663,7 +741,7 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 3) {
       const cat = VIDEO_CAT[text.trim().toLowerCase()] || "other";
-      userState.delete(chatId);
+      await finishWizard(chatId);
       try {
         await db.insert(videos).values({
           title: state.data.title ?? "YouTube video",
@@ -729,7 +807,7 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 4) {
       const c = await findCardByText(text);
-      userState.delete(chatId);
+      await finishWizard(chatId);
       const cardLabel = c ? `💳 ${c.name}` : "—";
       try {
         await db.insert(goals).values({
@@ -765,7 +843,7 @@ async function handleWizardStep(chatId: number, text: string) {
       await sendMessage(chatId, "Sabab bo'sh bo'lmasligi kerak. Yozing:");
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     const settingsMap = await loadSettingsMap();
     const expectedWake = getSetting(settingsMap, "wake_time", "04:30");
     const actualWake = getTashkentTimeString();
@@ -824,7 +902,7 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     if (state.step === 2) {
       const cat = TASK_CAT[text.trim().toLowerCase()] || "personal";
-      userState.delete(chatId);
+      await finishWizard(chatId);
       try {
         await db.insert(tasks).values({
           title: state.data.title ?? "",
@@ -890,7 +968,7 @@ async function handleWizardStep(chatId: number, text: string) {
     if (state.step === 3) {
       const endTime = text.trim();
       state.data.endTime = endTime === "-" || !endTime ? null : endTime;
-      userState.delete(chatId);
+      await finishWizard(chatId);
       try {
         await db.insert(routines).values({
           title: state.data.title ?? "",
@@ -924,7 +1002,7 @@ async function handleWizardStep(chatId: number, text: string) {
       await sendMessage(chatId, "Sabab yoki video yuboring:");
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     try {
       const [existing] = await db
         .select()
@@ -969,7 +1047,7 @@ async function handleWizardStep(chatId: number, text: string) {
       );
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     try {
       await db
         .insert(settings)
@@ -1004,7 +1082,7 @@ async function handleWizardStep(chatId: number, text: string) {
       );
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     try {
       await db
         .insert(settings)
@@ -1046,7 +1124,7 @@ async function handleCallback(
       await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     const cardId = val === "cash" ? null : Number(val);
     const payType = cardId ? "card" : "cash";
     let cardLabel = "💵 Naqd pul";
@@ -1091,7 +1169,7 @@ async function handleCallback(
       await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     const primary = await getPrimaryCard();
     let cardLabel = "💵 Naqd pul";
     let cardId: number | null = null;
@@ -1142,7 +1220,7 @@ async function handleCallback(
       await answerCallback(chatId, callbackId, "❌ Jarayon muddati o'tgan.");
       return;
     }
-    userState.delete(chatId);
+    await finishWizard(chatId);
     const cardId = Number(val);
     let cardLabel = "—";
     if (cardId) {
@@ -1247,7 +1325,7 @@ async function handleCallback(
         .where(
           and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
         );
-      userState.set(chatId, { mode: "wake_reason", step: 1, data: {} });
+      setWizardState(chatId, "wake_reason", 1);
       await answerCallback(chatId, callbackId, "😴 Uxlab qoldim");
       await sendMessage(
         chatId,
@@ -1311,11 +1389,7 @@ async function handleCallback(
 
   if (data === "tomorrow_task") {
     const tomorrow = tomorrowTashkentISO();
-    userState.set(chatId, {
-      mode: "tomorrow_task",
-      step: 1,
-      data: { targetDate: tomorrow },
-    });
+    setWizardState(chatId, "tomorrow_task", 1, { targetDate: tomorrow });
     await sendMessage(
       chatId,
       `📋 <b>Ertangi kun uchun ish qo'shish</b>\n\n📅 ${tomorrow}\n\n1️⃣ Ish matnini yozing:`,
@@ -1327,11 +1401,7 @@ async function handleCallback(
 
   if (data === "tomorrow_routine") {
     const tomorrow = tomorrowTashkentISO();
-    userState.set(chatId, {
-      mode: "tomorrow_routine",
-      step: 1,
-      data: { targetDate: tomorrow },
-    });
+    setWizardState(chatId, "tomorrow_routine", 1, { targetDate: tomorrow });
     await sendMessage(
       chatId,
       `🎯 <b>Ertangi kun uchun reja</b>\n\n📅 ${tomorrow}\n\n1️⃣ Reja nomini yozing (masalan: "Sport bilan shug'ullanish"):`,
@@ -1369,11 +1439,7 @@ async function handleCallback(
           { reply_markup: MAIN_KEYBOARD }
         );
       } else {
-        userState.set(chatId, {
-          mode: "result_response",
-          step: 1,
-          data: { question: "tasksDone" },
-        });
+        setWizardState(chatId, "result_response", 1, { question: "tasksDone" });
         await sendMessage(
           chatId,
           "📝 <b>Nima uchun bajara olmadingiz?</b>\n\nSababini yozing yoki qisqa video yuboring (maks 1 minut):",
@@ -1412,10 +1478,8 @@ async function handleCallback(
         financeRecorded ? "✅ Hisob yozildi!" : "❌ Yozilmadi"
       );
       if (!financeRecorded) {
-        userState.set(chatId, {
-          mode: "result_response",
-          step: 1,
-          data: { question: "financeRecorded" },
+        setWizardState(chatId, "result_response", 1, {
+          question: "financeRecorded",
         });
         await sendMessage(
           chatId,
@@ -1540,7 +1604,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/menu") {
-      userState.delete(chatId);
+      await finishWizard(chatId);
       await sendMessage(chatId, "🏠 <b>Asosiy menyu</b>", {
         reply_markup: MAIN_KEYBOARD,
       });
@@ -1548,7 +1612,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/uyg_onish") {
-      userState.set(chatId, { mode: "set_wake_time", step: 1, data: {} });
+      setWizardState(chatId, "set_wake_time", 1);
       const settingsMap = await loadSettingsMap();
       const cur = getSetting(settingsMap, "wake_time", "04:30");
       await sendMessage(
@@ -1560,7 +1624,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/uxlash") {
-      userState.set(chatId, { mode: "set_sleep_time", step: 1, data: {} });
+      setWizardState(chatId, "set_sleep_time", 1);
       const settingsMap = await loadSettingsMap();
       const cur = getSetting(settingsMap, "sleep_time", "21:40");
       await sendMessage(
@@ -1572,7 +1636,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/bekor") {
-      userState.delete(chatId);
+      await finishWizard(chatId);
       await sendMessage(chatId, "❌ Bekor qilindi.", {
         reply_markup: MAIN_KEYBOARD,
       });
@@ -1580,7 +1644,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/buyurtma_qilish") {
-      userState.set(chatId, { mode: "order", step: 1, data: {} });
+      setWizardState(chatId, "order", 1);
       await sendMessage(
         chatId,
         "🆕 <b>Yangi buyurtma qo'shish</b>\n\n1️⃣ Buyurtma nomini yozing:",
@@ -1590,7 +1654,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/chiqim_qilish") {
-      userState.set(chatId, { mode: "expense", step: 1, data: {} });
+      setWizardState(chatId, "expense", 1);
       await sendMessage(
         chatId,
         "💸 <b>Chiqim qo'shish</b>\n\n1️⃣ Chiqim nomini yozing:",
@@ -1600,7 +1664,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/kirim_qilish") {
-      userState.set(chatId, { mode: "income", step: 1, data: {} });
+      setWizardState(chatId, "income", 1);
       await sendMessage(
         chatId,
         "💰 <b>Kirim qo'shish</b>\n\n1️⃣ Kirim nomini yozing:",
@@ -1610,7 +1674,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/kitob_qilish") {
-      userState.set(chatId, { mode: "book", step: 1, data: {} });
+      setWizardState(chatId, "book", 1);
       await sendMessage(
         chatId,
         "📚 <b>Kitob qo'shish</b>\n\n1️⃣ Kitob nomini yozing:",
@@ -1620,7 +1684,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/video_qilish") {
-      userState.set(chatId, { mode: "video", step: 1, data: {} });
+      setWizardState(chatId, "video", 1);
       await sendMessage(
         chatId,
         "🎬 <b>Video qo'shish</b>\n\n1️⃣ YouTube havolasini yuboring:",
@@ -1630,7 +1694,7 @@ async function handleCommand(chatId: number, text: string) {
     }
 
     if (cmd === "/maqsad_qilish") {
-      userState.set(chatId, { mode: "goal", step: 1, data: {} });
+      setWizardState(chatId, "goal", 1);
       await sendMessage(
         chatId,
         "🎯 <b>Maqsad yaratish</b>\n\n1️⃣ Maqsad nomini yozing:",
@@ -2185,6 +2249,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
       }
 
+      // Wizard davom etayotgan bo'lsa — foydalanuvchi xabari ham
+      // tozalash ro'yxatiga qo'shiladi (keyin finishWizard o'chiradi).
+      if (typeof msg.message_id === "number") {
+        trackMessage(chatId, msg.message_id);
+      }
+
       // Video note (dumaloq video)
       if (msg.video_note) {
         const state = userState.get(chatId);
@@ -2209,7 +2279,7 @@ export async function POST(req: Request) {
                 responseType: "video",
               });
             }
-            userState.delete(chatId);
+            await finishWizard(chatId);
             await sendMessage(
               chatId,
               "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
@@ -2245,7 +2315,7 @@ export async function POST(req: Request) {
               responseType: "video",
             });
           }
-          userState.delete(chatId);
+          await finishWizard(chatId);
           await sendMessage(
             chatId,
             "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",

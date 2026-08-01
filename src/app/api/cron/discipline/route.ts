@@ -361,9 +361,9 @@ export async function GET(req: Request) {
       }
     }
 
-    // ── Sleep reminder (ANIQ sleepTime da, faqat kechqurun) ──
+    // ── Sleep reminder (ANIQ sleepTime da — user kiritgan vaqtda) ──
     const sleepMin = safeMinutes(sleepTime, 21 * 60 + 40);
-    if (reminderDue(sleepMin) && nowMin >= 18 * 60) {
+    if (reminderDue(sleepMin)) {
       const exists = await db
         .select({ id: botReminders.id })
         .from(botReminders)
