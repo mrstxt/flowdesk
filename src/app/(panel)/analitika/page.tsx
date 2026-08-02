@@ -56,6 +56,17 @@ type DailyResult = {
   videoFileId: string | null;
   createdAt: string;
 };
+type RoutineReminder = {
+  id: number;
+  routineId: number | null;
+  date: string;
+  type: string;
+  responded: boolean | null;
+  responseText: string | null;
+  routineTitle: string | null;
+  routineTime: string | null;
+  routineEndTime: string | null;
+};
 
 const EXPENSE_LABEL: Record<string, string> = {
   rent: "Ijara",
@@ -106,6 +117,16 @@ function fmtMin(min: number | null): string {
   return `${Math.abs(min)} daq (erta)`;
 }
 
+function parseRoutineDelay(responseText: string | null): number | null {
+  if (!responseText) return null;
+  const match = responseText.match(/delay=(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function isRoutineDone(responseText: string | null): boolean {
+  return responseText?.includes("Bajarildi") ?? false;
+}
+
 export default function AnalitikaPage() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -113,6 +134,7 @@ export default function AnalitikaPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [sleepLogs, setSleepLogs] = useState<SleepLog[]>([]);
   const [dailyResults, setDailyResults] = useState<DailyResult[]>([]);
+  const [routineReminders, setRoutineReminders] = useState<RoutineReminder[]>([]);
   const [wake, setWake] = useState("04:30");
   const [sleep, setSleep] = useState("21:40");
 
@@ -128,14 +150,18 @@ export default function AnalitikaPage() {
       fetch(`/api/daily-results?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
         r.json()
       ),
+      fetch(`/api/routine-analytics?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
+        r.json()
+      ),
       fetch("/api/settings").then((r) => r.json()),
-    ]).then(([i, e, o, g, sl, dr, s]) => {
+    ]).then(([i, e, o, g, sl, dr, rr, s]) => {
       setIncomes(i);
       setExpenses(e);
       setOrders(o);
       setGoals(g);
       setSleepLogs(sl);
       setDailyResults(dr);
+      setRoutineReminders(rr);
       setWake(s.wake_time || "04:30");
       setSleep(s.sleep_time || "21:40");
     });
@@ -228,6 +254,45 @@ export default function AnalitikaPage() {
     : 0;
   const oversleptDays = wakeStats.filter((s) => s.overslept);
 
+  // Kunlik reja intizomi (oxirgi 7 kun)
+  const actionableRoutineReminders = routineReminders.filter(
+    (r) =>
+      last7.includes(r.date) &&
+      (r.type === "routine_deadline" ||
+        r.type === "routine" ||
+        (r.type === "routine_start" && !r.routineEndTime))
+  );
+  const answeredRoutineReminders = actionableRoutineReminders.filter(
+    (r) => r.responded
+  );
+  const doneRoutineReminders = answeredRoutineReminders.filter((r) =>
+    isRoutineDone(r.responseText)
+  );
+  const onTimeRoutineReminders = doneRoutineReminders.filter((r) => {
+    const delay = parseRoutineDelay(r.responseText);
+    return delay !== null && delay <= 5;
+  });
+  const lateRoutineReminders = doneRoutineReminders.filter((r) => {
+    const delay = parseRoutineDelay(r.responseText);
+    return delay !== null && delay > 5;
+  });
+  const skippedRoutineReminders = answeredRoutineReminders.filter(
+    (r) => !isRoutineDone(r.responseText)
+  );
+  const routineOnTimePct = doneRoutineReminders.length
+    ? Math.round(
+        (onTimeRoutineReminders.length / doneRoutineReminders.length) * 100
+      )
+    : 0;
+  const avgRoutineDelay = lateRoutineReminders.length
+    ? Math.round(
+        lateRoutineReminders.reduce(
+          (sum, r) => sum + (parseRoutineDelay(r.responseText) ?? 0),
+          0
+        ) / lateRoutineReminders.length
+      )
+    : 0;
+
   // Top expense category this month
   const byCat: Record<string, number> = {};
   expenses
@@ -293,6 +358,18 @@ export default function AnalitikaPage() {
         good: false,
       });
   }
+  if (doneRoutineReminders.length >= 3) {
+    if (routineOnTimePct >= 80)
+      insights.push({
+        text: `Kunlik rejalar yaxshi ketmoqda: oxirgi 7 kunda bajarilgan rejalarning ${routineOnTimePct}% qismi o'z vaqtida yopilgan.`,
+        good: true,
+      });
+    else if (routineOnTimePct < 50)
+      insights.push({
+        text: `Rejalarda kechikish ko'paygan: bajarilgan rejalarning faqat ${routineOnTimePct}% qismi vaqtida yopilgan. O'rtacha kechikish ${avgRoutineDelay} daqiqa.`,
+        good: false,
+      });
+  }
   if (insights.length === 0)
     insights.push({
       text: "Hozircha ma'lumot kam — buyurtmalar va xarajatlarni kiritib boring, analitika o'zi tavsiyalar beradi.",
@@ -324,7 +401,7 @@ export default function AnalitikaPage() {
       </div>
 
       {/* Intizom samaradorligi */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         {/* Uyg'onish samaradorligi */}
         <div className="bg-gradient-to-br from-[#ff9f0a]/8 to-white rounded-3xl border border-[#ff9f0a]/20 p-6">
           <div className="flex items-center gap-2 mb-3">
@@ -442,6 +519,68 @@ export default function AnalitikaPage() {
             <Clock className="w-3 h-3" />
             Reja: {sleep}
           </div>
+        </div>
+
+        {/* Kunlik reja samaradorligi */}
+        <div className="bg-gradient-to-br from-[#34c759]/8 to-white rounded-3xl border border-[#34c759]/20 p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <MessageSquare className="w-5 h-5 text-[#34c759]" />
+            <h2 className="font-display text-lg font-bold text-slate-900">
+              Kunlik rejalar
+            </h2>
+            <span className="ml-auto text-xs text-slate-500">
+              Oxirgi 7 kun
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">Vaqtida</div>
+              <div className="font-display text-2xl font-extrabold text-[#34c759]">
+                {routineOnTimePct}%
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">Kechikkan</div>
+              <div className="font-display text-2xl font-extrabold text-accent">
+                {lateRoutineReminders.length}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">O'tkazilgan</div>
+              <div className="font-display text-2xl font-extrabold text-slate-700">
+                {skippedRoutineReminders.length}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <Clock className="w-3 h-3" />
+            Javob berilgan: {answeredRoutineReminders.length}/
+            {actionableRoutineReminders.length}
+          </div>
+          {lateRoutineReminders.length > 0 && (
+            <details className="mt-3">
+              <summary className="text-[11px] text-accent cursor-pointer hover:underline">
+                Kechikkan rejalar ({lateRoutineReminders.length})
+              </summary>
+              <ul className="mt-2 space-y-1.5">
+                {lateRoutineReminders.slice(-5).map((r) => (
+                  <li
+                    key={r.id}
+                    className="text-[11px] p-2 rounded-xl bg-accent-soft/60 text-slate-700"
+                  >
+                    <span className="font-bold">
+                      {new Date(r.date + "T00:00:00").toLocaleDateString(
+                        "uz-UZ",
+                        { day: "2-digit", month: "short" }
+                      )}
+                    </span>{" "}
+                    — {r.routineTitle || "Reja"} · +
+                    {parseRoutineDelay(r.responseText)} daq
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       </div>
 

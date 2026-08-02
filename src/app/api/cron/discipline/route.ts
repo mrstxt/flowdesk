@@ -224,7 +224,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // ── Routine reminders (ANIQ r.time da) ──
+    // ── Routine start reminders (ANIQ r.time da, tugmasiz) ──
     for (const r of allRoutines) {
       const rMin = safeMinutes(r.time, 0);
       if (reminderDue(rMin)) {
@@ -232,7 +232,11 @@ export async function GET(req: Request) {
           .select({ id: botReminders.id })
           .from(botReminders)
           .where(
-            and(eq(botReminders.date, today), eq(botReminders.routineId, r.id))
+            and(
+              eq(botReminders.date, today),
+              eq(botReminders.routineId, r.id),
+              eq(botReminders.type, "routine_start")
+            )
           )
           .limit(1);
 
@@ -246,17 +250,26 @@ export async function GET(req: Request) {
                 r.title
               )}</b>${endInfo}\n\nVaqti keldi! Boshlang 💪`,
               parse_mode: "HTML",
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: "✅ Bajarildi", callback_data: `routine_yes_${r.id}` }],
-                  [
-                    {
-                      text: "⏭ Hozircha emas",
-                      callback_data: `routine_no_${r.id}`,
+              ...(r.endTime
+                ? {}
+                : {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [
+                          {
+                            text: "✅ Bajarildi",
+                            callback_data: `routine_yes_${r.id}`,
+                          },
+                        ],
+                        [
+                          {
+                            text: "⏭ Hozircha emas",
+                            callback_data: `routine_no_${r.id}`,
+                          },
+                        ],
+                      ],
                     },
-                  ],
-                ],
-              },
+                  }),
             });
             if (sent.ok) anyOk = true;
             else
@@ -270,7 +283,67 @@ export async function GET(req: Request) {
               await db.insert(botReminders).values({
                 routineId: r.id,
                 date: today,
-                type: "routine",
+                type: "routine_start",
+                sent: true,
+              });
+            }
+            messagesSent++;
+          }
+        }
+      }
+    }
+
+    // ── Routine deadline reminders (deadline/endTime da, tugmali) ──
+    for (const r of allRoutines) {
+      if (!r.endTime) continue;
+      const deadlineMin = safeMinutes(r.endTime, safeMinutes(r.time, 0));
+      if (reminderDue(deadlineMin)) {
+        const exists = await db
+          .select({ id: botReminders.id })
+          .from(botReminders)
+          .where(
+            and(
+              eq(botReminders.date, today),
+              eq(botReminders.routineId, r.id),
+              eq(botReminders.type, "routine_deadline")
+            )
+          )
+          .limit(1);
+
+        if (force || exists.length === 0) {
+          let anyOk = false;
+          for (const chatId of chatIds) {
+            const sent = await botSend("sendMessage", {
+              chat_id: chatId,
+              text: `⏳ <b>${escapeHtml(r.title)}</b>\n\nDeadline vaqti keldi: <b>${escapeHtml(
+                r.endTime
+              )}</b>\nBajarildimi?`,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: "✅ Bajarildi", callback_data: `routine_yes_${r.id}` }],
+                  [
+                    {
+                      text: "⏭ Bajarilmadi",
+                      callback_data: `routine_no_${r.id}`,
+                    },
+                  ],
+                ],
+              },
+            });
+            if (sent.ok) anyOk = true;
+            else
+              console.error(
+                `routine deadline ${r.id} (${chatId}) yuborilmadi:`,
+                sent.error
+              );
+          }
+          if (anyOk) {
+            if (exists.length === 0) {
+              await db.insert(botReminders).values({
+                routineId: r.id,
+                date: today,
+                type: "routine_deadline",
                 sent: true,
               });
             }

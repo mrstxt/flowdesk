@@ -16,7 +16,7 @@ import {
   cards,
   botStates,
 } from "@/db/schema";
-import { desc, eq, gte, and, asc, sql, desc as descOrd } from "drizzle-orm";
+import { desc, eq, gte, and, asc, sql, desc as descOrd, inArray } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
 import {
@@ -341,6 +341,26 @@ function getTashkentTimeString(): string {
   if (hour === 24) hour = 0;
   const min = Number(parts.find((p) => p.type === "minute")?.value || 0);
   return `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function minutesFromTime(time: string | null | undefined): number | null {
+  if (!time) return null;
+  const [h, m] = time.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function routineResponseMeta(
+  status: "done" | "skipped",
+  routine: { time: string; endTime: string | null },
+): string {
+  const nowTime = getTashkentTimeString();
+  const nowMin = minutesFromTime(nowTime) ?? 0;
+  const dueTime = routine.endTime || routine.time;
+  const dueMin = minutesFromTime(dueTime) ?? nowMin;
+  const delay = Math.max(0, nowMin - dueMin);
+  const label = status === "done" ? "✅ Bajarildi" : "⏭ O'tkazildi";
+  return `${label} | at=${nowTime} | due=${dueTime} | delay=${delay}`;
 }
 
 /**
@@ -1572,6 +1592,16 @@ async function handleCallback(
   if (data.startsWith("routine_yes_")) {
     const rid = Number(data.split("_").pop());
     try {
+      const [routine] = await db
+        .select()
+        .from(routines)
+        .where(eq(routines.id, rid))
+        .limit(1);
+      if (!routine) {
+        await answerCallback(chatId, callbackId, "❌ Reja topilmadi.");
+        return;
+      }
+      const responseText = routineResponseMeta("done", routine);
       await db
         .update(routines)
         .set({
@@ -1581,9 +1611,15 @@ async function handleCallback(
         .where(eq(routines.id, rid));
       await db
         .update(botReminders)
-        .set({ responded: true, responseText: "✅ Bajarildi" })
+        .set({ responded: true, responseText })
         .where(
-          and(eq(botReminders.date, today), eq(botReminders.routineId, rid))
+          and(
+            eq(botReminders.date, today),
+            eq(botReminders.routineId, rid),
+            routine.endTime
+              ? eq(botReminders.type, "routine_deadline")
+              : inArray(botReminders.type, ["routine", "routine_start"])
+          )
         );
       const [r] = await db
         .select()
@@ -1612,11 +1648,26 @@ async function handleCallback(
   if (data.startsWith("routine_no_")) {
     const rid = Number(data.split("_").pop());
     try {
+      const [routine] = await db
+        .select()
+        .from(routines)
+        .where(eq(routines.id, rid))
+        .limit(1);
+      if (!routine) {
+        await answerCallback(chatId, callbackId, "❌ Reja topilmadi.");
+        return;
+      }
       await db
         .update(botReminders)
-        .set({ responded: true, responseText: "⏭ O'tkazildi" })
+        .set({ responded: true, responseText: routineResponseMeta("skipped", routine) })
         .where(
-          and(eq(botReminders.date, today), eq(botReminders.routineId, rid))
+          and(
+            eq(botReminders.date, today),
+            eq(botReminders.routineId, rid),
+            routine.endTime
+              ? eq(botReminders.type, "routine_deadline")
+              : inArray(botReminders.type, ["routine", "routine_start"])
+          )
         );
       await answerCallback(
         chatId,
