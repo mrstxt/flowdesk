@@ -2,12 +2,11 @@ import { db } from "@/db";
 import {
   orders,
   incomes,
-  expenses,
   goals,
   cards,
   cardTransactions,
 } from "@/db/schema";
-import { eq, gte, sql, and, ne } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 import { getPrimaryCard } from "@/lib/cardActions";
 
@@ -37,9 +36,8 @@ export function monthStartISO(date?: string): string {
  * Buyurtmani tasdiqlash:
  * 1) stage -> confirmed, archived=true
  * 2) Asosiy kartaga avtomatik kirim
- * 3) Shu oydagi sof foydadan maqsadlarga ajratish
- *    (har bir maqsad uchun shu oyda yig'ilgan sof foydaning
- *     foiziga teng summa goals.savedAmount ga qo'shiladi)
+ * 3) Faqat shu buyurtma summasidan maqsadlarga foiz ajratish
+ *    (masalan 100 000 so'm va 1% bo'lsa, 1 000 so'm maqsadga o'tadi)
  * 4) Maqsadga ajratilgan summa "Maqsadga: <nomi>" title bilan
  *    income sifatida yoziladi va maqsadning o'ziga tegishli
  *    kartasiga tushadi
@@ -107,61 +105,21 @@ export async function confirmOrder(
       });
     }
 
-    // 3. Shu oydagi sof foyda = kirim - chiqim
-    // MUHIM: source="goal" (ichki maqsad transferi) kirimga qo'shilmaydi,
-    // aks holda maqsadga ajratilgan pul yana "sof foyda" bo'lib hisoblanib,
-    // avtomatik foiz oshib ketardi (feedback loop).
-    const ms = monthStartISO();
-    const [incSum, expSum] = await Promise.all([
-      db
-        .select({
-          total: sql<string>`COALESCE(SUM(${incomes.amount}), 0)`,
-        })
-        .from(incomes)
-        .where(and(gte(incomes.date, ms), ne(incomes.source, "goal"))),
-      db
-        .select({
-          total: sql<string>`COALESCE(SUM(${expenses.amount}), 0)`,
-        })
-        .from(expenses)
-        .where(gte(expenses.date, ms)),
-    ]);
-    const totalIn = Number(incSum[0]?.total || 0);
-    const totalOut = Number(expSum[0]?.total || 0);
-    const net = totalIn - totalOut;
-
-    // 4. Maqsadlarga ajratish
+    // 3. Maqsadlarga ajratish faqat tasdiqlanayotgan buyurtma summasidan.
     const allGoals = await db.select().from(goals);
     let totalDistributed = 0;
     for (const g of allGoals) {
       const pct = Number(g.autoPercent ?? 0);
-      if (pct <= 0 || net <= 0) continue;
+      if (pct <= 0) continue;
 
-      // Bu maqsad uchun shu oyda qancha ajratilgan
-      const [existingRows] = await db
-        .select({
-          total: sql<string>`COALESCE(SUM(${incomes.amount}), 0)`,
-        })
-        .from(incomes)
-        .where(
-          and(
-            gte(incomes.date, ms),
-            eq(incomes.source, "goal"),
-            eq(incomes.title, `Maqsadga: ${g.title}`)
-          )
-        );
-      const alreadyAllocated = Number(existingRows?.total || 0);
-
-      // Shu oy uchun maqsadga ajratilishi kerak bo'lgan summa
-      const targetAlloc = (net * pct) / 100;
-      const remainingAlloc = Math.max(0, targetAlloc - alreadyAllocated);
-      if (remainingAlloc <= 0) continue;
+      const orderAllocation = (amt * pct) / 100;
+      if (orderAllocation <= 0) continue;
 
       // goals.savedAmount ga qo'shamiz
       await db
         .update(goals)
         .set({
-          savedAmount: String(Number(g.savedAmount) + remainingAlloc),
+          savedAmount: String(Number(g.savedAmount) + orderAllocation),
         })
         .where(eq(goals.id, g.id));
 
@@ -178,20 +136,20 @@ export async function confirmOrder(
           // 1. Manba kartadan (asosiy karta) ayiramiz
           await db
             .update(cards)
-            .set({ balance: sql`${cards.balance} - ${remainingAlloc}` })
+            .set({ balance: sql`${cards.balance} - ${orderAllocation}` })
             .where(eq(cards.id, sourceCardId));
           await db.insert(cardTransactions).values({
             cardId: sourceCardId,
             date: todayDateISO(),
             type: "transfer_out",
-            amount: String(remainingAlloc),
+            amount: String(orderAllocation),
             relatedCardId: g.cardId,
             description: `Maqsadga: ${g.title}`,
           });
           // 2. Maqsad kartasiga qo'shamiz
           await db
             .update(cards)
-            .set({ balance: sql`${cards.balance} + ${remainingAlloc}` })
+            .set({ balance: sql`${cards.balance} + ${orderAllocation}` })
             .where(eq(cards.id, g.cardId));
         }
         // Audit: maqsad kartasiga tushganini qayd qilamiz
@@ -199,21 +157,21 @@ export async function confirmOrder(
           cardId: g.cardId,
           date: todayDateISO(),
           type: "goal_in",
-          amount: String(remainingAlloc),
+          amount: String(orderAllocation),
           relatedCardId: sourceCardId ?? null,
           description: `Maqsadga: ${g.title}`,
         });
       }
       await db.insert(incomes).values({
         title: `Maqsadga: ${g.title}`,
-        amount: String(remainingAlloc),
+        amount: String(orderAllocation),
         source: "goal",
         date: todayDateISO(),
         paymentType,
         cardId: g.cardId,
       });
 
-      totalDistributed += remainingAlloc;
+      totalDistributed += orderAllocation;
     }
 
     return { ok: true, message: "OK", netDistributed: totalDistributed };

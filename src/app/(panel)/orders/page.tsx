@@ -162,7 +162,7 @@ export default function OrdersPage() {
       // Agar maqsadlarga taqsim bo'lgan bo'lsa, xabar beramiz
       if (result._distributed && result._distributed > 0) {
         alert(
-          `✅ Buyurtma tasdiqlandi!\n\n💰 ${parseMoneyInput(order.amount).toLocaleString()} so'm kirim.\n🎯 Maqsadlarga ${result._distributed.toLocaleString()} so'm avtomatik ajratildi (sof foydadan).`
+          `✅ Buyurtma tasdiqlandi!\n\n💰 ${parseMoneyInput(order.amount).toLocaleString()} so'm kirim.\n🎯 Maqsadlarga ${result._distributed.toLocaleString()} so'm avtomatik ajratildi (shu buyurtmadan).`
         );
       }
 

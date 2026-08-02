@@ -841,7 +841,7 @@ async function handleWizardStep(chatId: number, text: string) {
       userState.set(chatId, state);
       await sendMessage(
         chatId,
-        "3️⃣ Avtomatik foiz (0-100) — har bir kirimdan qancha % maqsadga tushadi:",
+        "3️⃣ Avtomatik foiz (0-100) — tasdiqlangan buyurtmadan qancha % maqsadga tushadi:",
         { reply_markup: REQUEST_CANCEL_KEYBOARD }
       );
       return;
@@ -875,7 +875,7 @@ async function handleWizardStep(chatId: number, text: string) {
           Number(state.data.amount)
         )}\nKarta: ${cardLabel}`;
         if (Number(state.data.autoPercent) > 0) {
-          msg += `\n🔄 Har bir kirimdan: ${state.data.autoPercent}%`;
+          msg += `\n🔄 Har bir tasdiqlangan buyurtmadan: ${state.data.autoPercent}%`;
         }
         await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
       } catch (e) {
@@ -1299,7 +1299,7 @@ async function handleCallback(
       Number(state.data.amount)
     )}\nKarta: ${cardLabel}`;
     if (Number(state.data.autoPercent) > 0) {
-      msg += `\n🔄 Har bir kirimdan: ${state.data.autoPercent}%`;
+      msg += `\n🔄 Har bir tasdiqlangan buyurtmadan: ${state.data.autoPercent}%`;
     }
     await sendMessage(chatId, msg, { reply_markup: MAIN_KEYBOARD });
     return;

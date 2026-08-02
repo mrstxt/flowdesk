@@ -562,7 +562,7 @@ export default function GoalsPage() {
                     <div className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5">
                       {Number(g.autoPercent) > 0 && (
                         <span className="text-accent">
-                          Avtomatik {g.autoPercent}% sof foydadan
+                          Avtomatik {g.autoPercent}% buyurtmadan
                         </span>
                       )}
                       {g.cardId && (
@@ -692,8 +692,8 @@ export default function GoalsPage() {
             </select>
           </div>
           <p className="text-xs text-slate-500">
-            * Maqsadga faqat kirim bo'ladi. Avtomatik foiz sof foydadan
-            ajratiladi va shu kartaga tushadi.
+            * Maqsadga faqat kirim bo'ladi. Avtomatik foiz tasdiqlangan
+            buyurtmadan ajratiladi va shu kartaga tushadi.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button
