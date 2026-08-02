@@ -65,7 +65,8 @@ function getSetting(
 async function sendMessage(
   chatId: number,
   text: string,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown>,
+  opts?: { skipDailyTrack?: boolean }
 ): Promise<number | null> {
   if (!TOKEN) return null;
   try {
@@ -91,6 +92,9 @@ async function sendMessage(
     const data = await res.json();
     const messageId = data?.result?.message_id as number | undefined;
     if (typeof messageId === "number") {
+      if (!opts?.skipDailyTrack) {
+        await rememberDailyMessage(chatId, messageId);
+      }
       const postIds = postFinishDeletes.get(chatId);
       // MAIN_KEYBOARD (reply tugmalar) bilan yuborilgan xabarni o'chirmaymiz —
       // aks holda tugmalar ham yo'qolib qoladi.
@@ -110,6 +114,59 @@ async function sendMessage(
   } catch (e) {
     console.error("sendMessage error:", e);
     return null;
+  }
+}
+
+function dailyChatKey(chatId: number, date = todayDateISO()): string {
+  return `daily_chat_${chatId}_${date}`;
+}
+
+async function getDailyMessageIds(chatId: number): Promise<number[]> {
+  try {
+    const [row] = await db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, dailyChatKey(chatId)))
+      .limit(1);
+    if (!row?.value) return [];
+    const parsed = JSON.parse(row.value);
+    return Array.isArray(parsed)
+      ? parsed.filter((id) => typeof id === "number")
+      : [];
+  } catch (e) {
+    console.error("getDailyMessageIds error:", e);
+    return [];
+  }
+}
+
+async function rememberDailyMessage(chatId: number, messageId: number) {
+  try {
+    const key = dailyChatKey(chatId);
+    const ids = await getDailyMessageIds(chatId);
+    if (!ids.includes(messageId)) ids.push(messageId);
+    await db
+      .insert(settings)
+      .values({ key, value: JSON.stringify(ids.slice(-350)) })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: JSON.stringify(ids.slice(-350)) },
+      });
+  } catch (e) {
+    console.error("rememberDailyMessage error:", e);
+  }
+}
+
+async function cleanupDailyChat(chatId: number, extraIds: number[] = []) {
+  const ids = Array.from(new Set([...(await getDailyMessageIds(chatId)), ...extraIds]))
+    .filter((id) => Number.isFinite(id))
+    .sort((a, b) => a - b);
+  for (const id of ids) {
+    await deleteMessage(chatId, id);
+  }
+  try {
+    await db.delete(settings).where(eq(settings.key, dailyChatKey(chatId)));
+  } catch (e) {
+    console.error("cleanupDailyChat clear error:", e);
   }
 }
 
@@ -1451,11 +1508,7 @@ async function handleCallback(
           and(eq(botReminders.date, today), eq(botReminders.type, "sleep"))
         );
       await answerCallback(chatId, callbackId, "🌙 Yaxshi dam oling!");
-      await sendMessage(
-        chatId,
-        "🌙 <b>Yaxshi!</b> Telefonni qo'ying, ertaga kuchli kun sizni kutmoqda! Yaxshi dam oling 💤",
-        { reply_markup: MAIN_KEYBOARD }
-      );
+      await cleanupDailyChat(chatId);
     } catch (e) {
       console.error("sleep_ack error:", e);
       await answerCallback(chatId, callbackId, "❌ Xatolik yuz berdi.");
@@ -2373,6 +2426,9 @@ export async function POST(req: Request) {
           await answerCallback(chatId, cb.id, "Ruxsat yo'q.");
           return NextResponse.json({ ok: true });
         }
+        if (typeof cb.message?.message_id === "number") {
+          await rememberDailyMessage(chatId, cb.message.message_id);
+        }
         await handleCallback(chatId, cb.id, cb.data || "");
         return NextResponse.json({ ok: true });
       }
@@ -2396,6 +2452,7 @@ export async function POST(req: Request) {
       // Wizard davom etayotgan bo'lsa — foydalanuvchi xabari ham
       // tozalash ro'yxatiga qo'shiladi (keyin finishWizard o'chiradi).
       if (typeof msg.message_id === "number") {
+        await rememberDailyMessage(chatId, msg.message_id);
         trackMessage(chatId, msg.message_id);
       }
 

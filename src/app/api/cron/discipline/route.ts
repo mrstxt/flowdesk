@@ -28,10 +28,60 @@ async function botSend(method: string, payload: Record<string, unknown>) {
       console.error(`botSend ${method} failed:`, res.status, text);
       return { ok: false, error: text };
     }
+    const data = await res.json();
+    const chatId = Number(payload.chat_id);
+    const messageId = data?.result?.message_id;
+    if (
+      method === "sendMessage" &&
+      Number.isFinite(chatId) &&
+      typeof messageId === "number"
+    ) {
+      await rememberDailyMessage(chatId, messageId);
+    }
     return { ok: true };
   } catch (e) {
     console.error("botSend error:", e);
     return { ok: false, error: String(e) };
+  }
+}
+
+function dailyChatKey(chatId: number, date: string): string {
+  return `daily_chat_${chatId}_${date}`;
+}
+
+async function getDailyMessageIds(chatId: number, date: string): Promise<number[]> {
+  try {
+    const [row] = await db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, dailyChatKey(chatId, date)))
+      .limit(1);
+    if (!row?.value) return [];
+    const parsed = JSON.parse(row.value);
+    return Array.isArray(parsed)
+      ? parsed.filter((id) => typeof id === "number")
+      : [];
+  } catch (e) {
+    console.error("getDailyMessageIds error:", e);
+    return [];
+  }
+}
+
+async function rememberDailyMessage(chatId: number, messageId: number) {
+  try {
+    const date = getTashkentTime().today;
+    const key = dailyChatKey(chatId, date);
+    const ids = await getDailyMessageIds(chatId, date);
+    if (!ids.includes(messageId)) ids.push(messageId);
+    await db
+      .insert(settings)
+      .values({ key, value: JSON.stringify(ids.slice(-350)) })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: JSON.stringify(ids.slice(-350)) },
+      });
+  } catch (e) {
+    console.error("rememberDailyMessage error:", e);
   }
 }
 
