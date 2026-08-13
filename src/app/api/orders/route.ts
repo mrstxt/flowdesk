@@ -6,6 +6,7 @@ import { confirmOrder } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+const ORDER_STAGES = new Set(["new", "in_progress", "review", "confirmed"]);
 
 export async function GET() {
   const rows = await db
@@ -17,13 +18,25 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
+  const title = String(body.title || "").trim();
+  const amount = parseMoneyInput(body.amount ?? "0");
+  const stage = ORDER_STAGES.has(body.stage) ? body.stage : "new";
+  if (!title) {
+    return NextResponse.json({ error: "title required" }, { status: 400 });
+  }
+  if (amount < 0) {
+    return NextResponse.json(
+      { error: "Summa manfiy bo'lmasligi kerak" },
+      { status: 400 }
+    );
+  }
   const [created] = await db
     .insert(orders)
     .values({
-      title: body.title,
+      title,
       description: body.description || null,
-      stage: body.stage || "new",
-      amount: String(parseMoneyInput(body.amount ?? "0")),
+      stage,
+      amount: String(amount),
       deadline: body.deadline || null,
       clientName: body.clientName || null,
       paymentType: body.paymentType || "cash",
@@ -47,12 +60,7 @@ export async function PUT(req: Request) {
 
   // Automation: move to confirmed -> income + goals allocation + archive
   if (oldStage && oldStage !== "confirmed" && payload.stage === "confirmed") {
-    const cardId = payload.cardId ? Number(payload.cardId) : null;
-    const result = await confirmOrder(
-      id,
-      String(payload.paymentType || "cash"),
-      cardId
-    );
+    const result = await confirmOrder(id);
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: 400 });
     }
@@ -79,6 +87,23 @@ export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = Number(searchParams.get("id"));
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const [existing] = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, id))
+    .limit(1);
+  if (!existing) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  if (existing.stage === "confirmed") {
+    return NextResponse.json(
+      {
+        error:
+          "Tasdiqlangan buyurtmani oddiy o'chirib bo'lmaydi. Avval tasdiqni bekor qilish kerak.",
+      },
+      { status: 400 }
+    );
+  }
   await db.delete(orders).where(eq(orders.id, id));
   return NextResponse.json({ ok: true });
 }

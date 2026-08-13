@@ -32,14 +32,6 @@ type Order = {
   archived: boolean | null;
   updatedAt: string;
 };
-type Card = {
-  id: number;
-  name: string;
-  bank: string | null;
-  last4: string | null;
-  color: string;
-};
-
 const STAGES = [
   { id: "new", label: "Yangi", color: "bg-[#8e8e93]" },
   { id: "in_progress", label: "Jarayonda", color: "bg-[#0a84ff]" },
@@ -49,21 +41,15 @@ const STAGES = [
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [cards, setCards] = useState<Card[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [modal, setModal] = useState(false);
-  const [payModal, setPayModal] = useState<Order | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor));
 
   async function load() {
     try {
-      const [rows, cardsRows] = await Promise.all([
-        fetch("/api/orders").then((r) => r.json()),
-        fetch("/api/cards").then((r) => r.json()),
-      ]);
+      const rows = await fetch("/api/orders").then((r) => r.json());
       setOrders(rows);
-      setCards(cardsRows);
     } catch (error) {
       console.error("Failed to load orders:", error);
     }
@@ -106,24 +92,11 @@ export default function OrdersPage() {
 
     if (!newStage || order.stage === newStage) return;
 
-    // If moving to confirmed, ask about payment
-    if (newStage === "confirmed" && order.stage !== "confirmed") {
-      // Eski stage qiymatini saqlab qolamiz. Aks holda API buyurtma avvaldan
-      // "confirmed" bo'lgan deb o'ylab, kirim/arxiv avtomatizatsiyasini o'tkazmaydi.
-      setPayModal(order);
-      return;
-    }
-
     // 3. Bosqichni yangilash
-    await updateStage(order, newStage, order.paymentType);
+    await updateStage(order, newStage);
   }
 
-  async function updateStage(
-    order: Order,
-    stage: string,
-    paymentType: string,
-    cardId: number | null = null
-  ) {
+  async function updateStage(order: Order, stage: string) {
     const oldStage = order.stage;
 
     // Optimistic update
@@ -132,7 +105,7 @@ export default function OrdersPage() {
         ? {
             ...o,
             stage,
-            paymentType,
+            paymentType: stage === "confirmed" ? "card" : o.paymentType,
             archived: stage === "confirmed" ? true : o.archived,
           }
         : o
@@ -146,8 +119,7 @@ export default function OrdersPage() {
         body: JSON.stringify({
           id: order.id,
           stage,
-          paymentType,
-          cardId,
+          paymentType: stage === "confirmed" ? "card" : order.paymentType,
           title: order.title,
           amount: order.amount,
           _oldStage: oldStage,
@@ -155,7 +127,8 @@ export default function OrdersPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to update order");
+        const data = await response.json();
+        throw new Error(data.error || "Failed to update order");
       }
 
       const result = await response.json();
@@ -171,15 +144,10 @@ export default function OrdersPage() {
       setOrders(rows);
     } catch (error) {
       console.error("Update failed:", error);
+      alert(error instanceof Error ? error.message : "Buyurtmani yangilashda xatolik");
       // Xatolik bo'lsa, eski holatga qaytarish
       await load();
     }
-  }
-
-  async function confirmPayment(paymentType: string, cardId: number | null) {
-    if (!payModal) return;
-    await updateStage(payModal, "confirmed", paymentType, cardId);
-    setPayModal(null);
   }
 
   async function createOrder(e: React.FormEvent<HTMLFormElement>) {
@@ -213,7 +181,12 @@ export default function OrdersPage() {
     if (!confirm("Buyurtmani o'chirmoqchimisiz?")) return;
 
     try {
-      await fetch(`/api/orders?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/orders?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "Buyurtmani o'chirishda xatolik yuz berdi");
+        return;
+      }
       await load();
     } catch (error) {
       console.error("Failed to delete order:", error);
@@ -355,62 +328,6 @@ export default function OrdersPage() {
             </button>
           </div>
         </form>
-      </Modal>
-
-      <Modal
-        open={!!payModal}
-        onClose={() => setPayModal(null)}
-        title="To'lovni tasdiqlash"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            <b>{payModal?.title}</b> buyurtmasi tasdiqlansinmi? To'lov qaysi
-            kartaga tushdi?
-          </p>
-          {cards.length === 0 ? (
-            <div className="text-sm text-slate-500 bg-amber-50 border border-amber-200 rounded-xl p-3">
-              ⚠️ Avval "Maqsadlar" sahifasida kamida bitta karta qo'shing. Naqd
-              pul uchun karta kerak emas — "Naqd" ni tanlang.
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {cards.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => confirmPayment("card", c.id)}
-                  className="w-full p-3 border-2 border-slate-200 rounded-xl hover:border-accent transition-colors text-left flex items-center gap-3"
-                >
-                  <div
-                    className="w-10 h-7 rounded-md shrink-0"
-                    style={{ background: c.color }}
-                  />
-                  <div className="flex-1">
-                    <div className="font-semibold text-sm text-slate-900">
-                      {c.name}
-                    </div>
-                    {c.bank && (
-                      <div className="text-xs text-slate-500">
-                        {c.bank}
-                        {c.last4 ? ` •••• ${c.last4}` : ""}
-                      </div>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="border-t border-slate-200 pt-3">
-            <button
-              onClick={() => confirmPayment("cash", null)}
-              className="w-full p-3 border-2 border-slate-200 rounded-xl hover:border-accent transition-colors text-left"
-            >
-              <div className="font-semibold text-slate-900">💵 Naqd pul</div>
-              <div className="text-xs text-slate-500 mt-1">
-                Qo'lda olindi, karta ko'rsatilmaydi
-              </div>
-            </button>
-          </div>
-        </div>
       </Modal>
     </div>
   );

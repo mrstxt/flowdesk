@@ -34,6 +34,7 @@ const ALLOWED = (process.env.TELEGRAM_ADMIN_CHAT_ID || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+const REQUIRE_ALLOWED_CHAT = process.env.NODE_ENV === "production";
 
 /* ── Helpers ── */
 
@@ -2254,7 +2255,7 @@ async function handleCommand(
         return;
       }
       try {
-        const result = await confirmOrder(id, "cash");
+        const result = await confirmOrder(id);
         if (!result.ok) {
           await sendMessage(chatId, result.message, {
             reply_markup: MAIN_KEYBOARD,
@@ -2422,7 +2423,10 @@ export async function POST(req: Request) {
     try {
       if (cb) {
         if (chatId == null) return NextResponse.json({ ok: true });
-        if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
+        if (
+          (REQUIRE_ALLOWED_CHAT && ALLOWED.length === 0) ||
+          (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId)))
+        ) {
           await answerCallback(chatId, cb.id, "Ruxsat yo'q.");
           return NextResponse.json({ ok: true });
         }
@@ -2441,7 +2445,10 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
       }
 
-      if (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId))) {
+      if (
+        (REQUIRE_ALLOWED_CHAT && ALLOWED.length === 0) ||
+        (ALLOWED.length > 0 && !ALLOWED.includes(String(chatId)))
+      ) {
         await sendMessage(
           chatId,
           "Ruxsat yo'q. Bu bot faqat administrator uchun."

@@ -150,7 +150,7 @@ export default function GoalsPage() {
     const form = e.currentTarget;
     const fd = new FormData(form);
     const cardIdRaw = fd.get("cardId") as string;
-    await fetch("/api/goals", {
+    const res = await fetch("/api/goals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -160,6 +160,11 @@ export default function GoalsPage() {
         cardId: cardIdRaw ? Number(cardIdRaw) : null,
       }),
     });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "Maqsad yaratishda xatolik");
+      return;
+    }
     setGoalModal(false);
     form.reset();
     load();
@@ -167,7 +172,12 @@ export default function GoalsPage() {
 
   async function deleteGoal(id: number) {
     if (!confirm("Maqsadni o'chirmoqchimisiz?")) return;
-    await fetch(`/api/goals?id=${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/goals?id=${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "Maqsadni o'chirishda xatolik");
+      return;
+    }
     load();
   }
 

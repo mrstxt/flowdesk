@@ -314,24 +314,47 @@ export async function addFundsToGoal(
   if (!srcCard || !targetCard) {
     return { ok: false, error: "Manba yoki maqsad kartasi topilmadi" };
   }
+  const targetCardId = goal.cardId;
 
   const desc = description || `Maqsadga: ${goal.title}`;
   const today = new Date().toISOString().slice(0, 10);
 
   // Manba karta va maqsad kartasi bir xil bo'lsa
-  if (sourceCardId === goal.cardId) {
-    await db
-      .update(goals)
-      .set({
-        savedAmount: String(Number(goal.savedAmount) + amount),
-      })
-      .where(eq(goals.id, goalId));
-    await db.insert(cardTransactions).values({
-      cardId: goal.cardId,
-      date: today,
-      type: "goal_in",
-      amount: String(amount),
-      description: desc,
+  if (sourceCardId === targetCardId) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(goals)
+        .set({
+          savedAmount: String(Number(goal.savedAmount) + amount),
+        })
+        .where(eq(goals.id, goalId));
+      const [goalTx] = await tx
+        .insert(cardTransactions)
+        .values({
+          cardId: targetCardId,
+          date: today,
+          type: "goal_in",
+          amount: String(amount),
+          description: desc,
+        })
+        .returning();
+      await tx.insert(incomes).values({
+        title: desc,
+        amount: String(amount),
+        source: "goal",
+        date: today,
+        paymentType: "card",
+        cardId: targetCardId,
+        transactionId: goalTx.id,
+      });
+      await tx.insert(expenses).values({
+        title: desc,
+        amount: String(amount),
+        category: "transfer",
+        date: today,
+        cardId: sourceCardId,
+        transactionId: goalTx.id,
+      });
     });
     return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };
   }
@@ -346,63 +369,69 @@ export async function addFundsToGoal(
     };
   }
 
-  // 1. Manba kartadan (Asosiy kartadan) pul ayiramiz (manfiy bo'lmasligi uchun)
-  await db
-    .update(cards)
-    .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
-    .where(eq(cards.id, sourceCardId));
-  await db.insert(cardTransactions).values({
-    cardId: sourceCardId,
-    date: today,
-    type: "transfer_out",
-    amount: String(amount),
-    relatedCardId: goal.cardId,
-    description: desc,
-  });
+  await db.transaction(async (tx) => {
+    // 1. Manba kartadan (Asosiy kartadan) pul ayiramiz
+    await tx
+      .update(cards)
+      .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
+      .where(eq(cards.id, sourceCardId));
+    const [outTx] = await tx
+      .insert(cardTransactions)
+      .values({
+        cardId: sourceCardId,
+        date: today,
+        type: "transfer_out",
+        amount: String(amount),
+        relatedCardId: targetCardId,
+        description: desc,
+      })
+      .returning();
 
-  // 2. Maqsad kartasiga (Target kartaga) pul qo'shamiz
-  await db
-    .update(cards)
-    .set({ balance: sql`${cards.balance} + ${amount}` })
-    .where(eq(cards.id, goal.cardId));
-  await db.insert(cardTransactions).values({
-    cardId: goal.cardId,
-    date: today,
-    type: "goal_in",
-    amount: String(amount),
-    relatedCardId: sourceCardId,
-    description: desc,
-  });
+    // 2. Maqsad kartasiga (Target kartaga) pul qo'shamiz
+    await tx
+      .update(cards)
+      .set({ balance: sql`${cards.balance} + ${amount}` })
+      .where(eq(cards.id, targetCardId));
+    const [goalTx] = await tx
+      .insert(cardTransactions)
+      .values({
+        cardId: targetCardId,
+        date: today,
+        type: "goal_in",
+        amount: String(amount),
+        relatedCardId: sourceCardId,
+        description: desc,
+      })
+      .returning();
 
-  // 3. goals.savedAmount ga qo'shamiz
-  await db
-    .update(goals)
-    .set({
-      savedAmount: String(Number(goal.savedAmount) + amount),
-    })
-    .where(eq(goals.id, goalId));
+    // 3. goals.savedAmount ga qo'shamiz
+    await tx
+      .update(goals)
+      .set({
+        savedAmount: String(Number(goal.savedAmount) + amount),
+      })
+      .where(eq(goals.id, goalId));
 
-  // 4. Income sifatida yozamiz (maqsad kartasiga)
-  await db.insert(incomes).values({
-    title: desc,
-    amount: String(amount),
-    source: "goal",
-    date: today,
-    paymentType: "card",
-    cardId: goal.cardId,
-  });
+    // 4. Income sifatida yozamiz (maqsad kartasiga)
+    await tx.insert(incomes).values({
+      title: desc,
+      amount: String(amount),
+      source: "goal",
+      date: today,
+      paymentType: "card",
+      cardId: goal.cardId,
+      transactionId: goalTx.id,
+    });
 
-  // 5. Asosiy kartadan pul chiqqanini ko'rsatamiz — UI asosiy kartani
-  //    totalProfitAll (incomes − expenses) orqali ko'rsatadi, shuning uchun
-  //    expense yozilmasa pul asosiy kartadan "ayirilmagandek" ko'rinadi.
-  //    (source="goal" income totalProfitAll dan chiqarilgani uchun
-  //    faqat bu expense hisobga olinadi — natija to'g'ri bo'ladi.)
-  await db.insert(expenses).values({
-    title: desc,
-    amount: String(amount),
-    category: "transfer",
-    date: today,
-    cardId: sourceCardId,
+    // 5. Asosiy kartadan pul chiqqanini ko'rsatamiz
+    await tx.insert(expenses).values({
+      title: desc,
+      amount: String(amount),
+      category: "transfer",
+      date: today,
+      cardId: sourceCardId,
+      transactionId: outTx.id,
+    });
   });
 
   return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };

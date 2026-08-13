@@ -7,10 +7,14 @@ import {
   addCardExpense,
   transferBetweenCards,
   addFundsToGoal,
-  getPrimaryCard,
 } from "@/lib/cardActions";
 
 export const dynamic = "force-dynamic";
+
+function positiveAmount(value: unknown): number | null {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -61,14 +65,14 @@ export async function POST(req: Request) {
     if (action === "income") {
       // Qo'shimcha kartaga pul kiritish
       const { cardId, amount, description } = body;
-      if (!cardId || !amount) {
+      const amt = positiveAmount(amount);
+      if (!cardId || !amt) {
         return NextResponse.json(
           { error: "cardId va amount kerak" },
           { status: 400 }
         );
       }
       const desc = description || "Qo'shimcha kirim";
-      const amt = Number(amount);
       await addCardIncome(Number(cardId), amt, desc);
 
       // Asosiy karta: UI umumiy foydani (totalProfitAll) ko'rsatadi, shuning
@@ -95,14 +99,14 @@ export async function POST(req: Request) {
     if (action === "expense") {
       // Kartadan chiqim
       const { cardId, amount, description } = body;
-      if (!cardId || !amount) {
+      const amt = positiveAmount(amount);
+      if (!cardId || !amt) {
         return NextResponse.json(
           { error: "cardId va amount kerak" },
           { status: 400 }
         );
       }
       const desc = description || "Chiqim";
-      const amt = Number(amount);
       const res = await addCardExpense(Number(cardId), amt, desc);
       if (!res.ok) {
         return NextResponse.json({ error: res.error }, { status: 400 });
@@ -131,7 +135,8 @@ export async function POST(req: Request) {
     if (action === "transfer") {
       // Kartadan kartaga o'tkazish
       const { fromCardId, toCardId, amount, description } = body;
-      if (!fromCardId || !toCardId || !amount) {
+      const amt = positiveAmount(amount);
+      if (!fromCardId || !toCardId || !amt) {
         return NextResponse.json(
           { error: "fromCardId, toCardId va amount kerak" },
           { status: 400 }
@@ -140,7 +145,7 @@ export async function POST(req: Request) {
       const res = await transferBetweenCards(
         Number(fromCardId),
         Number(toCardId),
-        Number(amount),
+        amt,
         description
       );
       if (!res.ok) {
@@ -152,7 +157,8 @@ export async function POST(req: Request) {
     if (action === "goal_fund") {
       // Maqsadga pul qo'shish (qaysi kartadan)
       const { goalId, amount, fromCardId, description } = body;
-      if (!goalId || !amount) {
+      const amt = positiveAmount(amount);
+      if (!goalId || !amt) {
         return NextResponse.json(
           { error: "goalId va amount kerak" },
           { status: 400 }
@@ -160,7 +166,7 @@ export async function POST(req: Request) {
       }
       const res = await addFundsToGoal(
         Number(goalId),
-        Number(amount),
+        amt,
         fromCardId ? Number(fromCardId) : null,
         description
       );

@@ -2,6 +2,7 @@ import { db } from "@/db";
 import {
   orders,
   incomes,
+  expenses,
   goals,
   cards,
   cardTransactions,
@@ -43,9 +44,7 @@ export function monthStartISO(date?: string): string {
  *    kartasiga tushadi
  */
 export async function confirmOrder(
-  orderId: number,
-  paymentType: string,
-  cardId?: number | null
+  orderId: number
 ): Promise<{ ok: boolean; message: string; netDistributed?: number }> {
   const [order] = await db
     .select()
@@ -57,125 +56,188 @@ export async function confirmOrder(
   if (order.stage === "confirmed")
     return { ok: false, message: "Buyurtma allaqachon tasdiqlangan" };
 
-  await db
-    .update(orders)
-    .set({
-      stage: "confirmed",
-      paymentType,
-      archived: true,
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, orderId));
-
   const amt = parseMoneyInput(order.amount);
+  let targetCardId: number | null = null;
   if (amt > 0) {
-    // Qaysi kartaga tushadi? Agar cardId berilmagan bo'lsa — asosiy karta
-    let targetCardId = cardId;
-    if (!targetCardId) {
-      const primary = await getPrimaryCard();
-      if (primary) targetCardId = primary.id;
+    // Buyurtma puli har doim loyiha asosiy kartasiga tushadi.
+    const primary = await getPrimaryCard();
+    if (!primary) {
+      return {
+        ok: false,
+        message: "Asosiy karta topilmadi. Avval asosiy karta yarating.",
+      };
     }
+    targetCardId = primary.id;
+  }
 
-    // 1. Asosiy kirim (income jadvaliga)
-    const [income] = await db
-      .insert(incomes)
-      .values({
-        title: `Buyurtma: ${order.title}`,
-        amount: String(amt),
-        source: "order",
-        date: todayDateISO(),
-        paymentType,
-        cardId: targetCardId,
-        orderId,
-      })
-      .returning();
-
-    // 2. Karta balance ga qo'shamiz + card_transactions yozamiz
-    if (targetCardId) {
-      await db
-        .update(cards)
-        .set({ balance: sql`${cards.balance} + ${amt}` })
-        .where(eq(cards.id, targetCardId));
-      await db.insert(cardTransactions).values({
-        cardId: targetCardId,
-        date: todayDateISO(),
-        type: "in",
-        amount: String(amt),
-        description: `Buyurtma: ${order.title}`,
-      });
+  if (amt > 0) {
+    const confirmedCardId = targetCardId;
+    if (!confirmedCardId) {
+      return {
+        ok: false,
+        message: "Asosiy karta topilmadi. Avval asosiy karta yarating.",
+      };
     }
 
     // 3. Maqsadlarga ajratish faqat tasdiqlanayotgan buyurtma summasidan.
     const allGoals = await db.select().from(goals);
-    let totalDistributed = 0;
-    for (const g of allGoals) {
+    const totalAutoPercent = allGoals.reduce((sum, g) => {
       const pct = Number(g.autoPercent ?? 0);
-      if (pct <= 0) continue;
+      return g.cardId && pct > 0 ? sum + pct : sum;
+    }, 0);
+    if (totalAutoPercent > 100) {
+      return {
+        ok: false,
+        message:
+          "Maqsadlarning jami avtomatik foizi 100% dan oshib ketgan. Foizlarni kamaytiring.",
+      };
+    }
 
-      const orderAllocation = (amt * pct) / 100;
-      if (orderAllocation <= 0) continue;
+    const result = await db.transaction(async (tx) => {
+      const orderPaymentType = "card";
+      const today = todayDateISO();
+      let totalDistributed = 0;
 
-      // goals.savedAmount ga qo'shamiz
-      await db
-        .update(goals)
+      await tx
+        .update(orders)
         .set({
-          savedAmount: String(Number(g.savedAmount) + orderAllocation),
+          stage: "confirmed",
+          paymentType: orderPaymentType,
+          archived: true,
+          updatedAt: new Date(),
         })
-        .where(eq(goals.id, g.id));
+        .where(eq(orders.id, orderId));
 
-      // Maqsadga ajratish: pul buyurtma tushgan kartadan (asosan asosiy
-      // kartadan) olinadi va maqsad kartasiga tranzaksiyadek o'tkaziladi.
-      const sourceCardId = targetCardId; // buyurtma puli tushgan karta
-      if (g.cardId) {
+      // 1. Karta balance ga qo'shamiz + card_transactions yozamiz
+      await tx
+        .update(cards)
+        .set({ balance: sql`${cards.balance} + ${amt}` })
+        .where(eq(cards.id, confirmedCardId));
+      const [orderTx] = await tx
+        .insert(cardTransactions)
+        .values({
+          cardId: confirmedCardId,
+          date: today,
+          type: "in",
+          amount: String(amt),
+          description: `Buyurtma #${orderId}: ${order.title}`,
+        })
+        .returning();
+
+      // 2. Asosiy kirim (income jadvaliga)
+      await tx.insert(incomes).values({
+        title: `Buyurtma: ${order.title}`,
+        amount: String(amt),
+        source: "order",
+        date: today,
+        paymentType: orderPaymentType,
+        cardId: confirmedCardId,
+        transactionId: orderTx.id,
+        orderId,
+      });
+
+      for (const g of allGoals) {
+        const pct = Number(g.autoPercent ?? 0);
+        if (pct <= 0) continue;
+        if (!g.cardId) continue;
+
+        const orderAllocation = (amt * pct) / 100;
+        if (orderAllocation <= 0) continue;
+
+        // goals.savedAmount ga qo'shamiz
+        await tx
+          .update(goals)
+          .set({
+            savedAmount: String(Number(g.savedAmount) + orderAllocation),
+          })
+          .where(eq(goals.id, g.id));
+
+        // Maqsadga ajratish: pul buyurtma tushgan asosiy kartadan olinadi
+        // va maqsad kartasiga tranzaksiyadek o'tkaziladi.
+        const sourceCardId = confirmedCardId; // buyurtma puli tushgan karta
+        const desc = `Maqsadga: ${g.title} (buyurtma #${orderId})`;
+        let outTxId: number | null = null;
+
         // Maqsad kartasi manba kartadan FARQLI bo'lsa — haqiqiy tranzaksiya:
         // manbadan ayiramiz, maqsad kartasiga qo'shamiz.
         // Agar maqsad kartasi manba (asosiy) karta bilan bir xil bo'lsa,
-        // pul shu kartada allaqachon — balance o'zgartirilmaydi (duplikat
-        // qo'shish xatosi bo'lmasligi uchun).
-        if (sourceCardId && sourceCardId !== g.cardId) {
-          // 1. Manba kartadan (asosiy karta) ayiramiz
-          await db
+        // pul shu kartada allaqachon — balance o'zgartirilmaydi.
+        if (sourceCardId !== g.cardId) {
+          await tx
             .update(cards)
-            .set({ balance: sql`${cards.balance} - ${orderAllocation}` })
+            .set({
+              balance: sql`GREATEST(${cards.balance} - ${orderAllocation}, 0)`,
+            })
             .where(eq(cards.id, sourceCardId));
-          await db.insert(cardTransactions).values({
-            cardId: sourceCardId,
-            date: todayDateISO(),
-            type: "transfer_out",
-            amount: String(orderAllocation),
-            relatedCardId: g.cardId,
-            description: `Maqsadga: ${g.title}`,
-          });
-          // 2. Maqsad kartasiga qo'shamiz
-          await db
+          const [outTx] = await tx
+            .insert(cardTransactions)
+            .values({
+              cardId: sourceCardId,
+              date: today,
+              type: "transfer_out",
+              amount: String(orderAllocation),
+              relatedCardId: g.cardId,
+              description: desc,
+            })
+            .returning();
+          outTxId = outTx.id;
+
+          await tx
             .update(cards)
             .set({ balance: sql`${cards.balance} + ${orderAllocation}` })
             .where(eq(cards.id, g.cardId));
         }
-        // Audit: maqsad kartasiga tushganini qayd qilamiz
-        await db.insert(cardTransactions).values({
-          cardId: g.cardId,
-          date: todayDateISO(),
-          type: "goal_in",
+
+        const [goalInTx] = await tx
+          .insert(cardTransactions)
+          .values({
+            cardId: g.cardId,
+            date: today,
+            type: "goal_in",
+            amount: String(orderAllocation),
+            relatedCardId: sourceCardId,
+            description: desc,
+          })
+          .returning();
+
+        await tx.insert(expenses).values({
+          title: desc,
           amount: String(orderAllocation),
-          relatedCardId: sourceCardId ?? null,
-          description: `Maqsadga: ${g.title}`,
+          category: "transfer",
+          date: today,
+          cardId: sourceCardId,
+          transactionId: outTxId ?? goalInTx.id,
         });
+
+        await tx.insert(incomes).values({
+          title: desc,
+          amount: String(orderAllocation),
+          source: "goal",
+          date: today,
+          paymentType: orderPaymentType,
+          cardId: g.cardId,
+          transactionId: goalInTx.id,
+          orderId,
+        });
+
+        totalDistributed += orderAllocation;
       }
-      await db.insert(incomes).values({
-        title: `Maqsadga: ${g.title}`,
-        amount: String(orderAllocation),
-        source: "goal",
-        date: todayDateISO(),
-        paymentType,
-        cardId: g.cardId,
-      });
 
-      totalDistributed += orderAllocation;
-    }
+      return { ok: true, message: "OK", netDistributed: totalDistributed };
+    });
 
-    return { ok: true, message: "OK", netDistributed: totalDistributed };
+    return result;
   }
+
+  await db
+    .update(orders)
+    .set({
+      stage: "confirmed",
+      paymentType: "card",
+      archived: true,
+      updatedAt: new Date(),
+    })
+    .where(eq(orders.id, orderId));
 
   return { ok: true, message: "OK" };
 }

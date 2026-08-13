@@ -168,7 +168,8 @@ export async function GET(req: Request) {
     hasTickSecret &&
     (tickParam === process.env.CRON_JOB_SECRET ||
       cronSecretHeader === process.env.CRON_JOB_SECRET);
-  const noSecrets = !hasVercelSecret && !hasTickSecret;
+  const noSecrets =
+    process.env.NODE_ENV !== "production" && !hasVercelSecret && !hasTickSecret;
   const authorized = noSecrets || isVercelCron || isTick;
   if (!authorized) {
     return NextResponse.json({ ok: false }, { status: 401 });
