@@ -142,6 +142,54 @@ BOT_WEBHOOK_SECRET="juda-uzun-random-webhook-secret"
 VERCEL_CRON_SECRET="juda-uzun-random-cron-secret"
 ```
 
+### Neon `flowdesk` Database Ulanishi
+
+Neon ichida bir nechta database bo'lishi mumkin. URL oxiridagi path qaysi databasega ulanishini belgilaydi:
+
+```text
+postgresql://USER:PASSWORD@HOST/neondb?sslmode=require
+postgresql://USER:PASSWORD@HOST/flowdesk?sslmode=require
+```
+
+Bu loyihada sayt `flowdesk` database bilan ishlashi kerak bo'lsa, `DATABASE_URL` ichida `/flowdesk` bo'lishi shart. Agar URL `/neondb` bo'lib qolsa, app boshqa databasega ulanadi va saytda data yo'qdek ko'rinishi mumkin.
+
+Local ishlatishda `.env.local` yoki `.env` ichiga qo'ying:
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST/flowdesk?sslmode=require&channel_binding=require"
+```
+
+Jadvallar hali yaratilmagan bo'lsa:
+
+```bash
+npm run db:init
+```
+
+Yoki Drizzle schema push uchun:
+
+```bash
+npm run db:push
+```
+
+Vercel saytga ulash uchun:
+
+1. Vercel Dashboard → Project `flowdesk` → Settings → Environment Variables oching.
+2. `DATABASE_URL` qiymatini `/flowdesk` bilan tugaydigan Neon URLga almashtiring.
+3. O'zgarishdan keyin projectni redeploy qiling.
+4. Deploydan keyin health endpointni tekshiring:
+
+```text
+https://SIZNING_DOMEN/api/health
+```
+
+To'g'ri ulansa:
+
+```json
+{"ok":true,"database":"connected","schema":"ready"}
+```
+
+Neon'da `Your account or project has exceeded the compute time quota` chiqsa, database URL to'g'ri bo'lsa ham sayt data o'qiy olmaydi. Bunda Neon compute quota ochilishi yoki plan yangilanishi kerak.
+
 ## Vercelga Joylash
 
 1. Repository GitHubga push qilingan bo'lishi kerak:

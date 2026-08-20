@@ -8,8 +8,11 @@
  *   .env faylidan DATABASE_URL ni avtomatik o'qiydi
  */
 
-import "dotenv/config";
+import { config } from "dotenv";
 import { Client } from "pg";
+
+config({ path: ".env.local" });
+config();
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
