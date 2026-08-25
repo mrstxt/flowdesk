@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { confirmOrder } from "@/lib/orderActions";
+import { cancelOrderConfirmation, confirmOrder } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +78,19 @@ export async function PUT(req: Request) {
     });
   }
 
+  // Automation: move out of confirmed/archive -> reverse order income/allocation
+  if (oldStage === "confirmed" && payload.stage !== "confirmed") {
+    const result = await cancelOrderConfirmation(id, String(payload.stage));
+    if (!result.ok) {
+      return NextResponse.json({ error: result.message }, { status: 400 });
+    }
+    const [updated] = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.id, id));
+    return NextResponse.json(updated);
+  }
+
   const [updated] = await db
     .update(orders)
     .set(payload)
@@ -100,13 +113,10 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (existing.stage === "confirmed") {
-    return NextResponse.json(
-      {
-        error:
-          "Tasdiqlangan buyurtmani oddiy o'chirib bo'lmaydi. Avval tasdiqni bekor qilish kerak.",
-      },
-      { status: 400 }
-    );
+    const result = await cancelOrderConfirmation(id);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.message }, { status: 400 });
+    }
   }
   await db.delete(orders).where(eq(orders.id, id));
   return NextResponse.json({ ok: true });

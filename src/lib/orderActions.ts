@@ -7,7 +7,7 @@ import {
   cards,
   cardTransactions,
 } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 import { getPrimaryCard } from "@/lib/cardActions";
 
@@ -260,4 +260,140 @@ export async function confirmOrder(
     .where(eq(orders.id, orderId));
 
   return { ok: true, message: "OK" };
+}
+
+export async function cancelOrderConfirmation(
+  orderId: number,
+  nextStage = "in_progress"
+): Promise<{ ok: boolean; message: string }> {
+  const [order] = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+
+  if (!order) return { ok: false, message: "Buyurtma topilmadi" };
+
+  const orderIncomes = await db
+    .select()
+    .from(incomes)
+    .where(and(eq(incomes.orderId, orderId), eq(incomes.source, "order")));
+  const goalIncomes = await db
+    .select()
+    .from(incomes)
+    .where(and(eq(incomes.orderId, orderId), eq(incomes.source, "goal")));
+
+  await db.transaction(async (tx) => {
+    for (const income of orderIncomes) {
+      if (income.cardId) {
+        await tx
+          .update(cards)
+          .set({
+            balance: sql`GREATEST(${cards.balance} - ${Number(income.amount)}, 0)`,
+          })
+          .where(eq(cards.id, income.cardId));
+      }
+    }
+
+    const allGoals = await tx.select().from(goals);
+    const goalExpenseTitles = goalIncomes.map((income) => income.title);
+    const goalExpenses = goalExpenseTitles.length
+      ? await tx
+          .select()
+          .from(expenses)
+          .where(inArray(expenses.title, goalExpenseTitles))
+      : [];
+    const transactionIds = [
+      ...orderIncomes.map((income) => income.transactionId),
+      ...goalIncomes.map((income) => income.transactionId),
+      ...goalExpenses.map((expense) => expense.transactionId),
+    ].filter((id): id is number => typeof id === "number");
+
+    const goalTransactions = transactionIds.length
+      ? await tx
+          .select()
+          .from(cardTransactions)
+          .where(inArray(cardTransactions.id, transactionIds))
+      : [];
+
+    for (const income of goalIncomes) {
+      const goalTitle = extractGoalTitle(income.title, orderId);
+      const goal = goalTitle
+        ? allGoals.find(
+            (g) => g.title === goalTitle && g.cardId === income.cardId
+          )
+        : null;
+
+      if (goal) {
+        await tx
+          .update(goals)
+          .set({
+            savedAmount: sql`GREATEST(${goals.savedAmount} - ${Number(
+              income.amount
+            )}, 0)`,
+          })
+          .where(eq(goals.id, goal.id));
+      }
+
+      const goalTx = goalTransactions.find(
+        (txRow) => txRow.id === income.transactionId
+      );
+      if (
+        income.cardId &&
+        goalTx?.relatedCardId &&
+        goalTx.relatedCardId !== income.cardId
+      ) {
+        await tx
+          .update(cards)
+          .set({
+            balance: sql`GREATEST(${cards.balance} - ${Number(income.amount)}, 0)`,
+          })
+          .where(eq(cards.id, income.cardId));
+
+        await tx
+          .update(cards)
+          .set({ balance: sql`${cards.balance} + ${Number(income.amount)}` })
+          .where(eq(cards.id, goalTx.relatedCardId));
+      }
+    }
+
+    const orderIncomeIds = orderIncomes.map((income) => income.id);
+    const goalIncomeIds = goalIncomes.map((income) => income.id);
+    const incomeIds = [...orderIncomeIds, ...goalIncomeIds];
+
+    if (goalExpenseTitles.length) {
+      await tx.delete(expenses).where(inArray(expenses.title, goalExpenseTitles));
+    }
+    if (transactionIds.length) {
+      await tx
+        .delete(expenses)
+        .where(inArray(expenses.transactionId, transactionIds));
+    }
+    if (incomeIds.length) {
+      await tx.delete(incomes).where(inArray(incomes.id, incomeIds));
+    }
+    if (transactionIds.length) {
+      await tx
+        .delete(cardTransactions)
+        .where(inArray(cardTransactions.id, transactionIds));
+    }
+
+    await tx
+      .update(orders)
+      .set({
+        stage: nextStage,
+        archived: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId));
+  });
+
+  return { ok: true, message: "OK" };
+}
+
+function extractGoalTitle(title: string, orderId: number): string | null {
+  const prefix = "Maqsadga: ";
+  const suffix = ` (buyurtma #${orderId})`;
+  if (!title.startsWith(prefix) || !title.endsWith(suffix)) return null;
+  return title.slice(prefix.length, -suffix.length);
 }
