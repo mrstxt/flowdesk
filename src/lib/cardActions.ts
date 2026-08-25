@@ -9,6 +9,22 @@ import {
 import { eq, sql, desc, and, gte, isNull, ne } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 
+function monthStartISO(date?: string): string {
+  const d = date ? new Date(date + "T00:00:00") : new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
+
+function goalSavedAmountForCurrentPeriod(goal: typeof goals.$inferSelect): number {
+  if (goal.period !== "monthly") return Number(goal.savedAmount);
+  const currentMonthStart = monthStartISO();
+  if (!goal.periodStartedAt || goal.periodStartedAt < currentMonthStart) {
+    return 0;
+  }
+  return Number(goal.savedAmount);
+}
+
 /**
  * Karta operatsiyalari markaziy moduli.
  *
@@ -288,36 +304,70 @@ export async function addFundsToGoal(
     return { ok: false, error: "Maqsadga karta biriktirilmagan" };
   }
 
-  // Manba karta har doim ASOSIY karta bo'ladi (user talabi).
-  // fromCardId parametri eski mijozlar uchun saqlanadi, lekin e'tiborga
-  // olinmaydi — maqsadga ajratilgan pul doim asosiy kartadan yechiladi.
-  const primary = await getPrimaryCard();
-  if (!primary) {
-    return {
-      ok: false,
-      error: "Asosiy karta topilmadi. Avval asosiy karta yarating.",
-    };
-  }
-  const sourceCardId = primary.id;
-
-  const [srcCard] = await db
-    .select()
-    .from(cards)
-    .where(eq(cards.id, sourceCardId))
-    .limit(1);
+  const sourceCardId = fromCardId;
+  const [srcCard] = sourceCardId
+    ? await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, sourceCardId))
+        .limit(1)
+    : [null];
   const [targetCard] = await db
     .select()
     .from(cards)
     .where(eq(cards.id, goal.cardId))
     .limit(1);
 
-  if (!srcCard || !targetCard) {
+  if (!targetCard || (sourceCardId && !srcCard)) {
     return { ok: false, error: "Manba yoki maqsad kartasi topilmadi" };
   }
   const targetCardId = goal.cardId;
 
   const desc = description || `Maqsadga: ${goal.title}`;
   const today = new Date().toISOString().slice(0, 10);
+  const currentSavedAmount = goalSavedAmountForCurrentPeriod(goal);
+  const nextPeriodStartedAt =
+    goal.period === "monthly" ? monthStartISO() : goal.periodStartedAt;
+
+  if (!sourceCardId) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(goals)
+        .set({
+          savedAmount: String(currentSavedAmount + amount),
+          periodStartedAt: nextPeriodStartedAt,
+        })
+        .where(eq(goals.id, goalId));
+
+      await tx
+        .update(cards)
+        .set({ balance: sql`${cards.balance} + ${amount}` })
+        .where(eq(cards.id, targetCardId));
+
+      const [goalTx] = await tx
+        .insert(cardTransactions)
+        .values({
+          cardId: targetCardId,
+          date: today,
+          type: "goal_in",
+          amount: String(amount),
+          description: desc,
+        })
+        .returning();
+
+      await tx.insert(incomes).values({
+        title: desc,
+        amount: String(amount),
+        source: "goal",
+        date: today,
+        paymentType: "card",
+        cardId: targetCardId,
+        transactionId: goalTx.id,
+      });
+    });
+
+    return { ok: true, cardName: "Qo'shimcha kirim", targetCardName: targetCard.name };
+  }
 
   // Manba karta va maqsad kartasi bir xil bo'lsa
   if (sourceCardId === targetCardId) {
@@ -325,7 +375,8 @@ export async function addFundsToGoal(
       await tx
         .update(goals)
         .set({
-          savedAmount: String(Number(goal.savedAmount) + amount),
+          savedAmount: String(currentSavedAmount + amount),
+          periodStartedAt: nextPeriodStartedAt,
         })
         .where(eq(goals.id, goalId));
       const [goalTx] = await tx
@@ -356,7 +407,7 @@ export async function addFundsToGoal(
         transactionId: goalTx.id,
       });
     });
-    return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };
+    return { ok: true, cardName: srcCard?.name, targetCardName: targetCard.name };
   }
 
   // Boshqa kartadan maqsad kartasiga (Masalan: Asosiy kartadan Maqsad kartasiga transaksiyadek o'tkazish):
@@ -365,7 +416,7 @@ export async function addFundsToGoal(
   if (srcAvailable < amount) {
     return {
       ok: false,
-      error: `«${srcCard.name}» kartasida mablag' yetarli emas (${srcAvailable} so'm)`,
+      error: `«${srcCard?.name || "Karta"}» kartasida mablag' yetarli emas (${srcAvailable} so'm)`,
     };
   }
 
@@ -408,7 +459,8 @@ export async function addFundsToGoal(
     await tx
       .update(goals)
       .set({
-        savedAmount: String(Number(goal.savedAmount) + amount),
+        savedAmount: String(currentSavedAmount + amount),
+        periodStartedAt: nextPeriodStartedAt,
       })
       .where(eq(goals.id, goalId));
 
@@ -434,5 +486,5 @@ export async function addFundsToGoal(
     });
   });
 
-  return { ok: true, cardName: srcCard.name, targetCardName: targetCard.name };
+  return { ok: true, cardName: srcCard?.name, targetCardName: targetCard.name };
 }

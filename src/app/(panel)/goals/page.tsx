@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Lock,
   PiggyBank,
+  Calendar,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -29,6 +30,9 @@ type Goal = {
   targetAmount: string;
   savedAmount: string;
   autoPercent: number | null;
+  period: string;
+  deadline: string | null;
+  periodStartedAt: string | null;
   cardId: number | null;
 };
 type Card = {
@@ -145,11 +149,19 @@ export default function GoalsPage() {
     return cards.find((c) => c.id === id)?.color || "#94a3b8";
   }
 
+  function goalPeriodLabel(goal: Goal): string {
+    if (goal.period === "monthly") {
+      return goal.deadline ? `Oylik · ${goal.deadline} gacha` : "Oylik";
+    }
+    return goal.deadline ? `${goal.deadline} gacha` : "Bir martalik";
+  }
+
   async function createGoal(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
     const fd = new FormData(form);
     const cardIdRaw = fd.get("cardId") as string;
+    const period = String(fd.get("period") || "one_time");
     const res = await fetch("/api/goals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -157,6 +169,8 @@ export default function GoalsPage() {
         title: fd.get("title"),
         targetAmount: String(parseMoneyInput(fd.get("targetAmount"))),
         autoPercent: Number(fd.get("autoPercent")) || 0,
+        period,
+        deadline: fd.get("deadline") || null,
         cardId: cardIdRaw ? Number(cardIdRaw) : null,
       }),
     });
@@ -187,6 +201,7 @@ export default function GoalsPage() {
     const form = e.currentTarget;
     const fd = new FormData(form);
     const amt = parseMoneyInput(fd.get("amount"));
+    const source = String(fd.get("source") || "");
     const description = (fd.get("description") as string)?.trim() || undefined;
     try {
       const res = await fetch("/api/card-transactions", {
@@ -196,6 +211,7 @@ export default function GoalsPage() {
           action: "goal_fund",
           goalId: addFundsGoal.id,
           amount: amt,
+          fromCardId: source === "extra" || !source ? null : Number(source),
           description,
         }),
       });
@@ -586,6 +602,10 @@ export default function GoalsPage() {
                           💳 {cardName(g.cardId)}
                         </span>
                       )}
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">
+                        <Calendar className="w-3 h-3" />
+                        {goalPeriodLabel(g)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -680,6 +700,31 @@ export default function GoalsPage() {
                 min="0"
                 max="100"
                 defaultValue="0"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Yig'ish turi
+              </label>
+              <select
+                name="period"
+                defaultValue="one_time"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900"
+              >
+                <option value="one_time">Bir martalik</option>
+                <option value="monthly">Oylik</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Muddat
+              </label>
+              <input
+                name="deadline"
+                type="date"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
@@ -884,6 +929,25 @@ export default function GoalsPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
+              Pul manbasi
+            </label>
+            <select
+              name="source"
+              required
+              defaultValue={primaryCard?.id ? String(primaryCard.id) : "extra"}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900"
+            >
+              {activeCards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.last4 ? `•••• ${c.last4}` : "karta"}) —{" "}
+                  {formatCurrency(cardDisplayBalance(c))}
+                </option>
+              ))}
+              <option value="extra">Qo'shimcha kirim (kartadan yechilmaydi)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
               Tavsif (izoh / description)
             </label>
             <input
@@ -894,10 +958,9 @@ export default function GoalsPage() {
             />
           </div>
           <p className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded-xl p-2.5">
-            💡 Maqsadga pul faqat <b>kirim</b> bo'ladi. Pul <b>asosiy kartadan</b>{" "}
-            ({primaryCard ? primaryCard.name : "asosiy karta"}) yechiladi va maqsad
-            kartasiga tranzaksiyadek o'tkaziladi. Asosiy karta qoldig'i kam
-            bo'lsa xatolik chiqadi.
+            Maqsadga pul faqat <b>kirim</b> bo'ladi. Karta tanlansa pul o'sha
+            kartadan yechilib maqsad kartasiga o'tadi; qo'shimcha kirim
+            tanlansa kartadan yechilmaydi.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button

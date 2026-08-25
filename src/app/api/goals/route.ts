@@ -5,6 +5,14 @@ import { desc, eq } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+const GOAL_PERIODS = new Set(["one_time", "monthly"]);
+
+function monthStartISO(date?: string): string {
+  const d = date ? new Date(date + "T00:00:00") : new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
 
 async function autoPercentTotal(exceptId?: number): Promise<number> {
   const rows = await db.select().from(goals);
@@ -22,6 +30,23 @@ function clampPercent(value: unknown): number {
 }
 
 export async function GET() {
+  const currentMonthStart = monthStartISO();
+  const rowsBeforeReset = await db.select().from(goals);
+  const staleMonthlyGoals = rowsBeforeReset.filter(
+    (g) =>
+      g.period === "monthly" &&
+      (!g.periodStartedAt || g.periodStartedAt < currentMonthStart)
+  );
+
+  await Promise.all(
+    staleMonthlyGoals.map((g) =>
+      db
+        .update(goals)
+        .set({ savedAmount: "0", periodStartedAt: currentMonthStart })
+        .where(eq(goals.id, g.id))
+    )
+  );
+
   const rows = await db.select().from(goals).orderBy(desc(goals.createdAt));
   return NextResponse.json(rows);
 }
@@ -32,6 +57,9 @@ export async function POST(req: Request) {
   const targetAmount = parseMoneyInput(body.targetAmount);
   const autoPercent = clampPercent(body.autoPercent);
   const cardId = body.cardId ? Number(body.cardId) : null;
+  const period = GOAL_PERIODS.has(body.period) ? body.period : "one_time";
+  const deadline = body.deadline || null;
+  const periodStartedAt = period === "monthly" ? monthStartISO() : null;
   if (!title) {
     return NextResponse.json({ error: "title required" }, { status: 400 });
   }
@@ -54,6 +82,9 @@ export async function POST(req: Request) {
       targetAmount: String(targetAmount),
       savedAmount: String(parseMoneyInput(body.savedAmount ?? "0")),
       autoPercent,
+      period,
+      deadline,
+      periodStartedAt,
       cardId,
     })
     .returning();
@@ -75,6 +106,13 @@ export async function PUT(req: Request) {
   }
   if ("autoPercent" in rest) {
     rest.autoPercent = clampPercent(rest.autoPercent);
+  }
+  if ("period" in rest) {
+    rest.period = GOAL_PERIODS.has(rest.period) ? rest.period : "one_time";
+    rest.periodStartedAt = rest.period === "monthly" ? monthStartISO() : null;
+  }
+  if ("deadline" in rest) {
+    rest.deadline = rest.deadline || null;
   }
   if ("autoPercent" in rest || "cardId" in rest) {
     const [existing] = await db

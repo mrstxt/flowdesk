@@ -123,9 +123,16 @@ CREATE TABLE IF NOT EXISTS goals (
   target_amount NUMERIC(12, 2) NOT NULL,
   saved_amount NUMERIC(12, 2) NOT NULL DEFAULT '0',
   auto_percent INTEGER DEFAULT 0,
+  period VARCHAR(20) NOT NULL DEFAULT 'one_time',
+  deadline DATE,
+  period_started_at DATE,
   card_id INTEGER,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS period VARCHAR(20) NOT NULL DEFAULT 'one_time';
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS deadline DATE;
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS period_started_at DATE;
 
 -- 10. sleep_logs
 CREATE TABLE IF NOT EXISTS sleep_logs (

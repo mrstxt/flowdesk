@@ -33,6 +33,15 @@ export function monthStartISO(date?: string): string {
   return `${y}-${m}-01`;
 }
 
+function goalSavedAmountForCurrentPeriod(goal: typeof goals.$inferSelect): number {
+  if (goal.period !== "monthly") return Number(goal.savedAmount);
+  const currentMonthStart = monthStartISO();
+  if (!goal.periodStartedAt || goal.periodStartedAt < currentMonthStart) {
+    return 0;
+  }
+  return Number(goal.savedAmount);
+}
+
 /**
  * Buyurtmani tasdiqlash:
  * 1) stage -> confirmed, archived=true
@@ -168,7 +177,11 @@ export async function confirmOrder(
         await tx
           .update(goals)
           .set({
-            savedAmount: String(Number(g.savedAmount) + orderAllocation),
+            savedAmount: String(
+              goalSavedAmountForCurrentPeriod(g) + orderAllocation
+            ),
+            periodStartedAt:
+              g.period === "monthly" ? monthStartISO() : g.periodStartedAt,
           })
           .where(eq(goals.id, g.id));
 

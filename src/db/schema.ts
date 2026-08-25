@@ -103,6 +103,9 @@ export const goals = pgTable("goals", {
     .notNull()
     .default("0"),
   autoPercent: integer("auto_percent").default(0),
+  period: varchar("period", { length: 20 }).notNull().default("one_time"),
+  deadline: date("deadline"),
+  periodStartedAt: date("period_started_at"),
   // Qaysi kartaga to'planadi (nullable — umumiy)
   cardId: integer("card_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
