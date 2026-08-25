@@ -106,7 +106,7 @@ export default function OrdersPage() {
             ...o,
             stage,
             paymentType: stage === "confirmed" ? "card" : o.paymentType,
-            archived: stage === "confirmed" ? true : o.archived,
+            archived: stage === "confirmed" ? true : false,
           }
         : o
     );

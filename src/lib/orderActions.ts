@@ -7,7 +7,7 @@ import {
   cards,
   cardTransactions,
 } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 import { getPrimaryCard } from "@/lib/cardActions";
 
@@ -55,6 +55,26 @@ export async function confirmOrder(
   if (!order) return { ok: false, message: "Buyurtma topilmadi" };
   if (order.stage === "confirmed")
     return { ok: false, message: "Buyurtma allaqachon tasdiqlangan" };
+
+  const [existingOrderIncome] = await db
+    .select({ id: incomes.id })
+    .from(incomes)
+    .where(and(eq(incomes.orderId, orderId), eq(incomes.source, "order")))
+    .limit(1);
+
+  if (existingOrderIncome) {
+    await db
+      .update(orders)
+      .set({
+        stage: "confirmed",
+        paymentType: "card",
+        archived: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId));
+
+    return { ok: true, message: "OK", netDistributed: 0 };
+  }
 
   const amt = parseMoneyInput(order.amount);
   let targetCardId: number | null = null;

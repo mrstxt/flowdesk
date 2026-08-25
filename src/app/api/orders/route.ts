@@ -58,6 +58,10 @@ export async function PUT(req: Request) {
   delete payload._oldStage;
   payload.updatedAt = new Date();
 
+  if (typeof payload.stage === "string" && payload.stage !== "confirmed") {
+    payload.archived = false;
+  }
+
   // Automation: move to confirmed -> income + goals allocation + archive
   if (oldStage && oldStage !== "confirmed" && payload.stage === "confirmed") {
     const result = await confirmOrder(id);
