@@ -78,6 +78,7 @@ export default function GoalsPage() {
   const [cardModal, setCardModal] = useState(false);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [addFundsGoal, setAddFundsGoal] = useState<Goal | null>(null);
+  const [assignCardGoal, setAssignCardGoal] = useState<Goal | null>(null);
   const [transferModal, setTransferModal] = useState(false);
   const [topUpModal, setTopUpModal] = useState<{
     cardId: number;
@@ -107,6 +108,12 @@ export default function GoalsPage() {
 
   const primaryCard = cards.find((c) => c.type === "primary" && !c.archived);
   const activeCards = cards.filter((c) => !c.archived);
+  const usedGoalCardIds = new Set(
+    goals.map((g) => g.cardId).filter((id): id is number => typeof id === "number")
+  );
+  const availableGoalCards = activeCards.filter(
+    (c) => c.type !== "primary" && !usedGoalCardIds.has(c.id)
+  );
 
   // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...).
   // Shu pul asosiy kartada to'planadi (ichki goal transferlar kirmaydi).
@@ -234,6 +241,32 @@ export default function GoalsPage() {
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
     }
+  }
+
+  async function assignCardToGoal(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!assignCardGoal) return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const cardId = Number(fd.get("cardId"));
+    if (!cardId) {
+      alert("Karta tanlang");
+      return;
+    }
+
+    const res = await fetch("/api/goals", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assignCardGoal.id, cardId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Karta biriktirishda xatolik");
+      return;
+    }
+    setAssignCardGoal(null);
+    form.reset();
+    load();
   }
 
   async function saveCard(e: React.FormEvent<HTMLFormElement>) {
@@ -649,9 +682,17 @@ export default function GoalsPage() {
                 <PiggyBank className="w-3.5 h-3.5" /> Pul qo'shish
               </button>
               {!g.cardId && (
-                <div className="text-[10px] text-amber-600 mt-1 text-center">
-                  Avval maqsadga karta biriktiring
-                </div>
+                <>
+                  <button
+                    onClick={() => setAssignCardGoal(g)}
+                    className="w-full mt-2 py-2 text-sm text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-full font-medium transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <CreditCard className="w-3.5 h-3.5" /> Karta biriktirish
+                  </button>
+                  <div className="text-[10px] text-amber-600 mt-1 text-center">
+                    Avval bo'sh qo'shimcha karta biriktiring
+                  </div>
+                </>
               )}
             </div>
           );
@@ -738,7 +779,7 @@ export default function GoalsPage() {
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900"
             >
               <option value="">Tanlanmagan</option>
-              {activeCards.map((c) => (
+              {availableGoalCards.map((c) => (
                 <option key={c.id} value={c.id}>
                   💳 {c.name} ({c.last4 ? `•••• ${c.last4}` : "?"}) —{" "}
                   {formatCurrency(cardDisplayBalance(c))}
@@ -747,8 +788,8 @@ export default function GoalsPage() {
             </select>
           </div>
           <p className="text-xs text-slate-500">
-            * Maqsadga faqat kirim bo'ladi. Avtomatik foiz tasdiqlangan
-            buyurtmadan ajratiladi va shu kartaga tushadi.
+            * Faqat bo'sh qo'shimcha kartalar ko'rsatiladi. Asosiy karta va
+            boshqa maqsadga biriktirilgan kartalar tanlanmaydi.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button
@@ -901,6 +942,55 @@ export default function GoalsPage() {
             >
               <Check className="w-3.5 h-3.5" />
               Saqlash
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Assign card to goal */}
+      <Modal
+        open={!!assignCardGoal}
+        onClose={() => setAssignCardGoal(null)}
+        title={`Karta biriktirish: ${assignCardGoal?.title || ""}`}
+      >
+        <form onSubmit={assignCardToGoal} className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Bo'sh qo'shimcha karta
+            </label>
+            <select
+              name="cardId"
+              required
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900"
+            >
+              <option value="">Karta tanlang</option>
+              {availableGoalCards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.last4 ? `•••• ${c.last4}` : "karta"}) —{" "}
+                  {formatCurrency(cardDisplayBalance(c))}
+                </option>
+              ))}
+            </select>
+          </div>
+          {availableGoalCards.length === 0 && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+              Bo'sh qo'shimcha karta yo'q. Avval yangi qo'shimcha karta yarating.
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setAssignCardGoal(null)}
+              className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-full"
+            >
+              Bekor
+            </button>
+            <button
+              type="submit"
+              disabled={availableGoalCards.length === 0}
+              className="px-4 py-2 text-sm bg-accent text-white rounded-full hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Biriktirish
             </button>
           </div>
         </form>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { goals } from "@/db/schema";
+import { cards, goals } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 
@@ -27,6 +27,31 @@ async function autoPercentTotal(exceptId?: number): Promise<number> {
 function clampPercent(value: unknown): number {
   const n = Number(value) || 0;
   return Math.max(0, Math.min(100, Math.floor(n)));
+}
+
+async function validateGoalCard(cardId: number | null, exceptGoalId?: number) {
+  if (!cardId) return null;
+
+  const [card] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, cardId))
+    .limit(1);
+
+  if (!card || card.archived) {
+    return "Karta topilmadi yoki arxivlangan";
+  }
+  if (card.type === "primary") {
+    return "Asosiy kartani maqsadga biriktirib bo'lmaydi";
+  }
+
+  const usedGoals = await db.select().from(goals).where(eq(goals.cardId, cardId));
+  const usedByOtherGoal = usedGoals.some((g) => g.id !== exceptGoalId);
+  if (usedByOtherGoal) {
+    return "Bu karta boshqa maqsadga biriktirilgan";
+  }
+
+  return null;
 }
 
 export async function GET() {
@@ -68,6 +93,10 @@ export async function POST(req: Request) {
       { error: "Maqsad summasi 0 dan katta bo'lishi kerak" },
       { status: 400 }
     );
+  }
+  const cardError = await validateGoalCard(cardId);
+  if (cardError) {
+    return NextResponse.json({ error: cardError }, { status: 400 });
   }
   if (cardId && (await autoPercentTotal()) + autoPercent > 100) {
     return NextResponse.json(
@@ -127,6 +156,10 @@ export async function PUT(req: Request) {
       "cardId" in rest ? (rest.cardId as number | null) : existing.cardId;
     const nextPercent =
       "autoPercent" in rest ? Number(rest.autoPercent) : Number(existing.autoPercent ?? 0);
+    const cardError = await validateGoalCard(nextCardId, id);
+    if (cardError) {
+      return NextResponse.json({ error: cardError }, { status: 400 });
+    }
     if (nextCardId && (await autoPercentTotal(id)) + nextPercent > 100) {
       return NextResponse.json(
         { error: "Maqsadlarning jami avtomatik foizi 100% dan oshmasligi kerak" },
