@@ -317,6 +317,25 @@ Content AI -> **Instagram ulash** -> **Instagram orqali tasdiqlash**.
 - Faqat o'zingiz ishlatsangiz, Development mode + app admin/tester akkaunt ko'p holatda yetadi.
 - Secret qiymatlarni GitHubga commit qilmang; faqat Vercel env yoki local `.env` ichida saqlang.
 
+### Content AI Analitika / ML Data
+
+Content AI ichida **Analitika/ML** bo'limi bor. Bu bo'lim:
+
+- ulangan Instagram profilni signal sifatida oladi
+- ilhom profillarini benchmark sifatida hisoblaydi
+- media, komment va pattern memory sonlarini ko'rsatadi
+- verificationdan keyin analytics snapshot yaratadi
+- snapshotni browser xotirasida saqlab, keyingi kirishda ko'rsatadi
+
+Verified tahlil qilish:
+
+1. Content AI -> **Analitika/ML** bo'limiga kiring.
+2. **Verified tahlil** tugmasini bosing.
+3. Robot emaslik verification savoliga javob bering.
+4. Tizim `/api/content-ai/analyze` orqali tahlil qiladi va readiness/tavsiyalarni chiqaradi.
+
+Real Instagram data kelishi uchun Instagram OAuth envlari to'g'ri sozlangan bo'lishi kerak. Aks holda tizim profil/inspiration signalini ko'rsatadi, lekin media va komment dataset `0` bo'lib turadi.
+
 ### Local Postgres Misol
 
 ```env

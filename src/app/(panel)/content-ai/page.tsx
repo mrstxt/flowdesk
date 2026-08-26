@@ -91,6 +91,21 @@ type ContentIdea = {
   score: number;
 };
 
+type AnalysisResult = {
+  analyzedAt: string;
+  readiness: number;
+  summary: {
+    profileConnected: boolean;
+    profileUsername: string | null;
+    inspirationProfiles: number;
+    mediaCount: number;
+    commentsCount: number;
+    patternCount: number;
+    signalCount: number;
+  };
+  recommendations: string[];
+};
+
 type SectionId =
   | "overview"
   | "profile"
@@ -133,7 +148,7 @@ const sections: Array<{ id: SectionId; label: string; icon: typeof Eye }> = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "profile", label: "My Profile", icon: UserRound },
   { id: "inspiration", label: "Inspiration", icon: Search },
-  { id: "ml-data", label: "ML Data", icon: LineChart },
+  { id: "ml-data", label: "Analitika/ML", icon: LineChart },
   { id: "studio", label: "AI Studio", icon: Wand2 },
   { id: "plan", label: "Plan", icon: CalendarDays },
 ];
@@ -229,6 +244,15 @@ export default function ContentAiPage() {
     improveScript({ script: "", hasOwnData: false, inspirationCount: 0 })
   );
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
+  const [trainModal, setTrainModal] = useState(false);
+  const [trainChallenge, setTrainChallenge] = useState({
+    question: "",
+    token: "",
+  });
+  const [trainAnswer, setTrainAnswer] = useState("");
+  const [trainError, setTrainError] = useState("");
+  const [trainLoading, setTrainLoading] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
 
   const totals = useMemo(() => {
     const views = media.reduce((sum, item) => sum + item.views, 0);
@@ -296,6 +320,17 @@ export default function ContentAiPage() {
       .catch(() => {
         // Cookie-backed profile is optional until OAuth is configured.
       });
+
+    const savedAnalysis = window.localStorage.getItem(
+      "flowdesk-content-ai-analysis"
+    );
+    if (savedAnalysis) {
+      try {
+        setAnalysis(JSON.parse(savedAnalysis) as AnalysisResult);
+      } catch {
+        window.localStorage.removeItem("flowdesk-content-ai-analysis");
+      }
+    }
   }, []);
 
   function openProfileModal() {
@@ -394,6 +429,58 @@ export default function ContentAiPage() {
         inspirationCount: inspirationProfiles.length,
       })
     );
+  }
+
+  async function loadTrainChallenge() {
+    const res = await fetch("/api/auth/challenge");
+    const data = await res.json();
+    setTrainChallenge({
+      question: data.question || "",
+      token: data.token || "",
+    });
+    setTrainAnswer("");
+    setTrainError("");
+  }
+
+  async function openTrainModal() {
+    await loadTrainChallenge();
+    setTrainModal(true);
+  }
+
+  async function runVerifiedAnalysis(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setTrainLoading(true);
+    setTrainError("");
+
+    const res = await fetch("/api/content-ai/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        captchaToken: trainChallenge.token,
+        captchaAnswer: trainAnswer,
+        inspirationProfiles,
+        mediaCount: media.length,
+        commentsCount: comments.length,
+        patternCount: winningPatterns.length,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setTrainError(data.error || "Tahlilni tasdiqlashda xatolik yuz berdi");
+      await loadTrainChallenge();
+      setTrainLoading(false);
+      return;
+    }
+
+    const nextAnalysis = data as AnalysisResult;
+    setAnalysis(nextAnalysis);
+    window.localStorage.setItem(
+      "flowdesk-content-ai-analysis",
+      JSON.stringify(nextAnalysis)
+    );
+    setTrainModal(false);
+    setTrainLoading(false);
   }
 
   return (
@@ -827,7 +914,7 @@ export default function ContentAiPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
               <div>
                 <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                  ML Data xotirasi
+                  Content AI Analitika
                 </h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                   AI o'rganadigan profil, kontent, komment va pattern signallari.
@@ -848,12 +935,46 @@ export default function ContentAiPage() {
             <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4 flex items-start gap-3">
               <ClipboardList className="w-5 h-5 text-[#0a84ff] mt-0.5 shrink-0" />
               <p className="text-sm text-slate-600 leading-6">
-                Bu bo'lim keyingi bosqichda haqiqiy data bazaga ulanadi:
-                Instagram media, insights, kommentlar, ilhom profillari va AI
-                chiqargan patternlar saqlanadi. Shundan keyin model har safar
-                eski o'rgangan narsasini ko'rib, yangi maslahat beradi.
+                Bu bo'lim profil, media, komment, ilhom profillari va AI
+                chiqargan patternlardan real analytics snapshot yaratadi.
+                Snapshot verificationdan keyin yangilanadi va keyingi kirishda
+                xotirada qoladi.
               </p>
             </div>
+
+            {analysis && (
+              <div className="mt-4 rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Oxirgi verified tahlil
+                    </div>
+                    <div className="font-display font-extrabold text-slate-900 dark:text-slate-100 mt-1">
+                      Readiness {analysis.readiness}%
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {new Date(analysis.analyzedAt).toLocaleString("uz-UZ")}
+                  </div>
+                </div>
+                <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden mb-3">
+                  <div
+                    className="h-full rounded-full bg-accent"
+                    style={{ width: `${analysis.readiness}%` }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <MiniStat
+                    label="Signal"
+                    value={String(analysis.summary.signalCount)}
+                  />
+                  <MiniStat
+                    label="Benchmark"
+                    value={String(analysis.summary.inspirationProfiles)}
+                  />
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
@@ -866,11 +987,42 @@ export default function ContentAiPage() {
                   Profil tahlili AI qaysi tartibda o'rganishini boshqarish.
                 </p>
               </div>
-              <button className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all">
+              <button
+                onClick={openTrainModal}
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all"
+              >
                 <RefreshCw className="w-4 h-4" />
-                O'qitishni boshlash
+                Verified tahlil
               </button>
             </div>
+
+            {analysis ? (
+              <div className="space-y-3 mb-4">
+                {analysis.recommendations.map((item) => (
+                  <div
+                    key={item}
+                    className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-[#22a447] mt-0.5 shrink-0" />
+                      <p className="text-sm text-slate-600 dark:text-slate-300 leading-6">
+                        {item}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-black/[0.1] dark:border-white/[0.12] bg-slate-50/70 dark:bg-slate-950 p-5 mb-4">
+                <div className="font-bold text-slate-900 dark:text-slate-100">
+                  Verified analytics hali yo'q
+                </div>
+                <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1">
+                  Tahlilni boshlashdan oldin verificationdan o'ting. Shundan
+                  keyin Content AI signal snapshot va tavsiyalarni saqlaydi.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-3">
               {[
@@ -993,6 +1145,80 @@ export default function ContentAiPage() {
         </section>
         </div>
       )}
+
+      <Modal
+        open={trainModal}
+        onClose={() => setTrainModal(false)}
+        title="ML tahlilni tasdiqlash"
+      >
+        <form onSubmit={runVerifiedAnalysis} className="space-y-4">
+          <div className="rounded-2xl bg-[#fff4d8] border border-[#ff9f0a]/15 p-4">
+            <p className="text-sm text-slate-600 leading-6">
+              Bu amal Content AI xotirasini yangilaydi. Tahlil verified bo'lishi
+              uchun robot emasligingizni tasdiqlang.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Verification
+            </label>
+            <div className="flex items-center gap-2 mt-2">
+              <div className="px-4 py-3 rounded-full bg-slate-100 dark:bg-slate-800 text-sm font-bold text-slate-700 dark:text-slate-200 min-w-28 text-center">
+                {trainChallenge.question || "..."}
+              </div>
+              <input
+                value={trainAnswer}
+                onChange={(e) => {
+                  setTrainAnswer(e.target.value);
+                  setTrainError("");
+                }}
+                inputMode="numeric"
+                placeholder="Javob"
+                required
+                className="min-w-0 flex-1 rounded-full border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+              />
+              <button
+                type="button"
+                onClick={loadTrainChallenge}
+                className="w-11 h-11 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-accent transition-colors flex items-center justify-center"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+            {trainError && (
+              <div className="text-sm text-red-500 mt-2">{trainError}</div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <MiniStat label="Profil" value={connectedProfile ? "1" : "0"} />
+            <MiniStat
+              label="Benchmark"
+              value={String(inspirationProfiles.length)}
+            />
+            <MiniStat label="Media" value={String(media.length)} />
+            <MiniStat label="Komment" value={String(comments.length)} />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setTrainModal(false)}
+              className="px-4 py-2.5 rounded-full bg-white dark:bg-slate-950 border border-black/[0.07] dark:border-white/[0.09] text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            >
+              Bekor qilish
+            </button>
+            <button
+              disabled={trainLoading}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all disabled:opacity-60"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {trainLoading ? "Tahlil qilinmoqda..." : "Tasdiqlab tahlil qilish"}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         open={profileModal}
