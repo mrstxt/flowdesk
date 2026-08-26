@@ -30,6 +30,7 @@ import {
 import { Modal } from "@/components/Modal";
 
 type InstagramProfile = {
+  id?: string;
   username: string;
   displayName: string;
   bio: string;
@@ -38,6 +39,7 @@ type InstagramProfile = {
   following: number;
   mediaCount: number;
   profileUrl: string;
+  connectedAt?: string;
 };
 
 type InstagramMedia = {
@@ -248,14 +250,34 @@ export default function ContentAiPage() {
 
   useEffect(() => {
     const saved = window.localStorage.getItem("flowdesk-content-ai-profile");
-    if (!saved) return;
-
-    try {
-      const parsed = JSON.parse(saved) as Partial<InstagramProfile>;
-      setConnectedProfile(normalizeProfile(parsed));
-    } catch {
-      window.localStorage.removeItem("flowdesk-content-ai-profile");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as Partial<InstagramProfile>;
+        setConnectedProfile(normalizeProfile(parsed));
+      } catch {
+        window.localStorage.removeItem("flowdesk-content-ai-profile");
+      }
     }
+
+    fetch("/api/instagram/status")
+      .then((res) => res.json())
+      .then(
+        (data: {
+          connected?: boolean;
+          profile?: Partial<InstagramProfile> | null;
+        }) => {
+          if (!data.connected || !data.profile) return;
+          const profile = normalizeProfile(data.profile);
+          setConnectedProfile(profile);
+          window.localStorage.setItem(
+            "flowdesk-content-ai-profile",
+            JSON.stringify(profile)
+          );
+        }
+      )
+      .catch(() => {
+        // Cookie-backed profile is optional until OAuth is configured.
+      });
   }, []);
 
   function openProfileModal() {
@@ -303,7 +325,14 @@ export default function ContentAiPage() {
   function disconnectProfile() {
     setConnectedProfile(null);
     window.localStorage.removeItem("flowdesk-content-ai-profile");
+    fetch("/api/instagram/disconnect", { method: "POST" }).catch(() => {
+      // Local disconnect should still work even if the API is unavailable.
+    });
     setProfileModal(false);
+  }
+
+  function startInstagramOauth() {
+    window.location.href = "/api/instagram/connect";
   }
 
   function addInspirationProfile(e: React.FormEvent<HTMLFormElement>) {
@@ -841,9 +870,18 @@ export default function ContentAiPage() {
             </p>
           </div>
 
+          <button
+            type="button"
+            onClick={startInstagramOauth}
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-accent text-white text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all shadow-lg shadow-accent/20"
+          >
+            <Camera className="w-4 h-4" />
+            Instagram orqali tasdiqlash
+          </button>
+
           <div>
             <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Profil username yoki link
+              Manual preview uchun username yoki link
             </label>
             <input
               value={profileInput}
@@ -899,9 +937,9 @@ export default function ContentAiPage() {
 
           <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4">
             <p className="text-sm text-slate-600 leading-6">
-              Hozir username panelga ulanadi va profil ko'rinadi. Keyingi
-              bosqichda shu flow Instagram Graph API OAuth tokeniga ulanib,
-              real insights, reels va kommentlarni avtomatik tortadi.
+              Yuqoridagi tugma Instagram'ga request yuboradi. Agar Meta app
+              env sozlanmagan bo'lsa, pastdagi manual preview orqali profil
+              ko'rinishini vaqtincha ulab turishingiz mumkin.
             </p>
           </div>
 

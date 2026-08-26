@@ -114,6 +114,30 @@ ADMIN_PASSWORD="siz-kiritadigan-parol"
 | `VERCEL_CRON_SECRET` | `random-cron-secret` | Vercel Cron endpointini himoya qilish uchun maxfiy satr |
 | `CRON_JOB_SECRET` | `random-cron-job-secret` | cron-job.org real-time tekshiruvlarini himoya qilish uchun maxfiy satr (`?tick=` parametri) |
 
+### Content AI Instagram Ulanishi Uchun
+
+Content AI profilni Instagram orqali tasdiqlatib ulashi uchun Meta/Instagram app kerak. App ichida callback URL sifatida quyidagini qo'shing:
+
+```text
+https://SIZNING_DOMEN/api/instagram/callback
+```
+
+Local dev uchun:
+
+```text
+http://localhost:3000/api/instagram/callback
+```
+
+Env kalitlari:
+
+| Kalit | Misol | Izoh |
+|---|---|---|
+| `INSTAGRAM_APP_ID` | `1234567890` | Meta/Instagram app client ID |
+| `INSTAGRAM_APP_SECRET` | `abc123...` | Meta/Instagram app secret. Clientga chiqmaydi |
+| `INSTAGRAM_REDIRECT_URI` | `https://domain.uz/api/instagram/callback` | Meta dashboarddagi callback URL bilan bir xil bo'lishi shart |
+| `INSTAGRAM_API_VERSION` | `v21.0` | Ixtiyoriy, default `v21.0` |
+| `INSTAGRAM_SCOPES` | `instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments` | Ixtiyoriy, kerakli permissionlar |
+
 ### Local Postgres Misol
 
 ```env
