@@ -12,6 +12,7 @@ import {
   Lightbulb,
   LineChart,
   Link2,
+  Lock,
   MessageCircle,
   MessageSquareText,
   Play,
@@ -94,6 +95,25 @@ const contentPlan: Array<{
   type: string;
   score: number;
 }> = [];
+
+const pipeline = [
+  {
+    title: "Profil ulash",
+    text: "OAuth ruxsatlari orqali profil aniqlanadi, parol app ichida olinmaydi.",
+  },
+  {
+    title: "Kontent o'qish",
+    text: "Reels, post, reach, view, save, share, comment va retention yig'iladi.",
+  },
+  {
+    title: "Pattern topish",
+    text: "Mening profilim va ilhom profillaridagi yaxshi ketgan formatlar ajratiladi.",
+  },
+  {
+    title: "AI tavsiya",
+    text: "Senariy, hook, caption, CTA va kontent reja real signalga asoslanadi.",
+  },
+];
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("uz-UZ").format(value);
@@ -199,6 +219,10 @@ export default function ContentAiPage() {
     ),
     patterns: winningPatterns.length,
   };
+
+  const profileStatus = connectedProfile
+    ? "Profil ulangan, statistika kutilmoqda"
+    : "Profil ulanmagan";
 
   useEffect(() => {
     const saved = window.localStorage.getItem("flowdesk-content-ai-profile");
@@ -377,6 +401,79 @@ export default function ContentAiPage() {
           </div>
         </div>
       </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                Secure Connect
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Login/parol saqlanmaydi. Ulanish Instagram ruxsatlari orqali qilinadi.
+              </p>
+            </div>
+            <div className="w-10 h-10 rounded-2xl bg-[#eaf9ef] text-[#22a447] flex items-center justify-center">
+              <Lock className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 dark:bg-slate-950 p-4 mb-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
+              Status
+            </div>
+            <div className="font-display font-extrabold text-slate-900 dark:text-slate-100">
+              {profileStatus}
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-2">
+              Hozir profil username orqali panelga ulanadi. Keyingi backend
+              bosqichida shu joy OAuth token olib, real Instagram insightslarni
+              avtomatik tortadi.
+            </p>
+          </div>
+
+          <button
+            onClick={openProfileModal}
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-accent text-white rounded-full text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all shadow-lg shadow-accent/20"
+          >
+            <Camera className="w-4 h-4" />
+            {connectedProfile ? "Profil ulanishini boshqarish" : "Profil ulash"}
+          </button>
+        </section>
+
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                AI data pipeline
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Content AI shu tartibda real profilni o'qib tavsiya beradi.
+              </p>
+            </div>
+            <Sparkles className="w-5 h-5 text-accent" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {pipeline.map((item, index) => (
+              <div
+                key={item.title}
+                className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-4"
+              >
+                <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-900 text-accent flex items-center justify-center text-sm font-extrabold mb-3">
+                  {index + 1}
+                </div>
+                <div className="font-bold text-slate-900 dark:text-slate-100">
+                  {item.title}
+                </div>
+                <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1">
+                  {item.text}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
         <Kpi label="Ko'rish" value={formatNumber(totals.views)} icon={Eye} tone="blue" />
@@ -743,9 +840,18 @@ export default function ContentAiPage() {
       <Modal
         open={profileModal}
         onClose={() => setProfileModal(false)}
-        title="Instagram profil ulash"
+        title="Secure Instagram ulash"
       >
         <form onSubmit={connectProfile} className="space-y-4">
+          <div className="rounded-2xl bg-[#eaf9ef] border border-[#34c759]/15 p-4 flex gap-3">
+            <Lock className="w-5 h-5 text-[#22a447] mt-0.5 shrink-0" />
+            <p className="text-sm text-slate-600 leading-6">
+              Instagram parolingiz bu appga kiritilmaydi va saqlanmaydi. Real
+              statistika uchun keyin OAuth permission yoki access token backend
+              orqali ulanadi.
+            </p>
+          </div>
+
           <div>
             <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
               Profil username yoki link
