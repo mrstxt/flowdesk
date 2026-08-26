@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Camera,
@@ -26,6 +26,7 @@ import {
   UserRound,
   Wand2,
 } from "lucide-react";
+import { Modal } from "@/components/Modal";
 
 type InstagramProfile = {
   username: string;
@@ -83,7 +84,6 @@ type ContentIdea = {
   score: number;
 };
 
-const profile: InstagramProfile = null;
 const media: InstagramMedia[] = [];
 const comments: InstagramComment[] = [];
 const winningPatterns: WinningPattern[] = [];
@@ -154,7 +154,11 @@ function improveScript({
 }
 
 export default function ContentAiPage() {
-  const [connectStarted, setConnectStarted] = useState(false);
+  const [profileModal, setProfileModal] = useState(false);
+  const [connectedProfile, setConnectedProfile] =
+    useState<InstagramProfile>(null);
+  const [profileInput, setProfileInput] = useState("");
+  const [profileError, setProfileError] = useState("");
   const [inspirationInput, setInspirationInput] = useState("");
   const [inspirationProfiles, setInspirationProfiles] = useState<
     InspirationProfile[]
@@ -183,7 +187,7 @@ export default function ContentAiPage() {
   const hasComments = comments.length > 0;
   const hasPatterns = winningPatterns.length > 0;
   const hasIdeas = contentIdeas.length > 0;
-  const hasOwnData = Boolean(profile && media.length);
+  const hasOwnData = Boolean(connectedProfile && media.length);
 
   const trainingStats = {
     ownMedia: media.length,
@@ -196,8 +200,54 @@ export default function ContentAiPage() {
     patterns: winningPatterns.length,
   };
 
-  function handleConnect() {
-    setConnectStarted(true);
+  useEffect(() => {
+    const saved = window.localStorage.getItem("flowdesk-content-ai-profile");
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as InstagramProfile;
+      setConnectedProfile(parsed);
+    } catch {
+      window.localStorage.removeItem("flowdesk-content-ai-profile");
+    }
+  }, []);
+
+  function openProfileModal() {
+    setProfileError("");
+    setProfileInput(connectedProfile?.username || "");
+    setProfileModal(true);
+  }
+
+  function connectProfile(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const username = cleanUsername(profileInput);
+
+    if (!username) {
+      setProfileError("Instagram username yoki profil linkini kiriting.");
+      return;
+    }
+
+    const nextProfile = {
+      username,
+      followers: 0,
+      mediaCount: 0,
+      profileUrl: `https://instagram.com/${username}`,
+    };
+
+    setConnectedProfile(nextProfile);
+    window.localStorage.setItem(
+      "flowdesk-content-ai-profile",
+      JSON.stringify(nextProfile)
+    );
+    setProfileInput("");
+    setProfileError("");
+    setProfileModal(false);
+  }
+
+  function disconnectProfile() {
+    setConnectedProfile(null);
+    window.localStorage.removeItem("flowdesk-content-ai-profile");
+    setProfileModal(false);
   }
 
   function addInspirationProfile(e: React.FormEvent<HTMLFormElement>) {
@@ -261,15 +311,15 @@ export default function ContentAiPage() {
         </div>
         <div className="flex flex-wrap gap-2.5">
           <button
-            onClick={handleConnect}
+            onClick={openProfileModal}
             className="flex items-center gap-2 px-5 py-2.5 bg-accent text-white rounded-full text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all shadow-lg shadow-accent/25"
           >
-            {connectStarted ? (
+            {connectedProfile ? (
               <CheckCircle2 className="w-4 h-4" />
             ) : (
               <Camera className="w-4 h-4" />
             )}
-            {connectStarted ? "Ulash jarayoni tayyor" : "Instagram ulash"}
+            {connectedProfile ? "Profil ulangan" : "Instagram ulash"}
           </button>
           <button className="flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-black/[0.07] dark:border-white/[0.09] rounded-full text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.97] transition-all">
             <RefreshCw className="w-4 h-4 text-[#0a84ff]" />
@@ -286,15 +336,28 @@ export default function ContentAiPage() {
             </div>
             <div>
               <div className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                {profile?.username || "Instagram profil ulanmagan"}
+                {connectedProfile
+                  ? `@${connectedProfile.username}`
+                  : "Instagram profil ulanmagan"}
               </div>
               <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {profile
-                  ? `${formatNumber(profile.followers)} obunachi · ${formatNumber(profile.mediaCount)} media`
+                {connectedProfile
+                  ? `${formatNumber(connectedProfile.followers)} obunachi · ${formatNumber(connectedProfile.mediaCount)} media · statistika kutilmoqda`
                   : "Profil ulangandan keyin bio, obunachi, reels va post statistikasi shu yerga tushadi."}
               </div>
             </div>
           </div>
+          {connectedProfile && (
+            <a
+              href={connectedProfile.profileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Link2 className="w-4 h-4" />
+              Profilni ochish
+            </a>
+          )}
           <div className="flex flex-wrap gap-2">
             {[
               "My Profile",
@@ -676,6 +739,69 @@ export default function ContentAiPage() {
           )}
         </section>
       </div>
+
+      <Modal
+        open={profileModal}
+        onClose={() => setProfileModal(false)}
+        title="Instagram profil ulash"
+      >
+        <form onSubmit={connectProfile} className="space-y-4">
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Profil username yoki link
+            </label>
+            <input
+              value={profileInput}
+              onChange={(e) => {
+                setProfileInput(e.target.value);
+                setProfileError("");
+              }}
+              placeholder="@username yoki instagram.com/username"
+              className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+              autoFocus
+            />
+            {profileError && (
+              <div className="text-sm text-red-500 mt-2">{profileError}</div>
+            )}
+          </div>
+
+          <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4">
+            <p className="text-sm text-slate-600 leading-6">
+              Hozir username panelga ulanadi va profil ko'rinadi. Keyingi
+              bosqichda shu flow Instagram Graph API OAuth tokeniga ulanib,
+              real insights, reels va kommentlarni avtomatik tortadi.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap justify-between gap-2 pt-2">
+            {connectedProfile ? (
+              <button
+                type="button"
+                onClick={disconnectProfile}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-slate-100 dark:bg-slate-800 text-sm font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Uzish
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setProfileModal(false)}
+                className="px-4 py-2.5 rounded-full bg-white dark:bg-slate-950 border border-black/[0.07] dark:border-white/[0.09] text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                Bekor qilish
+              </button>
+              <button className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all">
+                <CheckCircle2 className="w-4 h-4" />
+                Profilni ulash
+              </button>
+            </div>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
