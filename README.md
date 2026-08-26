@@ -116,27 +116,180 @@ ADMIN_PASSWORD="siz-kiritadigan-parol"
 
 ### Content AI Instagram Ulanishi Uchun
 
-Content AI profilni Instagram orqali tasdiqlatib ulashi uchun Meta/Instagram app kerak. App ichida callback URL sifatida quyidagini qo'shing:
+Content AI profilni Instagram orqali tasdiqlatib ulashi uchun Meta Developer ichida Instagram app sozlanadi. Flow shunday ishlaydi:
+
+1. User Content AI ichida **Instagram orqali tasdiqlash** bosadi.
+2. App `/api/instagram/connect` orqali Instagram OAuth sahifasiga redirect qiladi.
+3. User Instagram’da ruxsat beradi.
+4. Instagram `/api/instagram/callback` ga `code` bilan qaytadi.
+5. Server tokenni oladi, profilni o'qiydi va Content AI’da profil preview ko'rsatadi.
+
+> Muhim: Instagram paroli FlowDesk ichida kiritilmaydi va saqlanmaydi. Ulanish OAuth/access permission orqali bo'ladi.
+
+#### 1. Instagram akkaunt talabi
+
+Instagram API professional akkauntlar bilan ishlaydi:
+
+- Instagram profilingiz **Business** yoki **Creator** bo'lishi kerak.
+- Oddiy personal account API insights uchun yetarli emas.
+- Instagram app Development mode’da bo'lsa, odatda faqat app role/tester/admin bo'lgan akkauntlar ulana oladi.
+
+Instagram app ichida profilni Professional qilish:
 
 ```text
-https://SIZNING_DOMEN/api/instagram/callback
+Instagram app -> Profile -> Settings and privacy -> Account type and tools -> Switch to professional account
 ```
 
-Local dev uchun:
+#### 2. Meta Developer app yaratish
+
+1. `https://developers.facebook.com/apps/` ga kiring.
+2. **Create App** bosing.
+3. App type sifatida **Business** tanlang.
+4. App nomi va contact email kiriting.
+5. App yaratilgandan keyin dashboardga kiring.
+
+#### 3. Instagram product/use case qo'shish
+
+Meta dashboard interfeysi hisobga qarab biroz boshqacha ko'rinishi mumkin. Odatda quyidagilardan biri bo'ladi:
+
+Variant A:
+
+```text
+Add Product -> Instagram -> Set up -> Instagram API with Instagram Login
+```
+
+Variant B:
+
+```text
+Customize use case -> Instagram API -> API setup with Instagram login
+```
+
+Shu joyda sizga kerak bo'ladigan credentiallar chiqadi:
+
+- **Instagram App ID** -> `INSTAGRAM_APP_ID`
+- **Instagram App Secret** -> `INSTAGRAM_APP_SECRET`
+
+> E'tibor bering: Instagram App ID ba'zan Meta/Facebook App ID’dan alohida bo'ladi. Aynan Instagram Login/API setup ichidagi ID va Secretni oling.
+
+#### 4. OAuth Redirect URI qo'shish
+
+Instagram Login settings ichida **Valid OAuth Redirect URIs** joyiga production URL kiriting:
+
+```text
+https://SIZNING-VERCEL-DOMEN.vercel.app/api/instagram/callback
+```
+
+Agar custom domain bo'lsa:
+
+```text
+https://SIZNING-DOMEN.uz/api/instagram/callback
+```
+
+Local development uchun qo'shish mumkin:
 
 ```text
 http://localhost:3000/api/instagram/callback
 ```
 
-Env kalitlari:
+Vercel’dagi `INSTAGRAM_REDIRECT_URI` qiymati Meta dashboardga yozilgan URL bilan **harfma-harf bir xil** bo'lishi kerak.
 
-| Kalit | Misol | Izoh |
+#### 5. Permission/scopes sozlash
+
+FlowDesk Content AI uchun default scopes:
+
+```env
+INSTAGRAM_SCOPES="instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments"
+```
+
+Scope nima uchun kerak:
+
+| Scope | Nima uchun |
+|---|---|
+| `instagram_business_basic` | Profil, username, media kabi basic data |
+| `instagram_business_manage_insights` | Profil/media statistikasi, reach, view, retention/insight data |
+| `instagram_business_manage_comments` | Kommentlarni o'qish va keyin tahlil qilish |
+
+Agar keyinchalik Content AI’dan post/reels chiqarish ham kerak bo'lsa:
+
+```env
+INSTAGRAM_SCOPES="instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments,instagram_business_content_publish"
+```
+
+#### 6. Vercel Environment Variables
+
+Vercel’da:
+
+```text
+Vercel Dashboard -> Project -> Settings -> Environment Variables
+```
+
+Quyidagilarni qo'shing:
+
+| Kalit | Misol | Qayerdan olinadi |
 |---|---|---|
-| `INSTAGRAM_APP_ID` | `1234567890` | Meta/Instagram app client ID |
-| `INSTAGRAM_APP_SECRET` | `abc123...` | Meta/Instagram app secret. Clientga chiqmaydi |
-| `INSTAGRAM_REDIRECT_URI` | `https://domain.uz/api/instagram/callback` | Meta dashboarddagi callback URL bilan bir xil bo'lishi shart |
-| `INSTAGRAM_API_VERSION` | `v21.0` | Ixtiyoriy, default `v21.0` |
-| `INSTAGRAM_SCOPES` | `instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments` | Ixtiyoriy, kerakli permissionlar |
+| `INSTAGRAM_APP_ID` | `1234567890` | Meta app -> Instagram API with Instagram Login -> Instagram App ID |
+| `INSTAGRAM_APP_SECRET` | `abc123...` | Meta app -> Instagram API with Instagram Login -> Instagram App Secret -> Show |
+| `INSTAGRAM_REDIRECT_URI` | `https://flowdesk.vercel.app/api/instagram/callback` | Vercel production domain + `/api/instagram/callback` |
+| `INSTAGRAM_API_VERSION` | `v21.0` | Ixtiyoriy. Kiritilmasa app default `v21.0` ishlatadi |
+| `INSTAGRAM_SCOPES` | `instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments` | Meta permissions/use case ichida ruxsat berilgan scopelar |
+
+Vercel env misol:
+
+```env
+INSTAGRAM_APP_ID="1234567890"
+INSTAGRAM_APP_SECRET="instagram-app-secret"
+INSTAGRAM_REDIRECT_URI="https://flowdesk.vercel.app/api/instagram/callback"
+INSTAGRAM_API_VERSION="v21.0"
+INSTAGRAM_SCOPES="instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments"
+```
+
+Env qo'shgandan keyin projectni qayta deploy qiling:
+
+```text
+Vercel -> Deployments -> Redeploy
+```
+
+#### 7. Local `.env` misol
+
+Local test uchun `.env` yoki `.env.local`:
+
+```env
+INSTAGRAM_APP_ID="1234567890"
+INSTAGRAM_APP_SECRET="instagram-app-secret"
+INSTAGRAM_REDIRECT_URI="http://localhost:3000/api/instagram/callback"
+INSTAGRAM_API_VERSION="v21.0"
+INSTAGRAM_SCOPES="instagram_business_basic,instagram_business_manage_insights,instagram_business_manage_comments"
+```
+
+Local test qilish:
+
+```bash
+npm run dev
+```
+
+Keyin:
+
+```text
+http://localhost:3000/content-ai
+```
+
+Content AI -> **Instagram ulash** -> **Instagram orqali tasdiqlash**.
+
+#### 8. Ulanish ishlamasa tekshiring
+
+| Xato | Sabab | Yechim |
+|---|---|---|
+| `missing_env:INSTAGRAM_APP_ID,INSTAGRAM_APP_SECRET` | Vercel env qo'shilmagan | Vercel Settings -> Environment Variables ichida ID/Secret qo'shing va redeploy qiling |
+| `invalid_state` | OAuth sessiya cookie mos kelmadi yoki callback boshqa domen orqali keldi | `INSTAGRAM_REDIRECT_URI` va Meta redirect URI bir xil ekanini tekshiring |
+| `token_exchange_failed` | App ID/Secret noto'g'ri yoki redirect URI mos emas | Instagram App ID/Secretni qayta oling, redirect URI’ni harfma-harf solishtiring |
+| `profile_fetch_failed` | Permission yetarli emas yoki akkaunt professional emas | Instagram akkauntni Business/Creator qiling, scope va permissionlarni tekshiring |
+| Instagram approve sahifasi chiqmaydi | App Development mode’da va user app tester/admin emas | Meta app roles ichiga userni admin/developer/tester sifatida qo'shing |
+
+#### 9. Production eslatma
+
+- App Live mode va boshqa userlar uchun ishlashi kerak bo'lsa, Meta App Review talab qilinishi mumkin.
+- Faqat o'zingiz ishlatsangiz, Development mode + app admin/tester akkaunt ko'p holatda yetadi.
+- Secret qiymatlarni GitHubga commit qilmang; faqat Vercel env yoki local `.env` ichida saqlang.
 
 ### Local Postgres Misol
 
