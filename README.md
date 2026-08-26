@@ -68,7 +68,7 @@ npm install
 cp .env.example .env
 ```
 
-3. `.env` ichidagi qiymatlarni to'ldiring. Eng kamida panel ishlashi uchun `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` kerak.
+3. `.env` ichidagi qiymatlarni to'ldiring. Eng kamida panel ishlashi uchun `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_USERNAME`, `ADMIN_OTP_SECRET` kerak.
 
 4. Database jadvallarini yarating:
 
@@ -93,7 +93,7 @@ Keyin brauzerda `http://localhost:3000` ochiladi.
 | `DATABASE_URL` | `postgresql://user:pass@host:5432/db?sslmode=require` | Neon, Supabase, Vercel Postgres yoki local Postgres ulanish URL |
 | `SESSION_SECRET` | `9b4f...uzun-random...` | Login cookie imzosini himoya qiladi. Productionda uzun random satr bo'lishi shart |
 | `ADMIN_USERNAME` | `admin` | Panelga kirish login |
-| `ADMIN_PASSWORD` | `kuchli-parol` | Panelga kirish parol |
+| `ADMIN_OTP_SECRET` | `base32-totp-secret` | 1 martalik kod yaratish uchun TOTP secret |
 
 Vercel’da login ishlashi uchun shu 4 ta env majburiy:
 
@@ -101,7 +101,33 @@ Vercel’da login ishlashi uchun shu 4 ta env majburiy:
 DATABASE_URL="postgresql://..."
 SESSION_SECRET="uzun-random-secret"
 ADMIN_USERNAME="admin"
-ADMIN_PASSWORD="siz-kiritadigan-parol"
+ADMIN_OTP_SECRET="base32-totp-secret"
+```
+
+### Bir Martalik Kod Bilan Login
+
+FlowDesk doimiy parol o'rniga 1 martalik kod ishlatadi. Kirishda:
+
+1. `ADMIN_USERNAME` loginini kiriting.
+2. Authenticator appdagi 6 xonali kodni kiriting.
+3. Robot emaslik uchun sahifadagi matematik savolga javob bering.
+
+Kod har 30 soniyada almashadi. Uni Google Authenticator, 1Password, Authy yoki iCloud Passwords kabi appga qo'shish mumkin.
+
+TOTP secret talablari:
+
+- Base32 formatda bo'lishi kerak.
+- Productionda `JBSWY3DPEHPK3PXP` kabi default/test secret ishlatmang.
+- Secretni GitHubga commit qilmang; faqat Vercel env yoki local `.env` ichida saqlang.
+
+Authenticator appga qo'lda qo'shish:
+
+```text
+Account name: FlowDesk
+Secret: ADMIN_OTP_SECRET qiymati
+Type: Time-based
+Digits: 6
+Period: 30 seconds
 ```
 
 ### Telegram Bot Uchun
@@ -297,7 +323,7 @@ Content AI -> **Instagram ulash** -> **Instagram orqali tasdiqlash**.
 DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/app_db"
 SESSION_SECRET="local-development-secret-change-me"
 ADMIN_USERNAME="admin"
-ADMIN_PASSWORD="admin123"
+ADMIN_OTP_SECRET="JBSWY3DPEHPK3PXP"
 
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_ADMIN_CHAT_ID=""
@@ -311,7 +337,7 @@ VERCEL_CRON_SECRET="local-cron-secret"
 DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/DATABASE?sslmode=require"
 SESSION_SECRET="juda-uzun-random-secret-64-belgidan-kam-bolmasin"
 ADMIN_USERNAME="admin"
-ADMIN_PASSWORD="juda-kuchli-parol"
+ADMIN_OTP_SECRET="juda-base32-totp-secret"
 
 TELEGRAM_BOT_TOKEN="BOTFATHER_TOKEN"
 TELEGRAM_ADMIN_CHAT_ID="SIZNING_CHAT_ID"
@@ -389,7 +415,7 @@ GitHubdagi `mrstxt/flowdesk` reposini tanlang.
 DATABASE_URL="postgresql://..."
 SESSION_SECRET="..."
 ADMIN_USERNAME="..."
-ADMIN_PASSWORD="..."
+ADMIN_OTP_SECRET="..."
 TELEGRAM_BOT_TOKEN="..."
 TELEGRAM_ADMIN_CHAT_ID="..."
 BOT_WEBHOOK_SECRET="..."
@@ -554,7 +580,7 @@ Buni Telegram bot orqali ham qilish mumkin — `/kitob qilish` tugmasini bosing 
 
 ## Muhim Eslatma
 
-Productionda `ADMIN_PASSWORD`, `SESSION_SECRET`, `BOT_WEBHOOK_SECRET`, `VERCEL_CRON_SECRET` qiymatlarini oddiy yoki default qoldirmang. Har birini uzun random satr qilib qo'ying.
+Productionda `ADMIN_OTP_SECRET`, `SESSION_SECRET`, `BOT_WEBHOOK_SECRET`, `VERCEL_CRON_SECRET` qiymatlarini oddiy yoki default qoldirmang. Har birini uzun random satr qilib qo'ying.
 
 ## Login Muammolari
 
@@ -564,11 +590,11 @@ Vercel logs ichida:
 |---|---|
 | `GET / 307` | Normal holat. Login qilinmagan foydalanuvchi `/login`ga redirect bo'ladi |
 | `GET /login 200` | Normal holat. Login sahifasi ochilgan |
-| `POST /api/auth/login 400` | Login yoki parol input bo'sh/yaroqsiz ketgan |
-| `POST /api/auth/login 401` | `ADMIN_USERNAME` yoki `ADMIN_PASSWORD` qiymatiga mos login/parol kiritilmagan |
-| `POST /api/auth/login 500` | Vercel env ichida `SESSION_SECRET`, `ADMIN_USERNAME` yoki `ADMIN_PASSWORD` yetishmayapti |
+| `POST /api/auth/login 400` | Login, bir martalik kod yoki robot tekshiruv javobi bo'sh/yaroqsiz ketgan |
+| `POST /api/auth/login 401` | `ADMIN_USERNAME` yoki `ADMIN_OTP_SECRET` qiymatiga mos login/bir martalik kod kiritilmagan |
+| `POST /api/auth/login 500` | Vercel env ichida `SESSION_SECRET`, `ADMIN_USERNAME` yoki `ADMIN_OTP_SECRET` yetishmayapti |
 
-Agar `401` chiqsa, Vercel → Project → Settings → Environment Variables ichidagi `ADMIN_USERNAME` va `ADMIN_PASSWORD`ni tekshiring. Keyin projectni redeploy qiling.
+Agar `401` chiqsa, Vercel → Project → Settings → Environment Variables ichidagi `ADMIN_USERNAME` va `ADMIN_OTP_SECRET`ni tekshiring. Keyin projectni redeploy qiling.
 
 ## Ma'lumotlar Saqlanmasa Yoki Bot Xato Bersa
 
@@ -606,7 +632,7 @@ Xato holatlar:
 |---|---|
 | `database_not_configured` | Vercel envga `DATABASE_URL` qo'ying va redeploy qiling |
 | `database_schema_missing` | `npm run db:push` bilan jadvallarni yarating |
-| `database_connection_failed` | `DATABASE_URL` login/parol/host qiymatini tekshiring |
+| `database_connection_failed` | `DATABASE_URL` user/password/host qiymatini tekshiring |
 | `database_error` | Vercel Logs ichidagi `Health check failed` xabarini tekshiring |
 
 Vercel logda `getaddrinfo ENOTFOUND base` chiqsa, `DATABASE_URL` noto'g'ri. Host `base` bo'lib qolgan degani. `DATABASE_URL` hech qachon `base` bo'lmasligi kerak; u Neon/Supabase/Vercel Postgres bergan to'liq URL bo'lishi kerak:

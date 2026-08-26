@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { createToken, checkCredentials, missingAuthEnv } from "@/lib/auth";
+import {
+  createToken,
+  checkOneTimeLogin,
+  missingAuthEnv,
+  verifyCaptchaChallenge,
+} from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +19,28 @@ export async function POST(req: Request) {
       );
     }
 
-    const { username, password } = await req.json();
-    if (!username || !password) {
+    const { username, otp, captchaAnswer, captchaToken } = await req.json();
+    if (!username || !otp || !captchaAnswer || !captchaToken) {
       return NextResponse.json(
-        { error: "Login va parol kiritilishi kerak" },
+        { error: "Login, bir martalik kod va tekshiruv javobi kerak" },
         { status: 400 }
       );
     }
 
-    if (!checkCredentials(String(username ?? ""), String(password ?? ""))) {
+    const captchaOk = await verifyCaptchaChallenge(
+      String(captchaToken ?? ""),
+      String(captchaAnswer ?? "")
+    );
+    if (!captchaOk) {
       return NextResponse.json(
-        { error: "Login yoki parol noto'g'ri" },
+        { error: "Robot emasligingizni tekshirish javobi noto'g'ri" },
+        { status: 400 }
+      );
+    }
+
+    if (!(await checkOneTimeLogin(String(username ?? ""), String(otp ?? "")))) {
+      return NextResponse.json(
+        { error: "Login yoki bir martalik kod noto'g'ri" },
         { status: 401 }
       );
     }

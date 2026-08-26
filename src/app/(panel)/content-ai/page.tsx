@@ -91,7 +91,13 @@ type ContentIdea = {
   score: number;
 };
 
-type SectionId = "overview" | "profile" | "inspiration" | "studio" | "plan";
+type SectionId =
+  | "overview"
+  | "profile"
+  | "inspiration"
+  | "ml-data"
+  | "studio"
+  | "plan";
 
 const media: InstagramMedia[] = [];
 const comments: InstagramComment[] = [];
@@ -127,6 +133,7 @@ const sections: Array<{ id: SectionId; label: string; icon: typeof Eye }> = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "profile", label: "My Profile", icon: UserRound },
   { id: "inspiration", label: "Inspiration", icon: Search },
+  { id: "ml-data", label: "ML Data", icon: LineChart },
   { id: "studio", label: "AI Studio", icon: Wand2 },
   { id: "plan", label: "Plan", icon: CalendarDays },
 ];
@@ -811,6 +818,93 @@ export default function ContentAiPage() {
             </p>
           </div>
         </section>
+        </div>
+      )}
+
+      {activeSection === "ml-data" && (
+        <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6 fade-in">
+          <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+              <div>
+                <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                  ML Data xotirasi
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  AI o'rganadigan profil, kontent, komment va pattern signallari.
+                </p>
+              </div>
+              <LineChart className="w-5 h-5 text-accent" />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <TrainingCard icon={UserRound} label="Profil dataset" value={String(connectedProfile ? 1 : 0)} />
+              <TrainingCard icon={Play} label="Media dataset" value={String(media.length)} />
+              <TrainingCard icon={MessageCircle} label="Komment dataset" value={String(comments.length)} />
+              <TrainingCard icon={Search} label="Benchmark profil" value={String(inspirationProfiles.length)} />
+              <TrainingCard icon={Lightbulb} label="Pattern memory" value={String(winningPatterns.length)} />
+              <TrainingCard icon={Sparkles} label="AI tavsiya" value={String(contentIdeas.length)} />
+            </div>
+
+            <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4 flex items-start gap-3">
+              <ClipboardList className="w-5 h-5 text-[#0a84ff] mt-0.5 shrink-0" />
+              <p className="text-sm text-slate-600 leading-6">
+                Bu bo'lim keyingi bosqichda haqiqiy data bazaga ulanadi:
+                Instagram media, insights, kommentlar, ilhom profillari va AI
+                chiqargan patternlar saqlanadi. Shundan keyin model har safar
+                eski o'rgangan narsasini ko'rib, yangi maslahat beradi.
+              </p>
+            </div>
+          </section>
+
+          <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+              <div>
+                <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                  Training pipeline
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Profil tahlili AI qaysi tartibda o'rganishini boshqarish.
+                </p>
+              </div>
+              <button className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all">
+                <RefreshCw className="w-4 h-4" />
+                O'qitishni boshlash
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {[
+                {
+                  title: "1. Profil snapshot",
+                  text: "Bio, follower, following, media count va profil identifikatori saqlanadi.",
+                },
+                {
+                  title: "2. Media scoring",
+                  text: "Har reels/post view, reach, save, share, comment va retention bo'yicha baholanadi.",
+                },
+                {
+                  title: "3. Benchmark learning",
+                  text: "Belgilangan ilhom profillaridagi yaxshi uchgan kontent patternlari ajratiladi.",
+                },
+                {
+                  title: "4. Recommendation memory",
+                  text: "AI bergan maslahatlar va keyingi natijalar bog'lanib, xotira kuchayadi.",
+                },
+              ].map((step) => (
+                <div
+                  key={step.title}
+                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-4"
+                >
+                  <div className="font-bold text-slate-900 dark:text-slate-100">
+                    {step.title}
+                  </div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1">
+                    {step.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       )}
 
