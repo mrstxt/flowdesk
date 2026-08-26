@@ -9,15 +9,20 @@ import {
   ClipboardList,
   Eye,
   Heart,
+  Lightbulb,
   LineChart,
+  Link2,
   MessageCircle,
   MessageSquareText,
   Play,
+  Plus,
   RefreshCw,
   Save,
+  Search,
   Send,
   Sparkles,
   Target,
+  Trash2,
   UserRound,
   Wand2,
 } from "lucide-react";
@@ -54,9 +59,35 @@ type InstagramComment = {
   createdAt: string;
 };
 
+type InspirationProfile = {
+  id: string;
+  username: string;
+  status: "queued" | "connected" | "analyzing";
+  mediaRead: number;
+  topVideos: number;
+  patterns: number;
+};
+
+type WinningPattern = {
+  id: string;
+  source: "my-profile" | "inspiration";
+  title: string;
+  detail: string;
+  confidence: number;
+};
+
+type ContentIdea = {
+  id: string;
+  title: string;
+  source: string;
+  score: number;
+};
+
 const profile: InstagramProfile = null;
 const media: InstagramMedia[] = [];
 const comments: InstagramComment[] = [];
+const winningPatterns: WinningPattern[] = [];
+const contentIdeas: ContentIdea[] = [];
 const contentPlan: Array<{
   day: string;
   title: string;
@@ -68,28 +99,70 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("uz-UZ").format(value);
 }
 
-function improveScript(script: string) {
+function cleanUsername(value: string) {
+  return value
+    .trim()
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//, "")
+    .replace(/^@/, "")
+    .replace(/\/.*$/, "")
+    .trim();
+}
+
+function improveScript({
+  script,
+  hasOwnData,
+  inspirationCount,
+}: {
+  script: string;
+  hasOwnData: boolean;
+  inspirationCount: number;
+}) {
   const clean = script.trim();
 
   if (!clean) {
-    return "Senariy yozing. Profil statistikasi ulangandan keyin AI uni real retention, komment va saqlash patternlariga qarab yaxshilaydi.";
+    return [
+      "Senariy yozing.",
+      "",
+      "AI javoblari faqat real manbalarga tayanadi:",
+      "- Mening profilim: 0 media o'qilgan",
+      `- Ilhom profillari: ${inspirationCount} ta profil navbatda`,
+      "- Winning patterns: 0 ta pattern",
+      "",
+      "Profil va ilhom profillari o'qilgandan keyin hook, tempo, CTA va mavzu takliflari real statistikaga asoslanadi.",
+    ].join("\n");
   }
 
   return [
-    "Hook: asosiy og'riqni birinchi 2 soniyada ayting.",
+    hasOwnData
+      ? "My Profile signal: senariy profilingizdagi eng yaxshi retention va save patternlari bilan solishtiriladi."
+      : "My Profile signal: profil ulanmagani uchun shaxsiy statistik signal hali 0.",
+    inspirationCount
+      ? `Inspiration signal: ${inspirationCount} ta profil tahlil navbatida, top reels patternlari kelganda tavsiya kuchayadi.`
+      : "Inspiration signal: ilhom profili qo'shilmagan.",
     "",
-    `Qayta ishlanadigan matn: ${clean.replace(/\.$/, "")}.`,
+    "Senariy bazasi:",
+    clean.replace(/\.$/, ""),
     "",
-    "AI profil ulangandan keyin bu senariyni sizning eng kuchli video, komment va retention patternlaringizga moslab scoring qiladi.",
+    "AI tavsiya shabloni:",
+    "1. Hook birinchi 2 soniyada aniq muammo yoki natija bersin.",
+    "2. Asosiy qism 3 blokdan oshmasin.",
+    "3. Har 4-5 soniyada vizual yoki matn ritmi almashsin.",
+    "4. CTA bitta bo'lsin: izoh, saqlash yoki DM.",
     "",
-    "CTA: bitta aniq harakat qoldiring: izoh, saqlash yoki DM.",
+    "Real profilingiz va ilhom profillari o'qilgandan keyin shu javob umumiy shablon emas, aynan statistik patternlar asosida chiqadi.",
   ].join("\n");
 }
 
 export default function ContentAiPage() {
   const [connectStarted, setConnectStarted] = useState(false);
+  const [inspirationInput, setInspirationInput] = useState("");
+  const [inspirationProfiles, setInspirationProfiles] = useState<
+    InspirationProfile[]
+  >([]);
   const [script, setScript] = useState("");
-  const [generated, setGenerated] = useState(() => improveScript(""));
+  const [generated, setGenerated] = useState(() =>
+    improveScript({ script: "", hasOwnData: false, inspirationCount: 0 })
+  );
 
   const totals = useMemo(() => {
     const views = media.reduce((sum, item) => sum + item.views, 0);
@@ -108,13 +181,66 @@ export default function ContentAiPage() {
 
   const hasMedia = media.length > 0;
   const hasComments = comments.length > 0;
+  const hasPatterns = winningPatterns.length > 0;
+  const hasIdeas = contentIdeas.length > 0;
+  const hasOwnData = Boolean(profile && media.length);
+
+  const trainingStats = {
+    ownMedia: media.length,
+    comments: comments.length,
+    inspirationProfiles: inspirationProfiles.length,
+    inspirationMedia: inspirationProfiles.reduce(
+      (sum, item) => sum + item.mediaRead,
+      0
+    ),
+    patterns: winningPatterns.length,
+  };
 
   function handleConnect() {
     setConnectStarted(true);
   }
 
+  function addInspirationProfile(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const username = cleanUsername(inspirationInput);
+    if (!username) return;
+
+    setInspirationProfiles((items) => {
+      if (
+        items.some(
+          (item) => item.username.toLowerCase() === username.toLowerCase()
+        )
+      ) {
+        return items;
+      }
+
+      return [
+        ...items,
+        {
+          id: `${username}-${Date.now()}`,
+          username,
+          status: "queued",
+          mediaRead: 0,
+          topVideos: 0,
+          patterns: 0,
+        },
+      ];
+    });
+    setInspirationInput("");
+  }
+
+  function removeInspirationProfile(id: string) {
+    setInspirationProfiles((items) => items.filter((item) => item.id !== id));
+  }
+
   function handleGenerate() {
-    setGenerated(improveScript(script));
+    setGenerated(
+      improveScript({
+        script,
+        hasOwnData,
+        inspirationCount: inspirationProfiles.length,
+      })
+    );
   }
 
   return (
@@ -123,14 +249,14 @@ export default function ContentAiPage() {
         <div>
           <div className="text-sm font-semibold text-accent mb-1.5 flex items-center gap-2">
             <Sparkles className="w-4 h-4" />
-            Instagram profilingiz uchun AI content laboratoriya
+            Real profil va benchmark profillar asosidagi AI content laboratoriya
           </div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
             Content AI
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1.5 max-w-2xl">
-            Profil ulangandan keyin reels, post, koment, reach, view, save,
-            share va retention statistikalarini shu yerda o'qiydi.
+            AI avval profilingizni o'qiydi, keyin siz kiritgan ilhom
+            profillaridagi eng yaxshi videolardan pattern chiqaradi.
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5">
@@ -165,21 +291,26 @@ export default function ContentAiPage() {
               <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                 {profile
                   ? `${formatNumber(profile.followers)} obunachi · ${formatNumber(profile.mediaCount)} media`
-                  : "Profil ulangandan keyin bio, obunachi va media statistikasi chiqadi."}
+                  : "Profil ulangandan keyin bio, obunachi, reels va post statistikasi shu yerga tushadi."}
               </div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {["Profil", "Reels", "Postlar", "Kommentlar", "AI training"].map(
-              (item) => (
-                <span
-                  key={item}
-                  className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400"
-                >
-                  {item}
-                </span>
-              )
-            )}
+            {[
+              "My Profile",
+              "Reels",
+              "Kommentlar",
+              "Inspiration",
+              "Winning Patterns",
+              "AI training",
+            ].map((item) => (
+              <span
+                key={item}
+                className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400"
+              >
+                {item}
+              </span>
+            ))}
           </div>
         </div>
       </section>
@@ -193,66 +324,100 @@ export default function ContentAiPage() {
         <Kpi label="Retention" value={`${totals.retention}%`} icon={LineChart} tone="blue" />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-6 mb-6">
+      <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6 mb-6">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
               <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                Profil kontentlari
+                Mening kontentlarim
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Har bir video qanday ketayotgani, view, koment, save va AI score.
+                Har bir video: view, reach, komment, save, retention va AI score.
               </p>
             </div>
             <BarChart3 className="w-5 h-5 text-accent" />
           </div>
 
           {hasMedia ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-black/[0.06] dark:border-white/[0.08]">
-                    <th className="py-3 pr-4 font-bold">Kontent</th>
-                    <th className="py-3 px-4 font-bold">View</th>
-                    <th className="py-3 px-4 font-bold">Reach</th>
-                    <th className="py-3 px-4 font-bold">Komment</th>
-                    <th className="py-3 px-4 font-bold">Save</th>
-                    <th className="py-3 pl-4 font-bold">AI score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {media.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-black/[0.04] dark:border-white/[0.06]"
-                    >
-                      <td className="py-3 pr-4">
-                        <div className="font-semibold text-slate-900 dark:text-slate-100">
-                          {item.title}
-                        </div>
-                        <div className="text-xs text-slate-400">{item.postedAt}</div>
-                      </td>
-                      <td className="py-3 px-4">{formatNumber(item.views)}</td>
-                      <td className="py-3 px-4">{formatNumber(item.reach)}</td>
-                      <td className="py-3 px-4">{formatNumber(item.comments)}</td>
-                      <td className="py-3 px-4">{formatNumber(item.saves)}</td>
-                      <td className="py-3 pl-4 font-bold text-accent">
-                        {item.aiScore}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <MediaTable media={media} />
           ) : (
             <EmptyState
               icon={Play}
               title="Hali video statistikasi yo'q"
-              text="Instagram profil ulangandan keyin har bir reels va post shu jadvalda real raqamlari bilan chiqadi."
+              text="Instagram profil ulangandan keyin har bir reels va post real raqamlari bilan shu jadvalda chiqadi."
             />
           )}
         </section>
 
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                Ilhom profillari
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                AI benchmark sifatida o'qishi kerak bo'lgan profillar.
+              </p>
+            </div>
+            <Search className="w-5 h-5 text-[#0a84ff]" />
+          </div>
+
+          <form onSubmit={addInspirationProfile} className="flex gap-2 mb-4">
+            <input
+              value={inspirationInput}
+              onChange={(e) => setInspirationInput(e.target.value)}
+              placeholder="@username yoki instagram.com/username"
+              className="min-w-0 flex-1 rounded-full border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+            />
+            <button className="w-11 h-11 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center hover:opacity-90 active:scale-[0.97] transition-all">
+              <Plus className="w-5 h-5" />
+            </button>
+          </form>
+
+          {inspirationProfiles.length ? (
+            <div className="space-y-3">
+              {inspirationProfiles.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 dark:text-slate-100 truncate">
+                        @{item.username}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-1">
+                        {item.status === "queued"
+                          ? "Tahlil navbatida"
+                          : "Tahlil qilinmoqda"}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeInspirationProfile(item.id)}
+                      className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors flex items-center justify-center"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-3">
+                    <MiniStat label="Media" value={String(item.mediaRead)} />
+                    <MiniStat label="Top video" value={String(item.topVideos)} />
+                    <MiniStat label="Pattern" value={String(item.patterns)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon={Link2}
+              title="Ilhom profili qo'shilmagan"
+              text="Kerakli profillarni kiriting. AI eng yaxshi ko'rilgan videolar, hook, mavzu, caption va komment patternlarini ajratadi."
+            />
+          )}
+        </section>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3 mb-5">
             <div>
@@ -260,7 +425,7 @@ export default function ContentAiPage() {
                 Komment tahlili
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Savollar, e'tirozlar, sentiment va kontent g'oyalari.
+                Savol, e'tiroz, xarid signali va yangi video g'oyalari.
               </p>
             </div>
             <MessageSquareText className="w-5 h-5 text-[#0a84ff]" />
@@ -294,7 +459,50 @@ export default function ContentAiPage() {
             <EmptyState
               icon={MessageCircle}
               title="Kommentlar hali o'qilmagan"
-              text="Profil ulangandan keyin AI komentlarni guruhlaydi: savol, norozilik, qiziqish, xarid signali va yangi video g'oya."
+              text="Profil ulangandan keyin AI kommentlarni guruhlaydi va qaysi savoldan yangi kontent qilish kerakligini chiqaradi."
+            />
+          )}
+        </section>
+
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                Winning Patterns
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Mening profilim + ilhom profillaridan topilgan ishlaydigan formulalar.
+              </p>
+            </div>
+            <Lightbulb className="w-5 h-5 text-[#ff9f0a]" />
+          </div>
+
+          {hasPatterns ? (
+            <div className="space-y-3">
+              {winningPatterns.map((pattern) => (
+                <div
+                  key={pattern.id}
+                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
+                >
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="font-bold text-slate-900 dark:text-slate-100">
+                      {pattern.title}
+                    </div>
+                    <span className="text-xs font-bold text-accent">
+                      {pattern.confidence}%
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 leading-6">
+                    {pattern.detail}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon={Lightbulb}
+              title="Patternlar hali topilmagan"
+              text="AI real kontent va ilhom profillaridagi yaxshi ketgan videolarni o'qigandan keyin hook, format va CTA patternlarini chiqaradi."
             />
           )}
         </section>
@@ -308,7 +516,7 @@ export default function ContentAiPage() {
                 Script Studio
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Profil data kelgandan keyin senariy real patternlarga moslanadi.
+                AI javobi real profil va ilhom profillari signaliga tayanadi.
               </p>
             </div>
             <button
@@ -316,7 +524,7 @@ export default function ContentAiPage() {
               className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all"
             >
               <Wand2 className="w-4 h-4" />
-              Yaxshilash
+              Real data bilan tekshirish
             </button>
           </div>
 
@@ -329,17 +537,26 @@ export default function ContentAiPage() {
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
                 placeholder="Reels senariyingizni shu yerga yozing..."
-                className="mt-2 w-full min-h-[260px] resize-none rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+                className="mt-2 w-full min-h-[280px] resize-none rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
               />
             </div>
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 AI variant
               </label>
-              <pre className="mt-2 min-h-[260px] whitespace-pre-wrap rounded-2xl border border-accent/15 bg-accent-soft/60 px-4 py-3 text-sm leading-6 text-slate-800 dark:text-slate-100">
+              <pre className="mt-2 min-h-[280px] whitespace-pre-wrap rounded-2xl border border-accent/15 bg-accent-soft/60 px-4 py-3 text-sm leading-6 text-slate-800 dark:text-slate-100">
                 {generated}
               </pre>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <SourceCard label="My profile" value={`${media.length} media`} />
+            <SourceCard
+              label="Inspiration"
+              value={`${inspirationProfiles.length} profil`}
+            />
+            <SourceCard label="Patterns" value={`${winningPatterns.length} ta`} />
           </div>
         </section>
 
@@ -350,73 +567,154 @@ export default function ContentAiPage() {
                 AI training holati
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Model profil statistikasi yig'ilgandan keyin o'qishni boshlaydi.
+                O'qish uchun kerak bo'ladigan barcha real signal joylari.
               </p>
             </div>
             <Sparkles className="w-5 h-5 text-accent" />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-            <TrainingCard icon={Eye} label="Media o'qildi" value="0" />
-            <TrainingCard icon={MessageCircle} label="Komment o'qildi" value="0" />
+            <TrainingCard icon={Eye} label="Mening media" value={String(trainingStats.ownMedia)} />
+            <TrainingCard icon={MessageCircle} label="Komment" value={String(trainingStats.comments)} />
+            <TrainingCard icon={UserRound} label="Ilhom profil" value={String(trainingStats.inspirationProfiles)} />
+            <TrainingCard icon={Play} label="Ilhom media" value={String(trainingStats.inspirationMedia)} />
             <TrainingCard icon={Heart} label="Engagement signal" value="0" />
-            <TrainingCard icon={LineChart} label="Pattern topildi" value="0" />
+            <TrainingCard icon={LineChart} label="Pattern topildi" value={String(trainingStats.patterns)} />
           </div>
 
           <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4 flex items-start gap-3">
             <ClipboardList className="w-5 h-5 text-[#0a84ff] mt-0.5 shrink-0" />
             <p className="text-sm text-slate-600 leading-6">
-              Bu bo'lim real Instagram profil ulanadigan qilib tayyorlandi.
-              Data kelganda AI har bir kontentni, kommentlarni va ko'rilish
-              patternlarini alohida tahlil qiladi.
+              Real ulanish bosqichida Instagram Graph API orqali profilingiz
+              insights bilan olinadi. Ilhom profillari esa benchmark sifatida
+              o'qiladi va AI ko'chirish emas, pattern chiqarish uchun ishlatadi.
             </p>
           </div>
         </section>
       </div>
 
-      <section className="mt-6 bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <div>
-            <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-              Content Plan
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Reja faqat profil statistikasi o'qilgandan keyin tuziladi.
-            </p>
+      <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6 mt-6">
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                AI Ideas
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Real patternlardan yangi reels g'oyalari chiqadi.
+              </p>
+            </div>
+            <Lightbulb className="w-5 h-5 text-[#ff9f0a]" />
           </div>
-          <button className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-950 border border-black/[0.07] dark:border-white/[0.09] text-slate-700 dark:text-slate-200 rounded-full text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.97] transition-all">
-            <CalendarDays className="w-4 h-4 text-[#34c759]" />
-            Reja tuzish
-          </button>
-        </div>
 
-        {contentPlan.length ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {contentPlan.map((item) => (
-              <div
-                key={`${item.day}-${item.title}`}
-                className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4 bg-slate-50/70 dark:bg-slate-950"
-              >
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-                  {item.day}
+          {hasIdeas ? (
+            <div className="space-y-3">
+              {contentIdeas.map((idea) => (
+                <div
+                  key={idea.id}
+                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
+                >
+                  <div className="font-bold text-slate-900 dark:text-slate-100">
+                    {idea.title}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-2">
+                    {idea.source} · {idea.score} score
+                  </div>
                 </div>
-                <div className="font-display font-extrabold text-slate-900 dark:text-slate-100 leading-snug">
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon={Lightbulb}
+              title="AI g'oyalar hali yo'q"
+              text="Profil va ilhom profillari o'qilgandan keyin AI sizning auditoriyangizga mos g'oyalar beradi."
+            />
+          )}
+        </section>
+
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                Content Plan
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Reja faqat real statistik patternlar o'qilgandan keyin tuziladi.
+              </p>
+            </div>
+            <button className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-950 border border-black/[0.07] dark:border-white/[0.09] text-slate-700 dark:text-slate-200 rounded-full text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.97] transition-all">
+              <CalendarDays className="w-4 h-4 text-[#34c759]" />
+              Reja tuzish
+            </button>
+          </div>
+
+          {contentPlan.length ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {contentPlan.map((item) => (
+                <div
+                  key={`${item.day}-${item.title}`}
+                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4 bg-slate-50/70 dark:bg-slate-950"
+                >
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                    {item.day}
+                  </div>
+                  <div className="font-display font-extrabold text-slate-900 dark:text-slate-100 leading-snug">
+                    {item.title}
+                  </div>
+                  <div className="mt-3 text-xs text-accent font-bold">
+                    {item.score} score
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon={CalendarDays}
+              title="Content plan hali yo'q"
+              text="AI profilingiz va benchmark profillardan pattern o'qigandan keyin 7/14/30 kunlik reja beradi."
+            />
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function MediaTable({ media }: { media: InstagramMedia[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-black/[0.06] dark:border-white/[0.08]">
+            <th className="py-3 pr-4 font-bold">Kontent</th>
+            <th className="py-3 px-4 font-bold">View</th>
+            <th className="py-3 px-4 font-bold">Reach</th>
+            <th className="py-3 px-4 font-bold">Komment</th>
+            <th className="py-3 px-4 font-bold">Save</th>
+            <th className="py-3 pl-4 font-bold">AI score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {media.map((item) => (
+            <tr
+              key={item.id}
+              className="border-b border-black/[0.04] dark:border-white/[0.06]"
+            >
+              <td className="py-3 pr-4">
+                <div className="font-semibold text-slate-900 dark:text-slate-100">
                   {item.title}
                 </div>
-                <div className="mt-3 text-xs text-accent font-bold">
-                  {item.score} score
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon={CalendarDays}
-            title="Content plan hali yo'q"
-            text="AI profil ichidagi videolar va kommentlarni o'qigandan keyin keyingi postlar rejasini beradi."
-          />
-        )}
-      </section>
+                <div className="text-xs text-slate-400">{item.postedAt}</div>
+              </td>
+              <td className="py-3 px-4">{formatNumber(item.views)}</td>
+              <td className="py-3 px-4">{formatNumber(item.reach)}</td>
+              <td className="py-3 px-4">{formatNumber(item.comments)}</td>
+              <td className="py-3 px-4">{formatNumber(item.saves)}</td>
+              <td className="py-3 pl-4 font-bold text-accent">{item.aiScore}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -506,6 +804,30 @@ function TrainingCard({
         <div className="w-10 h-10 rounded-2xl bg-white dark:bg-slate-900 text-slate-400 flex items-center justify-center">
           <Icon className="w-5 h-5" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2">
+      <div className="text-[11px] text-slate-400">{label}</div>
+      <div className="font-display font-extrabold text-slate-900 dark:text-slate-100">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SourceCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-3">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        {label}
+      </div>
+      <div className="font-display font-extrabold text-slate-900 dark:text-slate-100 mt-1">
+        {value}
       </div>
     </div>
   );
