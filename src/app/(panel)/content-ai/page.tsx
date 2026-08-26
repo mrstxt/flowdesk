@@ -31,10 +31,14 @@ import { Modal } from "@/components/Modal";
 
 type InstagramProfile = {
   username: string;
+  displayName: string;
+  bio: string;
+  avatarUrl: string;
   followers: number;
+  following: number;
   mediaCount: number;
   profileUrl: string;
-} | null;
+};
 
 type InstagramMedia = {
   id: string;
@@ -128,6 +132,21 @@ function cleanUsername(value: string) {
     .trim();
 }
 
+function normalizeProfile(profile: Partial<InstagramProfile>): InstagramProfile {
+  const username = cleanUsername(profile.username || "");
+
+  return {
+    username,
+    displayName: profile.displayName || username,
+    bio: profile.bio || "",
+    avatarUrl: profile.avatarUrl || "",
+    followers: Number(profile.followers || 0),
+    following: Number(profile.following || 0),
+    mediaCount: Number(profile.mediaCount || 0),
+    profileUrl: profile.profileUrl || `https://instagram.com/${username}`,
+  };
+}
+
 function improveScript({
   script,
   hasOwnData,
@@ -176,8 +195,11 @@ function improveScript({
 export default function ContentAiPage() {
   const [profileModal, setProfileModal] = useState(false);
   const [connectedProfile, setConnectedProfile] =
-    useState<InstagramProfile>(null);
+    useState<InstagramProfile | null>(null);
   const [profileInput, setProfileInput] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [profileBio, setProfileBio] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState("");
   const [profileError, setProfileError] = useState("");
   const [inspirationInput, setInspirationInput] = useState("");
   const [inspirationProfiles, setInspirationProfiles] = useState<
@@ -229,8 +251,8 @@ export default function ContentAiPage() {
     if (!saved) return;
 
     try {
-      const parsed = JSON.parse(saved) as InstagramProfile;
-      setConnectedProfile(parsed);
+      const parsed = JSON.parse(saved) as Partial<InstagramProfile>;
+      setConnectedProfile(normalizeProfile(parsed));
     } catch {
       window.localStorage.removeItem("flowdesk-content-ai-profile");
     }
@@ -239,6 +261,9 @@ export default function ContentAiPage() {
   function openProfileModal() {
     setProfileError("");
     setProfileInput(connectedProfile?.username || "");
+    setProfileName(connectedProfile?.displayName || "");
+    setProfileBio(connectedProfile?.bio || "");
+    setProfileAvatar(connectedProfile?.avatarUrl || "");
     setProfileModal(true);
   }
 
@@ -253,7 +278,11 @@ export default function ContentAiPage() {
 
     const nextProfile = {
       username,
+      displayName: profileName.trim() || username,
+      bio: profileBio.trim(),
+      avatarUrl: profileAvatar.trim(),
       followers: 0,
+      following: 0,
       mediaCount: 0,
       profileUrl: `https://instagram.com/${username}`,
     };
@@ -264,6 +293,9 @@ export default function ContentAiPage() {
       JSON.stringify(nextProfile)
     );
     setProfileInput("");
+    setProfileName("");
+    setProfileBio("");
+    setProfileAvatar("");
     setProfileError("");
     setProfileModal(false);
   }
@@ -353,53 +385,10 @@ export default function ContentAiPage() {
       </div>
 
       <section className="mb-6 bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center">
-              <UserRound className="w-7 h-7" />
-            </div>
-            <div>
-              <div className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                {connectedProfile
-                  ? `@${connectedProfile.username}`
-                  : "Instagram profil ulanmagan"}
-              </div>
-              <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {connectedProfile
-                  ? `${formatNumber(connectedProfile.followers)} obunachi · ${formatNumber(connectedProfile.mediaCount)} media · statistika kutilmoqda`
-                  : "Profil ulangandan keyin bio, obunachi, reels va post statistikasi shu yerga tushadi."}
-              </div>
-            </div>
-          </div>
-          {connectedProfile && (
-            <a
-              href={connectedProfile.profileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              <Link2 className="w-4 h-4" />
-              Profilni ochish
-            </a>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {[
-              "My Profile",
-              "Reels",
-              "Kommentlar",
-              "Inspiration",
-              "Winning Patterns",
-              "AI training",
-            ].map((item) => (
-              <span
-                key={item}
-                className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400"
-              >
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
+        <InstagramProfileCard
+          profile={connectedProfile}
+          onConnect={openProfileModal}
+        />
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
@@ -871,6 +860,43 @@ export default function ContentAiPage() {
             )}
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Profil nomi
+              </label>
+              <input
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                placeholder="Masalan: FlowDesk"
+                className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Avatar URL
+              </label>
+              <input
+                value={profileAvatar}
+                onChange={(e) => setProfileAvatar(e.target.value)}
+                placeholder="https://..."
+                className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Bio
+            </label>
+            <textarea
+              value={profileBio}
+              onChange={(e) => setProfileBio(e.target.value)}
+              placeholder="Instagram bio matni..."
+              className="mt-2 w-full min-h-24 resize-none rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+            />
+          </div>
+
           <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4">
             <p className="text-sm text-slate-600 leading-6">
               Hozir username panelga ulanadi va profil ko'rinadi. Keyingi
@@ -908,6 +934,155 @@ export default function ContentAiPage() {
           </div>
         </form>
       </Modal>
+    </div>
+  );
+}
+
+function InstagramProfileCard({
+  profile,
+  onConnect,
+}: {
+  profile: InstagramProfile | null;
+  onConnect: () => void;
+}) {
+  if (!profile) {
+    return (
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+        <div className="flex items-center gap-5">
+          <div className="w-24 h-24 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
+            <UserRound className="w-10 h-10" />
+          </div>
+          <div>
+            <div className="font-display text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+              Instagram profil ulanmagan
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1 max-w-xl">
+              Profilni ulaganingizdan keyin u shu yerda Instagram ko'rinishiga
+              yaqin tarzda chiqadi: avatar, username, bio, post, follower va
+              following.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              {[
+                "My Profile",
+                "Reels",
+                "Kommentlar",
+                "Inspiration",
+                "AI training",
+              ].map((item) => (
+                <span
+                  key={item}
+                  className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onConnect}
+          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-accent text-white rounded-full text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all shadow-lg shadow-accent/20"
+        >
+          <Camera className="w-4 h-4" />
+          Profil ulash
+        </button>
+      </div>
+    );
+  }
+
+  const displayName = profile.displayName || profile.username;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+        <div className="flex items-start gap-5">
+          <div className="w-24 h-24 rounded-full p-0.5 bg-gradient-to-br from-[#ff2d5d] via-[#ff9f0a] to-[#8f35d5] shrink-0">
+            <div className="w-full h-full rounded-full bg-white dark:bg-slate-900 p-1">
+              {profile.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.avatarUrl}
+                  alt={displayName}
+                  className="w-full h-full rounded-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center">
+                  <UserRound className="w-10 h-10" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-display text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+                @{profile.username}
+              </h2>
+              <span className="px-2.5 py-1 rounded-full bg-[#eaf9ef] text-[#22a447] text-xs font-bold">
+                Ulangan
+              </span>
+            </div>
+            <div className="font-semibold text-slate-900 dark:text-slate-100 mt-2">
+              {displayName}
+            </div>
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1 whitespace-pre-wrap">
+              {profile.bio ||
+                "Bio hozircha kiritilmagan. Real API ulanganda Instagram bio avtomatik keladi."}
+            </p>
+            <div className="flex flex-wrap gap-5 mt-4 text-sm">
+              <ProfileCount label="post" value={profile.mediaCount} />
+              <ProfileCount label="followers" value={profile.followers} />
+              <ProfileCount label="following" value={profile.following} />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onConnect}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-800 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+          >
+            <Camera className="w-4 h-4" />
+            Tahrirlash
+          </button>
+          <a
+            href={profile.profileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 dark:bg-white text-sm font-semibold text-white dark:text-slate-900 hover:opacity-90 transition-opacity"
+          >
+            <Link2 className="w-4 h-4" />
+            Instagramda ochish
+          </a>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {["Reels", "Postlar", "Kommentlar"].map((item) => (
+          <div
+            key={item}
+            className="rounded-2xl bg-slate-50 dark:bg-slate-950 border border-black/[0.06] dark:border-white/[0.08] p-4 text-center"
+          >
+            <div className="text-xl font-display font-extrabold text-slate-900 dark:text-slate-100">
+              0
+            </div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mt-1">
+              {item}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <span className="font-display font-extrabold text-slate-900 dark:text-slate-100">
+        {formatNumber(value)}
+      </span>{" "}
+      <span className="text-slate-500 dark:text-slate-400">{label}</span>
     </div>
   );
 }
