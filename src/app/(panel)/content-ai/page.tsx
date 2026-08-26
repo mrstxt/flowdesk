@@ -91,6 +91,8 @@ type ContentIdea = {
   score: number;
 };
 
+type SectionId = "overview" | "profile" | "inspiration" | "studio" | "plan";
+
 const media: InstagramMedia[] = [];
 const comments: InstagramComment[] = [];
 const winningPatterns: WinningPattern[] = [];
@@ -119,6 +121,14 @@ const pipeline = [
     title: "AI tavsiya",
     text: "Senariy, hook, caption, CTA va kontent reja real signalga asoslanadi.",
   },
+];
+
+const sections: Array<{ id: SectionId; label: string; icon: typeof Eye }> = [
+  { id: "overview", label: "Overview", icon: BarChart3 },
+  { id: "profile", label: "My Profile", icon: UserRound },
+  { id: "inspiration", label: "Inspiration", icon: Search },
+  { id: "studio", label: "AI Studio", icon: Wand2 },
+  { id: "plan", label: "Plan", icon: CalendarDays },
 ];
 
 function formatNumber(value: number) {
@@ -211,6 +221,7 @@ export default function ContentAiPage() {
   const [generated, setGenerated] = useState(() =>
     improveScript({ script: "", hasOwnData: false, inspirationCount: 0 })
   );
+  const [activeSection, setActiveSection] = useState<SectionId>("overview");
 
   const totals = useMemo(() => {
     const views = media.reduce((sum, item) => sum + item.views, 0);
@@ -413,15 +424,39 @@ export default function ContentAiPage() {
         </div>
       </div>
 
-      <section className="mb-6 bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-        <InstagramProfileCard
-          profile={connectedProfile}
-          onConnect={openProfileModal}
-        />
-      </section>
+      <div className="mb-6 flex flex-wrap gap-2 rounded-3xl bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] p-2 shadow-sm">
+        {sections.map((section) => {
+          const Icon = section.icon;
+          const active = activeSection === section.id;
 
-      <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
-        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          return (
+            <button
+              key={section.id}
+              onClick={() => setActiveSection(section.id)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold transition-all ${
+                active
+                  ? "bg-accent text-white shadow-lg shadow-accent/20"
+                  : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {section.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeSection === "overview" && (
+        <div className="fade-in">
+          <section className="mb-6 bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+            <InstagramProfileCard
+              profile={connectedProfile}
+              onConnect={openProfileModal}
+            />
+          </section>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
               <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
@@ -457,9 +492,9 @@ export default function ContentAiPage() {
             <Camera className="w-4 h-4" />
             {connectedProfile ? "Profil ulanishini boshqarish" : "Profil ulash"}
           </button>
-        </section>
+            </section>
 
-        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
               <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
@@ -490,19 +525,22 @@ export default function ContentAiPage() {
               </div>
             ))}
           </div>
-        </section>
-      </div>
+            </section>
+          </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
-        <Kpi label="Ko'rish" value={formatNumber(totals.views)} icon={Eye} tone="blue" />
-        <Kpi label="Reach" value={formatNumber(totals.reach)} icon={Target} tone="purple" />
-        <Kpi label="Saqlash" value={formatNumber(totals.saves)} icon={Save} tone="green" />
-        <Kpi label="Ulashish" value={formatNumber(totals.shares)} icon={Send} tone="accent" />
-        <Kpi label="Komment" value={formatNumber(totals.commentsCount)} icon={MessageCircle} tone="orange" />
-        <Kpi label="Retention" value={`${totals.retention}%`} icon={LineChart} tone="blue" />
-      </div>
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+            <Kpi label="Ko'rish" value={formatNumber(totals.views)} icon={Eye} tone="blue" />
+            <Kpi label="Reach" value={formatNumber(totals.reach)} icon={Target} tone="purple" />
+            <Kpi label="Saqlash" value={formatNumber(totals.saves)} icon={Save} tone="green" />
+            <Kpi label="Ulashish" value={formatNumber(totals.shares)} icon={Send} tone="accent" />
+            <Kpi label="Komment" value={formatNumber(totals.commentsCount)} icon={MessageCircle} tone="orange" />
+            <Kpi label="Retention" value={`${totals.retention}%`} icon={LineChart} tone="blue" />
+          </div>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6 mb-6">
+      {activeSection === "profile" && (
+        <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6 mb-6 fade-in">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
@@ -527,6 +565,56 @@ export default function ContentAiPage() {
           )}
         </section>
 
+        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3 mb-5">
+            <div>
+              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                Komment tahlili
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Savol, e'tiroz, xarid signali va yangi video g'oyalari.
+              </p>
+            </div>
+            <MessageSquareText className="w-5 h-5 text-[#0a84ff]" />
+          </div>
+
+          {hasComments ? (
+            <div className="space-y-3">
+              {comments.map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
+                >
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="font-bold text-slate-900 dark:text-slate-100">
+                      @{comment.author}
+                    </div>
+                    <span className="text-xs text-slate-400">
+                      {comment.sentiment}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    {comment.text}
+                  </p>
+                  <div className="text-xs text-slate-400 mt-2">
+                    {comment.mediaTitle}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon={MessageCircle}
+              title="Kommentlar hali o'qilmagan"
+              text="Profil ulangandan keyin AI kommentlarni guruhlaydi va qaysi savoldan yangi kontent qilish kerakligini chiqaradi."
+            />
+          )}
+        </section>
+        </div>
+      )}
+
+      {activeSection === "inspiration" && (
+        <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6 mb-6 fade-in">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
@@ -593,54 +681,6 @@ export default function ContentAiPage() {
             />
           )}
         </section>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
-        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-3 mb-5">
-            <div>
-              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                Komment tahlili
-              </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Savol, e'tiroz, xarid signali va yangi video g'oyalari.
-              </p>
-            </div>
-            <MessageSquareText className="w-5 h-5 text-[#0a84ff]" />
-          </div>
-
-          {hasComments ? (
-            <div className="space-y-3">
-              {comments.map((comment) => (
-                <div
-                  key={comment.id}
-                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
-                >
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="font-bold text-slate-900 dark:text-slate-100">
-                      @{comment.author}
-                    </div>
-                    <span className="text-xs text-slate-400">
-                      {comment.sentiment}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-300">
-                    {comment.text}
-                  </p>
-                  <div className="text-xs text-slate-400 mt-2">
-                    {comment.mediaTitle}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={MessageCircle}
-              title="Kommentlar hali o'qilmagan"
-              text="Profil ulangandan keyin AI kommentlarni guruhlaydi va qaysi savoldan yangi kontent qilish kerakligini chiqaradi."
-            />
-          )}
-        </section>
 
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
@@ -684,9 +724,11 @@ export default function ContentAiPage() {
             />
           )}
         </section>
-      </div>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-6">
+      {activeSection === "studio" && (
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-6 fade-in">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
@@ -769,9 +811,11 @@ export default function ContentAiPage() {
             </p>
           </div>
         </section>
-      </div>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6 mt-6">
+      {activeSection === "plan" && (
+        <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6 fade-in">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
@@ -853,7 +897,8 @@ export default function ContentAiPage() {
             />
           )}
         </section>
-      </div>
+        </div>
+      )}
 
       <Modal
         open={profileModal}
