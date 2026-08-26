@@ -12,6 +12,7 @@ import {
   BookOpen,
   Clapperboard,
   BarChart3,
+  Sparkles,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const groups = [
       { href: "/intizom", label: "Intizom", icon: AlarmClock },
       { href: "/kitoblar", label: "Kitoblar", icon: BookOpen },
       { href: "/rivojlanish", label: "Videolar", icon: Clapperboard },
+      { href: "/content-ai", label: "Content AI", icon: Sparkles },
       { href: "/analitika", label: "Analitika", icon: BarChart3 },
     ],
   },
