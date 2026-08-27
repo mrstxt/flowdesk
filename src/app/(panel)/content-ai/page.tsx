@@ -211,7 +211,6 @@ const sections: Array<{ id: SectionId; label: string; icon: typeof Eye }> = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "profile", label: "My Profile", icon: UserRound },
   { id: "inspiration", label: "Inspiration", icon: Search },
-  { id: "ml-data", label: "Analitika/ML", icon: LineChart },
   { id: "studio", label: "AI Studio", icon: Wand2 },
   { id: "plan", label: "Plan", icon: CalendarDays },
 ];

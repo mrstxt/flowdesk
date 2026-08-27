@@ -82,6 +82,7 @@ export default function GoalsPage() {
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [addFundsGoal, setAddFundsGoal] = useState<Goal | null>(null);
   const [spendGoal, setSpendGoal] = useState<Goal | null>(null);
+  const [spendingGoalId, setSpendingGoalId] = useState<number | null>(null);
   const [assignCardGoal, setAssignCardGoal] = useState<Goal | null>(null);
   const [transferModal, setTransferModal] = useState(false);
   const [topUpModal, setTopUpModal] = useState<{
@@ -250,23 +251,25 @@ export default function GoalsPage() {
   async function spendGoalFunds(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!spendGoal) return;
+    const goal = spendGoal;
     const form = e.currentTarget;
     const fd = new FormData(form);
-    const saved = parseMoneyInput(spendGoal.savedAmount);
+    const saved = parseMoneyInput(goal.savedAmount);
     if (saved <= 0) {
       alert("Bu maqsadda ishlatiladigan pul yo'q");
       return;
     }
     try {
+      setSpendingGoalId(goal.id);
       const res = await fetch("/api/card-transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "goal_spend",
-          goalId: spendGoal.id,
+          goalId: goal.id,
           description:
             (fd.get("description") as string)?.trim() ||
-            `Maqsad uchun ishlatildi: ${spendGoal.title}`,
+            `Maqsad uchun ishlatildi: ${goal.title}`,
         }),
       });
       const data = await res.json();
@@ -275,7 +278,7 @@ export default function GoalsPage() {
         return;
       }
       alert(
-        `✅ ${formatCurrency(data.amount || saved)} «${spendGoal.title}» uchun ishlatildi.\n` +
+        `✅ ${formatCurrency(data.amount || saved)} «${goal.title}» uchun ishlatildi.\n` +
           "Hozirgi yig'ilgan summa 0 bo'ldi, tarix esa saqlanib qoldi."
       );
       setSpendGoal(null);
@@ -283,6 +286,8 @@ export default function GoalsPage() {
       load();
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSpendingGoalId(null);
     }
   }
 
@@ -1183,9 +1188,12 @@ export default function GoalsPage() {
             </button>
             <button
               type="submit"
+              disabled={spendingGoalId === spendGoal?.id}
               className="px-4 py-2 text-sm bg-red-600 text-white rounded-full hover:bg-red-700"
             >
-              Ishlatildi va 0 qilish
+              {spendingGoalId === spendGoal?.id
+                ? "Yopilyapti..."
+                : "Ishlatildi va 0 qilish"}
             </button>
           </div>
         </form>

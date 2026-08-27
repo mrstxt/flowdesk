@@ -522,8 +522,9 @@ export async function spendGoalFunds(
   const desc =
     description?.trim() || `Maqsad uchun ishlatildi: ${goal.title}`;
 
-  await db.transaction(async (tx) => {
-    await tx
+  try {
+    await db.transaction(async (tx) => {
+      const [lockedGoal] = await tx
       .update(goals)
       .set({
         savedAmount: "0",
@@ -531,15 +532,26 @@ export async function spendGoalFunds(
         lastUsedAt: new Date(),
         periodStartedAt:
           goal.period === "monthly" ? monthStartISO() : goal.periodStartedAt,
-      })
-      .where(eq(goals.id, goalId));
+        })
+        .where(
+          and(
+            eq(goals.id, goalId),
+            sql`${goals.savedAmount} = ${String(amount)}`,
+            sql`${goals.savedAmount} > 0`
+          )
+        )
+        .returning();
 
-    await tx
+      if (!lockedGoal) {
+        throw new Error("Bu maqsad puli allaqachon ishlatilgan yoki yangilangan");
+      }
+
+      await tx
       .update(cards)
       .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
       .where(eq(cards.id, goalCardId));
 
-    const [txRow] = await tx
+      const [txRow] = await tx
       .insert(cardTransactions)
       .values({
         cardId: goalCardId,
@@ -550,15 +562,21 @@ export async function spendGoalFunds(
       })
       .returning();
 
-    await tx.insert(expenses).values({
-      title: desc,
-      amount: String(amount),
-      category: "goal",
-      date: today,
-      cardId: goalCardId,
-      transactionId: txRow.id,
+      await tx.insert(expenses).values({
+        title: desc,
+        amount: String(amount),
+        category: "goal",
+        date: today,
+        cardId: goalCardId,
+        transactionId: txRow.id,
+      });
     });
-  });
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Maqsad pulini ishlatishda xatolik",
+    };
+  }
 
   return { ok: true, amount, cardName: targetCard.name };
 }

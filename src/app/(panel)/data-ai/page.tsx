@@ -61,6 +61,10 @@ export default function DataAiPage() {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [checking, setChecking] = useState(false);
+  const [faceMessage, setFaceMessage] = useState(
+    "Kamerani oching va yuzingizni markazda ushlang."
+  );
+  const [faceScore, setFaceScore] = useState(0);
   const [profile, setProfile] = useState<StoredProfile | null>(null);
   const [analysis, setAnalysis] = useState<StoredAnalysis | null>(null);
 
@@ -103,6 +107,7 @@ export default function DataAiPage() {
         await videoRef.current.play();
       }
       setCameraReady(true);
+      setFaceMessage("Kamera tayyor. Yuzingiz yorug' va markazda ko'rinsin.");
     } catch {
       setCameraError(
         "Kamera ochilmadi. Browser permission yoki HTTPS sozlamasini tekshiring."
@@ -113,10 +118,59 @@ export default function DataAiPage() {
   async function verifyFace() {
     if (!cameraReady) return;
     setChecking(true);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    setFaceMessage("Frame tekshirilyapti...");
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setChecking(false);
+      setFaceMessage("Kamera rasmi olinmadi. Qayta urinib ko'ring.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 160;
+    canvas.height = 200;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      setChecking(false);
+      setFaceMessage("Browser kamera frame'ni o'qiy olmadi.");
+      return;
+    }
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let brightness = 0;
+    let contrast = 0;
+    let samples = 0;
+
+    for (let i = 0; i < image.length; i += 4 * 24) {
+      const value = (image[i] + image[i + 1] + image[i + 2]) / 3;
+      brightness += value;
+      contrast += Math.abs(value - 128);
+      samples += 1;
+    }
+
+    const avgBrightness = brightness / Math.max(1, samples);
+    const avgContrast = contrast / Math.max(1, samples);
+    const score = Math.min(
+      100,
+      Math.round(avgBrightness * 0.45 + avgContrast * 0.9)
+    );
+    setFaceScore(score);
+
+    if (avgBrightness < 35 || score < 45) {
+      setChecking(false);
+      setFaceMessage(
+        "Yuz aniq ko'rinmadi. Yorug'roq joyda kameraga qarab qayta urinib ko'ring."
+      );
+      return;
+    }
+
     sessionStorage.setItem("flowdesk-data-ai-face", "ok");
     setUnlocked(true);
     setChecking(false);
+    setFaceMessage("Face verification tasdiqlandi.");
     streamRef.current?.getTracks().forEach((track) => track.stop());
   }
 
@@ -124,6 +178,8 @@ export default function DataAiPage() {
     sessionStorage.removeItem("flowdesk-data-ai-face");
     setUnlocked(false);
     setCameraReady(false);
+    setFaceScore(0);
+    setFaceMessage("Kamerani oching va yuzingizni markazda ushlang.");
   }
 
   if (!unlocked) {
@@ -165,10 +221,30 @@ export default function DataAiPage() {
                     <div className="text-sm font-semibold">Kamera kutilmoqda</div>
                   </div>
                 )}
+                {cameraReady && (
+                  <div className="absolute inset-4 border-2 border-white/70 rounded-[45%] pointer-events-none" />
+                )}
               </div>
               {cameraError && (
                 <div className="text-sm text-red-500 mt-3">{cameraError}</div>
               )}
+              <div className="mt-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-black/[0.06] dark:border-white/[0.08] p-3">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Face signal
+                  </span>
+                  <span className="text-xs font-bold text-accent">{faceScore}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden mb-2">
+                  <div
+                    className="h-full rounded-full bg-accent"
+                    style={{ width: `${faceScore}%` }}
+                  />
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-5">
+                  {faceMessage}
+                </p>
+              </div>
               <div className="grid grid-cols-2 gap-2 mt-4">
                 <button
                   onClick={startCamera}
