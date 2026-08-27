@@ -39,7 +39,7 @@ function goalSavedAmountForCurrentPeriod(goal: typeof goals.$inferSelect): numbe
  * - "additional" tipidagi karta = qo'shimcha karta (ixtiyoriy)
  * - Asosiy kartaga har doim BARCHA buyurtma pullari keladi
  * - Qo'shimcha kartaga qo'lda pul kiritiladi yoki transfer qilinadi
- * - Maqsad faqat "kirim" qabul qiladi (chiqim yo'q)
+ * - Maqsaddagi pul ishlatilsa, savedAmount 0 bo'ladi va tarix usedAmount da qoladi
  */
 
 /** Asosiy kartani qaytaradi (1 ta yoki null) */
@@ -305,6 +305,7 @@ export async function addFundsToGoal(
   }
 
   const sourceCardId = fromCardId;
+  const targetCardId = goal.cardId;
   const [srcCard] = sourceCardId
     ? await db
         .select()
@@ -315,13 +316,12 @@ export async function addFundsToGoal(
   const [targetCard] = await db
     .select()
     .from(cards)
-    .where(eq(cards.id, goal.cardId))
+    .where(eq(cards.id, targetCardId))
     .limit(1);
 
   if (!targetCard || (sourceCardId && !srcCard)) {
     return { ok: false, error: "Manba yoki maqsad kartasi topilmadi" };
   }
-  const targetCardId = goal.cardId;
 
   const desc = description || `Maqsadga: ${goal.title}`;
   const today = new Date().toISOString().slice(0, 10);
@@ -487,4 +487,78 @@ export async function addFundsToGoal(
   });
 
   return { ok: true, cardName: srcCard?.name, targetCardName: targetCard.name };
+}
+
+export async function spendGoalFunds(
+  goalId: number,
+  description?: string
+): Promise<{ ok: boolean; error?: string; amount?: number; cardName?: string }> {
+  const [goal] = await db
+    .select()
+    .from(goals)
+    .where(eq(goals.id, goalId))
+    .limit(1);
+
+  if (!goal) return { ok: false, error: "Maqsad topilmadi" };
+  if (!goal.cardId) {
+    return { ok: false, error: "Maqsadga karta biriktirilmagan" };
+  }
+  const goalCardId = goal.cardId;
+
+  const amount = goalSavedAmountForCurrentPeriod(goal);
+  if (amount <= 0) {
+    return { ok: false, error: "Bu maqsadda ishlatiladigan yig'ilgan pul yo'q" };
+  }
+
+  const [targetCard] = await db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, goalCardId))
+    .limit(1);
+
+  if (!targetCard) return { ok: false, error: "Maqsad kartasi topilmadi" };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const desc =
+    description?.trim() || `Maqsad uchun ishlatildi: ${goal.title}`;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(goals)
+      .set({
+        savedAmount: "0",
+        usedAmount: sql`${goals.usedAmount} + ${amount}`,
+        lastUsedAt: new Date(),
+        periodStartedAt:
+          goal.period === "monthly" ? monthStartISO() : goal.periodStartedAt,
+      })
+      .where(eq(goals.id, goalId));
+
+    await tx
+      .update(cards)
+      .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
+      .where(eq(cards.id, goalCardId));
+
+    const [txRow] = await tx
+      .insert(cardTransactions)
+      .values({
+        cardId: goalCardId,
+        date: today,
+        type: "goal_out",
+        amount: String(amount),
+        description: desc,
+      })
+      .returning();
+
+    await tx.insert(expenses).values({
+      title: desc,
+      amount: String(amount),
+      category: "goal",
+      date: today,
+      cardId: goalCardId,
+      transactionId: txRow.id,
+    });
+  });
+
+  return { ok: true, amount, cardName: targetCard.name };
 }

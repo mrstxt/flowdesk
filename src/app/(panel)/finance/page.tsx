@@ -80,6 +80,7 @@ const EXPENSE_CATS: Record<string, string> = {
   rent: "Ijara",
   ads: "Reklama",
   subscriptions: "Abonent to'lovlar",
+  goal: "Maqsad ishlatildi",
   personal: "Shaxsiy",
   transfer: "Transfer",
   other: "Boshqa",

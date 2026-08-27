@@ -7,6 +7,7 @@ import {
   addCardExpense,
   transferBetweenCards,
   addFundsToGoal,
+  spendGoalFunds,
 } from "@/lib/cardActions";
 
 export const dynamic = "force-dynamic";
@@ -177,6 +178,22 @@ export async function POST(req: Request) {
         ok: true,
         cardName: res.cardName,
         targetCardName: res.targetCardName,
+      });
+    }
+
+    if (action === "goal_spend") {
+      const { goalId, description } = body;
+      if (!goalId) {
+        return NextResponse.json({ error: "goalId kerak" }, { status: 400 });
+      }
+      const res = await spendGoalFunds(Number(goalId), description);
+      if (!res.ok) {
+        return NextResponse.json({ error: res.error }, { status: 400 });
+      }
+      return NextResponse.json({
+        ok: true,
+        amount: res.amount,
+        cardName: res.cardName,
       });
     }
 

@@ -102,12 +102,29 @@ export const goals = pgTable("goals", {
   savedAmount: numeric("saved_amount", { precision: 12, scale: 2 })
     .notNull()
     .default("0"),
+  usedAmount: numeric("used_amount", { precision: 12, scale: 2 })
+    .notNull()
+    .default("0"),
+  lastUsedAt: timestamp("last_used_at"),
   autoPercent: integer("auto_percent").default(0),
   period: varchar("period", { length: 20 }).notNull().default("one_time"),
   deadline: date("deadline"),
   periodStartedAt: date("period_started_at"),
   // Qaysi kartaga to'planadi (nullable — umumiy)
   cardId: integer("card_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const subscriptions = pgTable("subscriptions", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  dueDay: integer("due_day").notNull().default(1),
+  cycle: varchar("cycle", { length: 20 }).notNull().default("monthly"),
+  category: varchar("category", { length: 100 }).default("subscriptions"),
+  active: boolean("active").default(true),
+  lastPaidAt: date("last_paid_at"),
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

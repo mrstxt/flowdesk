@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { cards, goals } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +67,12 @@ export async function GET() {
     staleMonthlyGoals.map((g) =>
       db
         .update(goals)
-        .set({ savedAmount: "0", periodStartedAt: currentMonthStart })
+        .set({
+          savedAmount: "0",
+          usedAmount: sql`${goals.usedAmount} + ${Number(g.savedAmount)}`,
+          lastUsedAt: Number(g.savedAmount) > 0 ? new Date() : g.lastUsedAt,
+          periodStartedAt: currentMonthStart,
+        })
         .where(eq(goals.id, g.id))
     )
   );
@@ -129,6 +134,9 @@ export async function PUT(req: Request) {
   }
   if ("savedAmount" in rest) {
     rest.savedAmount = String(parseMoneyInput(rest.savedAmount));
+  }
+  if ("usedAmount" in rest) {
+    rest.usedAmount = String(parseMoneyInput(rest.usedAmount));
   }
   if ("cardId" in rest) {
     rest.cardId = rest.cardId ? Number(rest.cardId) : null;

@@ -15,6 +15,7 @@ import {
   Lock,
   PiggyBank,
   Calendar,
+  RotateCcw,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -29,6 +30,8 @@ type Goal = {
   title: string;
   targetAmount: string;
   savedAmount: string;
+  usedAmount: string;
+  lastUsedAt: string | null;
   autoPercent: number | null;
   period: string;
   deadline: string | null;
@@ -78,6 +81,7 @@ export default function GoalsPage() {
   const [cardModal, setCardModal] = useState(false);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [addFundsGoal, setAddFundsGoal] = useState<Goal | null>(null);
+  const [spendGoal, setSpendGoal] = useState<Goal | null>(null);
   const [assignCardGoal, setAssignCardGoal] = useState<Goal | null>(null);
   const [transferModal, setTransferModal] = useState(false);
   const [topUpModal, setTopUpModal] = useState<{
@@ -236,6 +240,45 @@ export default function GoalsPage() {
             : "Maqsad kartasiga qo'shildi.")
       );
       setAddFundsGoal(null);
+      form.reset();
+      load();
+    } catch (e) {
+      alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  async function spendGoalFunds(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!spendGoal) return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const saved = parseMoneyInput(spendGoal.savedAmount);
+    if (saved <= 0) {
+      alert("Bu maqsadda ishlatiladigan pul yo'q");
+      return;
+    }
+    try {
+      const res = await fetch("/api/card-transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "goal_spend",
+          goalId: spendGoal.id,
+          description:
+            (fd.get("description") as string)?.trim() ||
+            `Maqsad uchun ishlatildi: ${spendGoal.title}`,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Maqsad pulini ishlatishda xatolik");
+        return;
+      }
+      alert(
+        `✅ ${formatCurrency(data.amount || saved)} «${spendGoal.title}» uchun ishlatildi.\n` +
+          "Hozirgi yig'ilgan summa 0 bo'ldi, tarix esa saqlanib qoldi."
+      );
+      setSpendGoal(null);
       form.reset();
       load();
     } catch (e) {
@@ -601,6 +644,8 @@ export default function GoalsPage() {
         )}
         {goals.map((g) => {
           const saved = parseMoneyInput(g.savedAmount);
+          const used = parseMoneyInput(g.usedAmount);
+          const lifetimeSaved = saved + used;
           const target = parseMoneyInput(g.targetAmount);
           const pct = Math.min(100, (saved / target) * 100);
           const remaining = Math.max(0, target - saved);
@@ -672,15 +717,42 @@ export default function GoalsPage() {
                   </span>{" "}
                   kerak
                 </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                      Oldin ishlatilgan
+                    </div>
+                    <div className="text-sm font-bold text-slate-800 tabular-nums">
+                      {formatCurrency(used)}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                      Umumiy yig'ilgan
+                    </div>
+                    <div className="text-sm font-bold text-slate-800 tabular-nums">
+                      {formatCurrency(lifetimeSaved)}
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <button
-                onClick={() => setAddFundsGoal(g)}
-                disabled={!g.cardId}
-                className="w-full mt-3 py-2 text-sm text-accent hover:bg-accent-soft rounded-full font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-              >
-                <PiggyBank className="w-3.5 h-3.5" /> Pul qo'shish
-              </button>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <button
+                  onClick={() => setAddFundsGoal(g)}
+                  disabled={!g.cardId}
+                  className="py-2 text-sm text-accent hover:bg-accent-soft rounded-full font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <PiggyBank className="w-3.5 h-3.5" /> Pul qo'shish
+                </button>
+                <button
+                  onClick={() => setSpendGoal(g)}
+                  disabled={!g.cardId || saved <= 0}
+                  className="py-2 text-sm text-red-700 bg-red-50 hover:bg-red-100 rounded-full font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> 0 qilish
+                </button>
+              </div>
               {!g.cardId && (
                 <>
                   <button
@@ -1065,6 +1137,55 @@ export default function GoalsPage() {
               className="px-4 py-2 text-sm bg-accent text-white rounded-full hover:bg-accent-hover"
             >
               Qo'shish
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Spend goal funds */}
+      <Modal
+        open={!!spendGoal}
+        onClose={() => setSpendGoal(null)}
+        title={`Maqsad puli ishlatildi: ${spendGoal?.title || ""}`}
+      >
+        <form onSubmit={spendGoalFunds} className="space-y-3">
+          <div className="rounded-2xl bg-red-50 border border-red-100 p-4">
+            <div className="text-xs text-red-700 font-semibold mb-1">
+              Hozir ishlatiladigan summa
+            </div>
+            <div className="font-display text-2xl font-extrabold text-red-800">
+              {formatCurrency(spendGoal?.savedAmount || "0")}
+            </div>
+            <p className="text-xs text-red-700 mt-2">
+              Tasdiqlasangiz, shu summa maqsad kartasidan chiqim bo'ladi,
+              goal ichidagi hozirgi yig'ilgan pul 0 ga tushadi, oldin
+              yig'ilgan tarix esa saqlanadi.
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Izoh
+            </label>
+            <input
+              name="description"
+              type="text"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30"
+              placeholder={`Masalan: ${spendGoal?.title || "maqsad"} uchun ishlatildi`}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setSpendGoal(null)}
+              className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-full"
+            >
+              Bekor
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm bg-red-600 text-white rounded-full hover:bg-red-700"
+            >
+              Ishlatildi va 0 qilish
             </button>
           </div>
         </form>
