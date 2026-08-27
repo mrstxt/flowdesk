@@ -12,6 +12,7 @@ import {
   BookOpen,
   Clapperboard,
   BarChart3,
+  Brain,
   Sparkles,
   Calendar,
   LogOut,
@@ -37,6 +38,7 @@ const groups = [
       { href: "/rivojlanish", label: "Videolar", icon: Clapperboard },
       { href: "/content-ai", label: "Content AI", icon: Sparkles },
       { href: "/analitika", label: "Analitika", icon: BarChart3 },
+      { href: "/data-ai", label: "Data AI", icon: Brain },
     ],
   },
 ];

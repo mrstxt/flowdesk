@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardList,
+  Clock,
   Eye,
   Heart,
   Lightbulb,
@@ -24,7 +25,9 @@ import {
   Sparkles,
   Target,
   Trash2,
+  Upload,
   UserRound,
+  Users,
   Wand2,
   Zap,
 } from "lucide-react";
@@ -92,6 +95,15 @@ type ContentIdea = {
   score: number;
 };
 
+type PlannedVideo = {
+  id: string;
+  title: string;
+  format: string;
+  publishAt: string;
+  audience: string;
+  status: "planned" | "ready" | "published";
+};
+
 type AnalysisResult = {
   analyzedAt: string;
   readiness: number;
@@ -156,6 +168,24 @@ const marketingActions = [
   "Caption va CTA generator",
   "Benchmark pattern extract",
   "Kommentlardan kontent g'oya",
+];
+
+const audienceHeatmap = [
+  { day: "Dush", slots: ["07:30", "12:30", "21:00"], score: 62 },
+  { day: "Sesh", slots: ["08:00", "13:00", "20:30"], score: 70 },
+  { day: "Chor", slots: ["07:45", "12:00", "21:30"], score: 78 },
+  { day: "Pay", slots: ["08:15", "14:00", "20:45"], score: 74 },
+  { day: "Jum", slots: ["09:00", "15:30", "22:00"], score: 82 },
+  { day: "Shan", slots: ["11:00", "18:00", "22:30"], score: 88 },
+  { day: "Yak", slots: ["10:30", "17:30", "21:15"], score: 80 },
+];
+
+const publishingChecklist = [
+  "Hook 2 soniyada natija yoki og'riqni ochadi",
+  "Cover matni 4-6 so'zdan oshmaydi",
+  "Caption birinchi qatori retentionni ushlab turadi",
+  "CTA bitta: saqlash, izoh yoki DM",
+  "Posting vaqti audience aktiv slotga tushgan",
 ];
 
 const pipeline = [
@@ -286,6 +316,8 @@ export default function ContentAiPage() {
   const [trainError, setTrainError] = useState("");
   const [trainLoading, setTrainLoading] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [scheduleModal, setScheduleModal] = useState(false);
+  const [plannedVideos, setPlannedVideos] = useState<PlannedVideo[]>([]);
 
   const totals = useMemo(() => {
     const views = media.reduce((sum, item) => sum + item.views, 0);
@@ -362,6 +394,15 @@ export default function ContentAiPage() {
         setAnalysis(JSON.parse(savedAnalysis) as AnalysisResult);
       } catch {
         window.localStorage.removeItem("flowdesk-content-ai-analysis");
+      }
+    }
+
+    const savedPlan = window.localStorage.getItem("flowdesk-content-ai-plan");
+    if (savedPlan) {
+      try {
+        setPlannedVideos(JSON.parse(savedPlan) as PlannedVideo[]);
+      } catch {
+        window.localStorage.removeItem("flowdesk-content-ai-plan");
       }
     }
   }, []);
@@ -514,6 +555,44 @@ export default function ContentAiPage() {
     );
     setTrainModal(false);
     setTrainLoading(false);
+  }
+
+  function savePlannedVideos(next: PlannedVideo[]) {
+    setPlannedVideos(next);
+    window.localStorage.setItem("flowdesk-content-ai-plan", JSON.stringify(next));
+  }
+
+  function addPlannedVideo(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const title = String(fd.get("title") || "").trim();
+    const publishAt = String(fd.get("publishAt") || "").trim();
+    if (!title || !publishAt) return;
+
+    savePlannedVideos([
+      {
+        id: `${Date.now()}`,
+        title,
+        format: String(fd.get("format") || "Reels"),
+        publishAt,
+        audience: String(fd.get("audience") || "Asosiy auditoriya"),
+        status: "planned",
+      },
+      ...plannedVideos,
+    ]);
+    setScheduleModal(false);
+    form.reset();
+  }
+
+  function updatePlannedVideoStatus(id: string, status: PlannedVideo["status"]) {
+    savePlannedVideos(
+      plannedVideos.map((item) => (item.id === id ? { ...item, status } : item))
+    );
+  }
+
+  function removePlannedVideo(id: string) {
+    savePlannedVideos(plannedVideos.filter((item) => item.id !== id));
   }
 
   return (
@@ -1119,90 +1198,277 @@ export default function ContentAiPage() {
       )}
 
       {activeSection === "plan" && (
-        <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6 fade-in">
-        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-            <div>
-              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                AI Ideas
-              </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Real patternlardan yangi reels g'oyalari chiqadi.
-              </p>
-            </div>
-            <Lightbulb className="w-5 h-5 text-[#ff9f0a]" />
+        <div className="space-y-6 fade-in">
+          <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-6">
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                    AI Ideas
+                  </h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Real patternlardan yangi reels g'oyalari chiqadi.
+                  </p>
+                </div>
+                <Lightbulb className="w-5 h-5 text-[#ff9f0a]" />
+              </div>
+
+              {hasIdeas ? (
+                <div className="space-y-3">
+                  {contentIdeas.map((idea) => (
+                    <div
+                      key={idea.id}
+                      className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
+                    >
+                      <div className="font-bold text-slate-900 dark:text-slate-100">
+                        {idea.title}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-2">
+                        {idea.source} · {idea.score} score
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={Lightbulb}
+                  title="AI g'oyalar hali yo'q"
+                  text="Profil va ilhom profillari o'qilgandan keyin AI sizning auditoriyangizga mos g'oyalar beradi."
+                />
+              )}
+            </section>
+
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                    Video Scheduler
+                  </h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Reels/video rejalashtirish, tayyorlash va joylash nazorati.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setScheduleModal(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all"
+                >
+                  <CalendarDays className="w-4 h-4" />
+                  Video rejalash
+                </button>
+              </div>
+
+              {plannedVideos.length ? (
+                <div className="space-y-3">
+                  {plannedVideos.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-bold text-slate-900 dark:text-slate-100">
+                            {item.title}
+                          </div>
+                          <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                            <span className="inline-flex items-center gap-1">
+                              <Play className="w-3.5 h-3.5" />
+                              {item.format}
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              {item.publishAt.replace("T", " ")}
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <Users className="w-3.5 h-3.5" />
+                              {item.audience}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removePlannedVideo(item.id)}
+                          className="w-9 h-9 rounded-full bg-white dark:bg-slate-900 text-slate-400 hover:text-red-500 transition-colors flex items-center justify-center"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        {(["planned", "ready", "published"] as const).map((status) => (
+                          <button
+                            key={status}
+                            onClick={() => updatePlannedVideoStatus(item.id, status)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                              item.status === status
+                                ? "bg-accent text-white"
+                                : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border border-black/[0.06] dark:border-white/[0.08]"
+                            }`}
+                          >
+                            {status === "planned"
+                              ? "Rejada"
+                              : status === "ready"
+                                ? "Tayyor"
+                                : "Joylandi"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={CalendarDays}
+                  title="Video reja hali yo'q"
+                  text="Qaysi video qachon chiqishini kiriting. AI audience aktiv vaqtlariga qarab joylash vaqtini tanlashga yordam beradi."
+                />
+              )}
+            </section>
           </div>
 
-          {hasIdeas ? (
-            <div className="space-y-3">
-              {contentIdeas.map((idea) => (
-                <div
-                  key={idea.id}
-                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4"
-                >
-                  <div className="font-bold text-slate-900 dark:text-slate-100">
-                    {idea.title}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-2">
-                    {idea.source} · {idea.score} score
-                  </div>
+          <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6">
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                    Auditoriya aktiv vaqtlari
+                  </h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Real insight kelganda bu heatmap profilingiz auditoriyasi
+                    bo'yicha yangilanadi.
+                  </p>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={Lightbulb}
-              title="AI g'oyalar hali yo'q"
-              text="Profil va ilhom profillari o'qilgandan keyin AI sizning auditoriyangizga mos g'oyalar beradi."
-            />
-          )}
-        </section>
+                <Users className="w-5 h-5 text-[#0a84ff]" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
+                {audienceHeatmap.map((item) => (
+                  <div
+                    key={item.day}
+                    className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50 dark:bg-slate-950 p-3"
+                  >
+                    <div className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                      {item.day}
+                    </div>
+                    <div className="mt-3 h-24 rounded-xl bg-white dark:bg-slate-900 p-2 flex items-end">
+                      <div
+                        className="w-full rounded-lg bg-gradient-to-t from-[#0a84ff] to-[#34c759]"
+                        style={{ height: `${item.score}%` }}
+                      />
+                    </div>
+                    <div className="text-[11px] font-bold text-slate-400 mt-3 space-y-1">
+                      {item.slots.map((slot) => (
+                        <div key={slot}>{slot}</div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
 
-        <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-            <div>
-              <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
-                Content Plan
-              </h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Reja faqat real statistik patternlar o'qilgandan keyin tuziladi.
-              </p>
-            </div>
-            <button className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-950 border border-black/[0.07] dark:border-white/[0.09] text-slate-700 dark:text-slate-200 rounded-full text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.97] transition-all">
-              <CalendarDays className="w-4 h-4 text-[#34c759]" />
-              Reja tuzish
-            </button>
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+                    Joylash checklist
+                  </h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Har bir video joylanishidan oldin AI tekshiradigan signal.
+                  </p>
+                </div>
+                <Upload className="w-5 h-5 text-[#34c759]" />
+              </div>
+              <div className="space-y-3">
+                {publishingChecklist.map((item) => (
+                  <div
+                    key={item}
+                    className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-4 flex items-start gap-3"
+                  >
+                    <CheckCircle2 className="w-5 h-5 text-[#22a447] mt-0.5 shrink-0" />
+                    <p className="text-sm text-slate-600 dark:text-slate-300 leading-6">
+                      {item}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
-
-          {contentPlan.length ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {contentPlan.map((item) => (
-                <div
-                  key={`${item.day}-${item.title}`}
-                  className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] p-4 bg-slate-50/70 dark:bg-slate-950"
-                >
-                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-                    {item.day}
-                  </div>
-                  <div className="font-display font-extrabold text-slate-900 dark:text-slate-100 leading-snug">
-                    {item.title}
-                  </div>
-                  <div className="mt-3 text-xs text-accent font-bold">
-                    {item.score} score
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={CalendarDays}
-              title="Content plan hali yo'q"
-              text="AI profilingiz va benchmark profillardan pattern o'qigandan keyin 7/14/30 kunlik reja beradi."
-            />
-          )}
-        </section>
         </div>
       )}
+
+      <Modal
+        open={scheduleModal}
+        onClose={() => setScheduleModal(false)}
+        title="Video rejalashtirish"
+      >
+        <form onSubmit={addPlannedVideo} className="space-y-4">
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Video mavzusi
+            </label>
+            <input
+              name="title"
+              required
+              placeholder="Masalan: 3 kunda profilni tartiblash"
+              className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Format
+              </label>
+              <select
+                name="format"
+                defaultValue="Reels"
+                className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+              >
+                <option>Reels</option>
+                <option>Post</option>
+                <option>Story</option>
+                <option>Carousel</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Joylash vaqti
+              </label>
+              <input
+                name="publishAt"
+                type="datetime-local"
+                required
+                className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Auditoriya
+            </label>
+            <input
+              name="audience"
+              placeholder="Masalan: biznes boshlayotganlar"
+              className="mt-2 w-full rounded-2xl border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
+            />
+          </div>
+          <div className="rounded-2xl bg-[#eef7ff] border border-[#0a84ff]/10 p-4">
+            <p className="text-sm text-slate-600 leading-6">
+              Real insight ulanganidan keyin AI shu reja vaqtini auditoriya
+              eng aktiv bo'lgan slotlar bilan solishtiradi va yaxshiroq vaqt
+              taklif qiladi.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setScheduleModal(false)}
+              className="px-4 py-2.5 rounded-full bg-white dark:bg-slate-950 border border-black/[0.07] dark:border-white/[0.09] text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            >
+              Bekor qilish
+            </button>
+            <button className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-accent text-white text-sm font-semibold hover:bg-accent-hover active:scale-[0.97] transition-all">
+              <CalendarDays className="w-4 h-4" />
+              Rejaga qo'shish
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         open={trainModal}
