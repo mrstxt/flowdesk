@@ -15,6 +15,7 @@ import {
   Brain,
   Sparkles,
   Calendar,
+  Settings,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const groups = [
       { href: "/finance", label: "Hisob-kitob", icon: Wallet },
       { href: "/goals", label: "Maqsadlar", icon: Target },
       { href: "/subscriptions", label: "Obunalar", icon: Calendar },
+      { href: "/settings", label: "Sozlanmalar", icon: Settings },
     ],
   },
   {

@@ -15,6 +15,8 @@ import {
   settings,
   cards,
   botStates,
+  workRoles,
+  workReports,
 } from "@/db/schema";
 import { desc, eq, gte, and, asc, sql, desc as descOrd, inArray } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
@@ -254,6 +256,7 @@ const MAIN_KEYBOARD = {
     [{ text: "➕ Buyurtma" }, { text: "💸 Chiqim" }, { text: "💰 Kirim" }],
     [{ text: "💳 Kartalarim" }, { text: "📊 Statistika" }],
     [{ text: "📚 Kitob qo'shish" }, { text: "🎬 Video qo'shish" }, { text: "🎯 Maqsad" }],
+    [{ text: "🧾 Ish hisoboti" }],
     [{ text: "☀️ Uyg'onish vaqti" }, { text: "🌙 Uxlash vaqti" }],
     [{ text: "🔔 Botni yoqish" }, { text: "🔕 Botni o'chirish" }],
     [{ text: "🏠 Menyu" }, { text: "❓ Yordam" }],
@@ -279,6 +282,7 @@ const BUTTON_TO_CMD: Record<string, string> = {
   "📚 Kitob qo'shish": "/kitob_qilish",
   "🎬 Video qo'shish": "/video_qilish",
   "🎯 Maqsad": "/maqsad_qilish",
+  "🧾 Ish hisoboti": "/ish_hisobot",
   "☀️ Uyg'onish vaqti": "/uyg_onish",
   "🌙 Uxlash vaqti": "/uxlash",
   "🔔 Botni yoqish": "/bot_yoq",
@@ -451,6 +455,35 @@ function parseYouTubeId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+function htmlEscape(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function parseReportQuestions(raw: string | null | undefined): string[] {
+  if (!raw) {
+    return [
+      "Bugun bu rolda nima ish qildingiz?",
+      "Qaysi natija yoki raqam chiqdi?",
+      "Ertaga nimani yaxshilaysiz?",
+    ];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const lines = parsed.map((item) => String(item).trim()).filter(Boolean);
+      if (lines.length) return lines;
+    }
+  } catch {}
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.length ? lines : parseReportQuestions(null);
+}
+
 const EXPENSE_CAT: Record<string, string> = {
   ijara: "rent",
   reklama: "ads",
@@ -495,6 +528,7 @@ const HELP = [
   "/kitob Nomi, muallif, sahifalar, PDF",
   "/video YouTube_havola, nomi, kategoriya",
   "/maqsad Nomi, summa, auto foiz",
+  "/ish_hisobot — ish rollari bo'yicha kunlik hisobot",
   "/bot_yoq — ogohlantirishni yoqish",
   "/bot_och — ogohlantirishni o'chirish",
   "",
@@ -966,6 +1000,127 @@ async function handleWizardStep(chatId: number, text: string) {
       }
       return;
     }
+  }
+
+  // ── Ish rollari bo'yicha kunlik hisobot ──
+  if (state.mode === "work_report") {
+    const roleIds = (state.data.roleIds || "")
+      .split(",")
+      .map((id) => Number(id))
+      .filter(Boolean);
+    const roleIndex = Number(state.data.roleIndex || "0");
+    const questionIndex = Number(state.data.questionIndex || "0");
+    const currentRoleId = roleIds[roleIndex];
+
+    if (!currentRoleId) {
+      await finishWizard(chatId);
+      await sendMessage(chatId, "✅ Ish hisobotlari yakunlandi.", {
+        reply_markup: MAIN_KEYBOARD,
+      });
+      return;
+    }
+
+    const [role] = await db
+      .select()
+      .from(workRoles)
+      .where(eq(workRoles.id, currentRoleId))
+      .limit(1);
+    if (!role || role.active === false) {
+      const nextRoleIndex = roleIndex + 1;
+      const nextRoleId = roleIds[nextRoleIndex];
+      if (!nextRoleId) {
+        await finishWizard(chatId);
+        await sendMessage(chatId, "✅ Ish hisobotlari yakunlandi.", {
+          reply_markup: MAIN_KEYBOARD,
+        });
+        return;
+      }
+      const [nextRole] = await db
+        .select()
+        .from(workRoles)
+        .where(eq(workRoles.id, nextRoleId))
+        .limit(1);
+      const nextQuestions = parseReportQuestions(nextRole?.reportQuestions);
+      state.data.roleIndex = String(nextRoleIndex);
+      state.data.questionIndex = "0";
+      state.data.answers = "[]";
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        `<b>${htmlEscape(nextRole?.name || "Keyingi rol")}</b>\n1️⃣ ${htmlEscape(
+          nextQuestions[0]
+        )}`,
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    const questions = parseReportQuestions(role.reportQuestions);
+    let answers: { question: string; answer: string }[] = [];
+    try {
+      answers = JSON.parse(state.data.answers || "[]");
+    } catch {
+      answers = [];
+    }
+    answers.push({
+      question: questions[questionIndex] || "Hisobot",
+      answer: text.trim(),
+    });
+
+    const nextQuestionIndex = questionIndex + 1;
+    if (nextQuestionIndex < questions.length) {
+      state.data.answers = JSON.stringify(answers);
+      state.data.questionIndex = String(nextQuestionIndex);
+      userState.set(chatId, state);
+      await sendMessage(
+        chatId,
+        `<b>${htmlEscape(role.name)}</b>\n${nextQuestionIndex + 1}️⃣ ${htmlEscape(
+          questions[nextQuestionIndex]
+        )}`
+      );
+      return;
+    }
+
+    const summary = answers
+      .map((item) => `${item.question}: ${item.answer}`)
+      .join(" • ");
+    await db.insert(workReports).values({
+      roleId: role.id,
+      date: today,
+      answers: JSON.stringify(answers),
+      summary,
+    });
+
+    const nextRoleIndex = roleIndex + 1;
+    const nextRoleId = roleIds[nextRoleIndex];
+    if (!nextRoleId) {
+      await finishWizard(chatId);
+      await sendMessage(
+        chatId,
+        "✅ <b>Ish hisobotlari saqlandi.</b>\nPanel → Sozlanmalar → Ish rollari ichida ko'rasiz.",
+        { reply_markup: MAIN_KEYBOARD }
+      );
+      return;
+    }
+
+    const [nextRole] = await db
+      .select()
+      .from(workRoles)
+      .where(eq(workRoles.id, nextRoleId))
+      .limit(1);
+    const nextQuestions = parseReportQuestions(nextRole?.reportQuestions);
+    state.data.roleIndex = String(nextRoleIndex);
+    state.data.questionIndex = "0";
+    state.data.answers = "[]";
+    userState.set(chatId, state);
+    await sendMessage(
+      chatId,
+      `<b>${htmlEscape(nextRole?.name || "Keyingi rol")}</b>\n1️⃣ ${htmlEscape(
+        nextQuestions[0]
+      )}`,
+      { reply_markup: REQUEST_CANCEL_KEYBOARD }
+    );
+    return;
   }
 
   // ── Wake reason (uxlab qolish sababi) ──
@@ -1896,6 +2051,44 @@ async function handleCommand(
       await sendMessage(
         chatId,
         "🎯 <b>Maqsad yaratish</b>\n\n1️⃣ Maqsad nomini yozing:",
+        { reply_markup: REQUEST_CANCEL_KEYBOARD }
+      );
+      return;
+    }
+
+    if (cmd === "/ish_hisobot") {
+      const activeRoles = await db
+        .select()
+        .from(workRoles)
+        .where(eq(workRoles.active, true))
+        .orderBy(asc(workRoles.id));
+      if (activeRoles.length === 0) {
+        await sendMessage(
+          chatId,
+          "🧾 <b>Ish roli topilmadi.</b>\nPanel → Sozlanmalar → Ish rollari bo'limidan kamida bitta rol qo'shing.",
+          { reply_markup: MAIN_KEYBOARD }
+        );
+        return;
+      }
+      const firstRole = activeRoles[0];
+      const questions = parseReportQuestions(firstRole.reportQuestions);
+      setWizardState(
+        chatId,
+        "work_report",
+        1,
+        {
+          roleIds: activeRoles.map((role) => role.id).join(","),
+          roleIndex: "0",
+          questionIndex: "0",
+          answers: "[]",
+        },
+        triggerMessageId
+      );
+      await sendMessage(
+        chatId,
+        `🧾 <b>Kunlik ish hisoboti</b>\n\n<b>${htmlEscape(
+          firstRole.name
+        )}</b>\n1️⃣ ${htmlEscape(questions[0])}`,
         { reply_markup: REQUEST_CANCEL_KEYBOARD }
       );
       return;

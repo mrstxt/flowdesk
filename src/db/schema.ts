@@ -248,3 +248,30 @@ export const dailyResults = pgTable("daily_results", {
   videoFileId: varchar("video_file_id", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/* ── Ish joylari / rollar va kunlik hisobotlar ── */
+
+export const workRoles = pgTable("work_roles", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  tasksText: text("tasks_text"),
+  monthlySalary: numeric("monthly_salary", { precision: 12, scale: 2 })
+    .notNull()
+    .default("0"),
+  dailySalary: numeric("daily_salary", { precision: 12, scale: 2 })
+    .notNull()
+    .default("0"),
+  reportQuestions: text("report_questions"),
+  active: boolean("active").default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const workReports = pgTable("work_reports", {
+  id: serial("id").primaryKey(),
+  roleId: integer("role_id").notNull(),
+  date: date("date").notNull(),
+  answers: text("answers").notNull(),
+  summary: text("summary"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

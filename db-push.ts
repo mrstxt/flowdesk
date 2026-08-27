@@ -247,6 +247,38 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_paid_at DATE;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- 18. work_roles (ish joylari / rollar)
+CREATE TABLE IF NOT EXISTS work_roles (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  tasks_text TEXT,
+  monthly_salary NUMERIC(12, 2) NOT NULL DEFAULT '0',
+  daily_salary NUMERIC(12, 2) NOT NULL DEFAULT '0',
+  report_questions TEXT,
+  active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE work_roles ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE work_roles ADD COLUMN IF NOT EXISTS tasks_text TEXT;
+ALTER TABLE work_roles ADD COLUMN IF NOT EXISTS monthly_salary NUMERIC(12, 2) NOT NULL DEFAULT '0';
+ALTER TABLE work_roles ADD COLUMN IF NOT EXISTS daily_salary NUMERIC(12, 2) NOT NULL DEFAULT '0';
+ALTER TABLE work_roles ADD COLUMN IF NOT EXISTS report_questions TEXT;
+ALTER TABLE work_roles ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
+
+-- 19. work_reports (bot so'raydigan kunlik hisobotlar)
+CREATE TABLE IF NOT EXISTS work_reports (
+  id SERIAL PRIMARY KEY,
+  role_id INTEGER NOT NULL,
+  date DATE NOT NULL,
+  answers TEXT NOT NULL,
+  summary TEXT,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE work_reports ADD COLUMN IF NOT EXISTS summary TEXT;
 `;
 
 async function main() {
