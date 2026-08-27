@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Camera, Fingerprint, KeyRound, Lock, ShieldCheck } from "lucide-react";
+import {
+  Camera,
+  Fingerprint,
+  KeyRound,
+  Lock,
+  ShieldCheck,
+  Smartphone,
+} from "lucide-react";
 
 const pinKey = "flowdesk-security-pin";
 const faceKey = "flowdesk-security-face";
@@ -50,6 +57,7 @@ export function SecurityGate({
 }: SecurityGateProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const autoTriedRef = useRef(false);
   const sessionKey = `flowdesk-${scope}-verified`;
   const [ready, setReady] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
@@ -60,6 +68,7 @@ export function SecurityGate({
   const [message, setMessage] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
   const [checkingFace, setCheckingFace] = useState(false);
+  const [checkingPasskey, setCheckingPasskey] = useState(false);
 
   useEffect(() => {
     const pinEnabled = Boolean(localStorage.getItem(pinKey));
@@ -82,6 +91,13 @@ export function SecurityGate({
       setUnlocked(true);
     }
   }, [ready, requireSecurity, hasAnyMethod]);
+
+  useEffect(() => {
+    if (!ready || unlocked || !hasPasskey || autoTriedRef.current) return;
+    autoTriedRef.current = true;
+    verifyPasskey({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, unlocked, hasPasskey]);
 
   async function verifyPin() {
     const raw = localStorage.getItem(pinKey);
@@ -162,9 +178,11 @@ export function SecurityGate({
     setCheckingFace(false);
   }
 
-  async function verifyPasskey() {
+  async function verifyPasskey(opts?: { silent?: boolean }) {
     const raw = localStorage.getItem(passkeyKey);
     if (!raw) return;
+    setCheckingPasskey(true);
+    if (!opts?.silent) setMessage("");
     try {
       const saved = JSON.parse(raw) as { rawId: string };
       await navigator.credentials.get({
@@ -180,7 +198,13 @@ export function SecurityGate({
       sessionStorage.setItem(sessionKey, "ok");
       setUnlocked(true);
     } catch {
-      setMessage("Touch ID / Fingerprint tasdiqlanmadi.");
+      if (opts?.silent) {
+        setMessage("Qurilma orqali ochish uchun pastdagi Face ID / Touch ID tugmasini bosing yoki PIN kiriting.");
+      } else {
+        setMessage("Qurilma Face ID / Touch ID / Fingerprint tasdiqlanmadi.");
+      }
+    } finally {
+      setCheckingPasskey(false);
     }
   }
 
@@ -190,7 +214,7 @@ export function SecurityGate({
   return (
     <div className="min-h-screen bg-[#fbfbfd] dark:bg-[#0a0a0c] flex items-center justify-center p-6">
       <div className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-6 shadow-sm">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
           <div>
             <div className="w-12 h-12 rounded-2xl bg-accent-soft text-accent flex items-center justify-center mb-4">
               <Lock className="w-6 h-6" />
@@ -210,10 +234,10 @@ export function SecurityGate({
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
                 <MethodBadge icon={KeyRound} label="PIN" active={hasPin} />
-                <MethodBadge icon={Camera} label="Face ID" active={hasFace} />
+                <MethodBadge icon={Camera} label="Kamera face" active={hasFace} />
                 <MethodBadge
                   icon={Fingerprint}
-                  label="Fingerprint"
+                  label="Device biometric"
                   active={hasPasskey}
                 />
               </div>
@@ -237,6 +261,32 @@ export function SecurityGate({
 
           {hasAnyMethod && (
             <div className="space-y-3">
+              {hasPasskey && (
+                <div className="rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-4">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-2xl bg-violet-50 text-violet-700 flex items-center justify-center">
+                      <Fingerprint className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                        Face ID / Touch ID
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Qurilma blokirovkasidek ochish
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => verifyPasskey()}
+                    disabled={checkingPasskey}
+                    className="w-full rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-2.5 text-sm font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    {checkingPasskey ? "Qurilma tasdiqlayapti" : "Qurilma orqali ochish"}
+                  </button>
+                </div>
+              )}
+
               {hasPin && (
                 <div className="rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-4">
                   <div className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-100 mb-3">
@@ -263,25 +313,12 @@ export function SecurityGate({
                 </div>
               )}
 
-              {hasPasskey && (
-                <button
-                  onClick={verifyPasskey}
-                  className="w-full rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-4 flex items-center gap-3 text-left hover:bg-slate-50 dark:hover:bg-slate-950"
-                >
-                  <Fingerprint className="w-5 h-5 text-violet-700" />
-                  <span>
-                    <span className="block text-sm font-bold text-slate-900 dark:text-slate-100">
-                      Touch ID / Fingerprint
-                    </span>
-                    <span className="block text-xs text-slate-500">
-                      Qurilma tasdiqlashi orqali ochish
-                    </span>
-                  </span>
-                </button>
-              )}
-
               {hasFace && (
                 <div className="rounded-3xl border border-black/[0.06] dark:border-white/[0.08] p-4">
+                  <div className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-100 mb-3">
+                    <Camera className="w-4 h-4 text-blue-700" />
+                    Kamera face check
+                  </div>
                   <div className="aspect-[4/3] rounded-2xl bg-slate-950 overflow-hidden relative">
                     <video
                       ref={videoRef}

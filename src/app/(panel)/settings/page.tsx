@@ -139,7 +139,7 @@ export default function SettingsPage() {
     );
     clearSecuritySessions();
     setFaceStatus(true);
-    setSecurityMessage("Face ID saqlandi. Panel va Data AI kirishida ishlaydi.");
+    setSecurityMessage("Kamera face check saqlandi. Panel va Data AI kirishida fallback sifatida ishlaydi.");
     streamRef.current?.getTracks().forEach((track) => track.stop());
     setCameraReady(false);
   }
@@ -183,7 +183,7 @@ export default function SettingsPage() {
       );
       clearSecuritySessions();
       setPasskeyStatus(true);
-      setSecurityMessage("Touch ID / Fingerprint bog'landi. Panel va Data AI kirishida ishlaydi.");
+      setSecurityMessage("Qurilma Face ID / Touch ID / Fingerprint bog'landi. Panel va Data AI kirishida blokirovka ochilgandek prompt chiqadi.");
     } catch {
       setSecurityMessage("Device verification bekor qilindi yoki xato berdi.");
     }
@@ -271,9 +271,9 @@ export default function SettingsPage() {
               <Camera className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-bold text-slate-900">Face ID</h2>
+              <h2 className="font-bold text-slate-900">Kamera face check</h2>
               <p className="text-xs text-slate-500">
-                Kamera orqali panel va Data AI tasdiqlashi
+                Kamera orqali qo'shimcha yuz tekshiruvi
               </p>
             </div>
           </div>
@@ -295,7 +295,7 @@ export default function SettingsPage() {
               Face saqlash
             </button>
           </div>
-          <Status active={faceStatus} text="Face ID holati" />
+          <Status active={faceStatus} text="Kamera face holati" />
         </section>
 
         <section className="bg-white rounded-3xl border border-black/[0.06] p-6">
@@ -304,9 +304,9 @@ export default function SettingsPage() {
               <Fingerprint className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-bold text-slate-900">Touch ID / Fingerprint</h2>
+              <h2 className="font-bold text-slate-900">Face ID / Touch ID / Fingerprint</h2>
               <p className="text-xs text-slate-500">
-                Qurilmadagi biometric tasdiqlash
+                Qurilma blokirovkasidek biometric ochish
               </p>
             </div>
           </div>
@@ -315,19 +315,19 @@ export default function SettingsPage() {
               onClick={registerPasskey}
               className="w-full rounded-full bg-slate-900 text-white py-2.5 text-sm font-semibold"
             >
-              Qurilmaga bog'lash
+              Qurilma biometric bog'lash
             </button>
             <button
               onClick={verifyPasskey}
               className="w-full rounded-full border border-slate-200 py-2.5 text-sm font-semibold"
             >
-              Tasdiqlash
+              Qurilma orqali tekshirish
             </button>
           </div>
-          <Status active={passkeyStatus} text="Device holati" />
+          <Status active={passkeyStatus} text="Device biometric holati" />
           <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500 leading-relaxed">
-            Productionda passkey challenge serverda ham tekshirilishi kerak.
-            Hozirgi versiya browser platform authenticator bilan ishlaydi.
+            Mac/iPhone bo'lsa Face ID yoki Touch ID, Android/Windows bo'lsa
+            qurilmadagi mavjud biometric yoki ekran paroli prompti chiqadi.
           </div>
         </section>
 
