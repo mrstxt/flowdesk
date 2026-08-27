@@ -6,6 +6,20 @@ import { todayISO } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+function validDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function cleanAnswers(value: unknown): { question: string; answer: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ({
+      question: String(item?.question || "Savol").trim(),
+      answer: String(item?.answer || "").trim(),
+    }))
+    .filter((item) => item.answer);
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const roleId = Number(searchParams.get("roleId"));
@@ -32,12 +46,16 @@ export async function POST(req: Request) {
   if (!roleId) {
     return NextResponse.json({ error: "roleId kerak" }, { status: 400 });
   }
+  const date = String(body.date || todayISO());
+  if (!validDate(date)) {
+    return NextResponse.json({ error: "Sana formati YYYY-MM-DD bo'lishi kerak" }, { status: 400 });
+  }
 
-  const answers = Array.isArray(body.answers) ? body.answers : [];
+  const answers = cleanAnswers(body.answers);
   const summary =
     String(body.summary || "").trim() ||
     answers
-      .map((item: { question?: string; answer?: string }) => item.answer)
+      .map((item) => item.answer)
       .filter(Boolean)
       .join(" • ");
 
@@ -45,7 +63,7 @@ export async function POST(req: Request) {
     .insert(workReports)
     .values({
       roleId,
-      date: body.date || todayISO(),
+      date,
       answers: JSON.stringify(answers),
       summary,
     })

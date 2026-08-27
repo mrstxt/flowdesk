@@ -9,8 +9,12 @@ export const dynamic = "force-dynamic";
 function taskLines(raw: string | null): string[] {
   return String(raw || "")
     .split("\n")
-    .map((line) => line.replace(/^[-•*\d.\s]+/, "").trim())
+    .map((line) => line.replace(/^\s*(?:[-•*]\s+|\d+[.)]\s+)/, "").trim())
     .filter(Boolean);
+}
+
+function validDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 export async function POST(req: Request) {
@@ -19,6 +23,9 @@ export async function POST(req: Request) {
   const date = String(body.date || todayISO());
   if (!roleId) {
     return NextResponse.json({ error: "roleId kerak" }, { status: 400 });
+  }
+  if (!validDate(date)) {
+    return NextResponse.json({ error: "Sana formati YYYY-MM-DD bo'lishi kerak" }, { status: 400 });
   }
 
   const [role] = await db

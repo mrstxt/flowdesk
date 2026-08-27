@@ -59,7 +59,12 @@ export async function PUT(req: Request) {
   if (!id) return NextResponse.json({ error: "id kerak" }, { status: 400 });
 
   const updates: Partial<typeof workRoles.$inferInsert> = {};
-  if ("name" in body) updates.name = String(body.name || "").trim();
+  if ("name" in body) {
+    updates.name = String(body.name || "").trim();
+    if (!updates.name) {
+      return NextResponse.json({ error: "Ish bo'limi nomi kerak" }, { status: 400 });
+    }
+  }
   if ("description" in body) {
     updates.description = body.description
       ? String(body.description).trim()
@@ -80,6 +85,9 @@ export async function PUT(req: Request) {
     updates.reportQuestions = cleanQuestions(body.reportQuestions);
   }
   if ("active" in body) updates.active = Boolean(body.active);
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "Yangilash uchun data kerak" }, { status: 400 });
+  }
 
   const [updated] = await db
     .update(workRoles)
