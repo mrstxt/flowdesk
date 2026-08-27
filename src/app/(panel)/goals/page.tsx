@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Plus,
   Target,
@@ -83,6 +83,7 @@ export default function GoalsPage() {
   const [addFundsGoal, setAddFundsGoal] = useState<Goal | null>(null);
   const [spendGoal, setSpendGoal] = useState<Goal | null>(null);
   const [spendingGoalId, setSpendingGoalId] = useState<number | null>(null);
+  const spendInFlightRef = useRef(false);
   const [assignCardGoal, setAssignCardGoal] = useState<Goal | null>(null);
   const [transferModal, setTransferModal] = useState(false);
   const [topUpModal, setTopUpModal] = useState<{
@@ -251,6 +252,7 @@ export default function GoalsPage() {
   async function spendGoalFunds(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!spendGoal) return;
+    if (spendInFlightRef.current) return;
     const goal = spendGoal;
     const form = e.currentTarget;
     const fd = new FormData(form);
@@ -260,6 +262,7 @@ export default function GoalsPage() {
       return;
     }
     try {
+      spendInFlightRef.current = true;
       setSpendingGoalId(goal.id);
       const res = await fetch("/api/card-transactions", {
         method: "POST",
@@ -287,6 +290,7 @@ export default function GoalsPage() {
     } catch (e) {
       alert("Xatolik: " + (e instanceof Error ? e.message : String(e)));
     } finally {
+      spendInFlightRef.current = false;
       setSpendingGoalId(null);
     }
   }
