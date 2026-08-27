@@ -77,6 +77,17 @@ type Card = {
   balance: string;
 };
 
+async function fetchJson<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: ${res.status}`);
+    return (await res.json()) as T;
+  } catch (error) {
+    console.error("Dashboard data load failed:", error);
+    return fallback;
+  }
+}
+
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -93,17 +104,18 @@ export default function Dashboard() {
 
   async function load() {
     const [o, t, i, e, g, r, b, s, c] = await Promise.all([
-      fetch("/api/orders").then((r) => r.json()),
-      fetch(`/api/tasks?from=${todayISO()}&to=${todayISO()}`).then((r) =>
-        r.json()
+      fetchJson<Order[]>("/api/orders", []),
+      fetchJson<Task[]>(
+        `/api/tasks?from=${todayISO()}&to=${todayISO()}`,
+        []
       ),
-      fetch("/api/incomes").then((r) => r.json()),
-      fetch("/api/expenses").then((r) => r.json()),
-      fetch("/api/goals").then((r) => r.json()),
-      fetch("/api/routines").then((r) => r.json()),
-      fetch("/api/books").then((r) => r.json()),
-      fetch("/api/settings").then((r) => r.json()),
-      fetch("/api/cards").then((r) => r.json()),
+      fetchJson<Income[]>("/api/incomes", []),
+      fetchJson<Expense[]>("/api/expenses", []),
+      fetchJson<Goal[]>("/api/goals", []),
+      fetchJson<Routine[]>("/api/routines", []),
+      fetchJson<Book[]>("/api/books", []),
+      fetchJson<{ wake_time?: string; sleep_time?: string }>("/api/settings", {}),
+      fetchJson<Card[]>("/api/cards", []),
     ]);
     setOrders(o);
     setTasks(t);
@@ -132,6 +144,13 @@ export default function Dashboard() {
     .filter((e) => e.date >= ms)
     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
+  const allTimeIn = incomes
+    .filter((i) => i.source !== "goal")
+    .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
+  const allTimeOut = expenses.reduce(
+    (s, e) => s + parseMoneyInput(e.amount),
+    0
+  );
   // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...).
   // Shu pul asosiy kartada to'planadi, shuning uchun kartada umumiy
   // summa ko'rinishi kerak (ichki goal transferlar kirmaydi).
@@ -268,24 +287,28 @@ export default function Dashboard() {
         <Kpi
           label="Oylik kirim"
           value={formatCurrency(totalIn)}
+          hint={`Jami: ${formatCurrency(allTimeIn)}`}
           icon={ArrowUpRight}
           tone="green"
         />
         <Kpi
           label="Oylik chiqim"
           value={formatCurrency(totalOut)}
+          hint={`Jami: ${formatCurrency(allTimeOut)}`}
           icon={ArrowDownRight}
           tone="red"
         />
         <Kpi
           label="Sof foyda (oy)"
           value={formatCurrency(net)}
+          hint={`Jami: ${formatCurrency(allTimeIn - allTimeOut)}`}
           icon={TrendingUp}
           tone="accent"
         />
         <Kpi
           label="Faol buyurtmalar"
           value={`${activeOrders.length} ta`}
+          hint={`DB: ${orders.length} ta`}
           icon={Kanban}
           tone="blue"
         />
@@ -700,11 +723,13 @@ export default function Dashboard() {
 function Kpi({
   label,
   value,
+  hint,
   icon: Icon,
   tone,
 }: {
   label: string;
   value: string;
+  hint?: string;
   icon: React.ComponentType<{ className?: string }>;
   tone: "green" | "red" | "accent" | "blue";
 }) {
@@ -725,6 +750,7 @@ function Kpi({
       <div className="font-display text-[22px] font-extrabold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums">
         {value}
       </div>
+      {hint && <div className="text-xs text-slate-400 mt-1">{hint}</div>}
     </div>
   );
 }

@@ -127,6 +127,17 @@ function isRoutineDone(responseText: string | null): boolean {
   return responseText?.includes("Bajarildi") ?? false;
 }
 
+async function fetchJson<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: ${res.status}`);
+    return (await res.json()) as T;
+  } catch (error) {
+    console.error("Analytics data load failed:", error);
+    return fallback;
+  }
+}
+
 export default function AnalitikaPage() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -140,20 +151,23 @@ export default function AnalitikaPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/incomes").then((r) => r.json()),
-      fetch("/api/expenses").then((r) => r.json()),
-      fetch("/api/orders").then((r) => r.json()),
-      fetch("/api/goals").then((r) => r.json()),
-      fetch(`/api/sleep-logs?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
-        r.json()
+      fetchJson<Income[]>("/api/incomes", []),
+      fetchJson<Expense[]>("/api/expenses", []),
+      fetchJson<Order[]>("/api/orders", []),
+      fetchJson<Goal[]>("/api/goals", []),
+      fetchJson<SleepLog[]>(
+        `/api/sleep-logs?from=${dateKey(-30)}&to=${dateKey(0)}`,
+        []
       ),
-      fetch(`/api/daily-results?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
-        r.json()
+      fetchJson<DailyResult[]>(
+        `/api/daily-results?from=${dateKey(-30)}&to=${dateKey(0)}`,
+        []
       ),
-      fetch(`/api/routine-analytics?from=${dateKey(-30)}&to=${dateKey(0)}`).then((r) =>
-        r.json()
+      fetchJson<RoutineReminder[]>(
+        `/api/routine-analytics?from=${dateKey(-30)}&to=${dateKey(0)}`,
+        []
       ),
-      fetch("/api/settings").then((r) => r.json()),
+      fetchJson<{ wake_time?: string; sleep_time?: string }>("/api/settings", {}),
     ]).then(([i, e, o, g, sl, dr, rr, s]) => {
       setIncomes(i);
       setExpenses(e);

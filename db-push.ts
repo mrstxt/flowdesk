@@ -122,6 +122,8 @@ CREATE TABLE IF NOT EXISTS goals (
   title VARCHAR(255) NOT NULL,
   target_amount NUMERIC(12, 2) NOT NULL,
   saved_amount NUMERIC(12, 2) NOT NULL DEFAULT '0',
+  used_amount NUMERIC(12, 2) NOT NULL DEFAULT '0',
+  last_used_at TIMESTAMP,
   auto_percent INTEGER DEFAULT 0,
   period VARCHAR(20) NOT NULL DEFAULT 'one_time',
   deadline DATE,
@@ -133,6 +135,8 @@ CREATE TABLE IF NOT EXISTS goals (
 ALTER TABLE goals ADD COLUMN IF NOT EXISTS period VARCHAR(20) NOT NULL DEFAULT 'one_time';
 ALTER TABLE goals ADD COLUMN IF NOT EXISTS deadline DATE;
 ALTER TABLE goals ADD COLUMN IF NOT EXISTS period_started_at DATE;
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS used_amount NUMERIC(12, 2) NOT NULL DEFAULT '0';
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP;
 
 -- 10. sleep_logs
 CREATE TABLE IF NOT EXISTS sleep_logs (
@@ -222,6 +226,27 @@ CREATE TABLE IF NOT EXISTS video_notes (
   content TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+-- 17. subscriptions (oylik obunalar)
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  amount NUMERIC(12, 2) NOT NULL,
+  due_day INTEGER NOT NULL DEFAULT 1,
+  cycle VARCHAR(20) NOT NULL DEFAULT 'monthly',
+  category VARCHAR(100) DEFAULT 'subscriptions',
+  active BOOLEAN DEFAULT TRUE,
+  last_paid_at DATE,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS due_day INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS cycle VARCHAR(20) NOT NULL DEFAULT 'monthly';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'subscriptions';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_paid_at DATE;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS notes TEXT;
 `;
 
 async function main() {
