@@ -127,6 +127,10 @@ function isRoutineDone(responseText: string | null): boolean {
   return responseText?.includes("Bajarildi") ?? false;
 }
 
+function countsAgainstPrimaryExpense(expense: Expense): boolean {
+  return expense.category !== "goal";
+}
+
 async function fetchJson<T>(url: string, fallback: T): Promise<T> {
   try {
     const res = await fetch(url);
@@ -190,7 +194,7 @@ export default function AnalitikaPage() {
       .reduce((s, x) => s + Number(x.amount), 0);
   const sumOut = (key: string) =>
     expenses
-      .filter((x) => x.date.startsWith(key))
+      .filter((x) => x.date.startsWith(key) && countsAgainstPrimaryExpense(x))
       .reduce((s, x) => s + Number(x.amount), 0);
   const sumGoalAlloc = (key: string) =>
     incomes
@@ -310,7 +314,7 @@ export default function AnalitikaPage() {
   // Top expense category this month
   const byCat: Record<string, number> = {};
   expenses
-    .filter((x) => x.date.startsWith(curKey))
+    .filter((x) => x.date.startsWith(curKey) && countsAgainstPrimaryExpense(x))
     .forEach((x) => {
       byCat[x.category] = (byCat[x.category] || 0) + Number(x.amount);
     });

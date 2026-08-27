@@ -72,7 +72,9 @@ export async function getCardAvailableBalance(cardId: number): Promise<number> {
     .where(ne(incomes.source, "goal"));
   const outRows = await db.select().from(expenses);
   const totalIn = inRows.reduce((s, r) => s + Number(r.amount), 0);
-  const totalOut = outRows.reduce((s, r) => s + Number(r.amount), 0);
+  const totalOut = outRows
+    .filter((r) => r.category !== "goal")
+    .reduce((s, r) => s + Number(r.amount), 0);
   return totalIn - totalOut;
 }
 
@@ -556,15 +558,6 @@ export async function spendGoalFunds(
           description: desc,
         })
         .returning();
-
-      await tx.insert(expenses).values({
-        title: desc,
-        amount: String(amount),
-        category: "goal",
-        date: today,
-        cardId: goalCardId,
-        transactionId: txRow.id,
-      });
 
       return { ok: true, amount, cardName: targetCard.name };
     });

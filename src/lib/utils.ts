@@ -68,12 +68,14 @@ export function monthStartISO(): string {
  */
 export function totalProfit(
   incomes: { amount: string; source: string }[],
-  expenses: { amount: string }[]
+  expenses: { amount: string; category?: string | null }[]
 ): number {
   const totalIn = incomes
     .filter((i) => i.source !== "goal")
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
-  const totalOut = expenses.reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+  const totalOut = expenses
+    .filter((e) => e.category !== "goal")
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   return totalIn - totalOut;
 }
 

@@ -86,6 +86,10 @@ const EXPENSE_CATS: Record<string, string> = {
   other: "Boshqa",
 };
 
+function countsAgainstPrimary(expense: Pick<Expense, "category">): boolean {
+  return expense.category !== "goal";
+}
+
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return "";
   try {
@@ -198,14 +202,17 @@ export default function FinancePage() {
   const totalIn = monthIncomes
     .filter((i) => i.source !== "goal")
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
-  const totalOut = monthExpenses.reduce((s, e) => s + parseMoneyInput(e.amount), 0);
+  const totalOut = monthExpenses
+    .filter(countsAgainstPrimary)
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
   // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...). Asosiy kartada
   // shu pul turadi, shuning uchun panelda ham ko'rinishi kerak.
   const totalProfitAll = totalProfit(incomes, expenses);
 
   const incomeGroups = groupByDay(incomes);
-  const expenseGroups = groupByDay(expenses);
+  const visibleExpenses = expenses.filter(countsAgainstPrimary);
+  const expenseGroups = groupByDay(visibleExpenses);
   const allTx: Tx[] = [
     ...incomes.map((i) => ({
       id: i.id,
@@ -218,7 +225,7 @@ export default function FinancePage() {
       category: "",
       cardId: i.cardId,
     })),
-    ...expenses.map((e) => ({
+    ...visibleExpenses.map((e) => ({
       id: e.id,
       title: e.title,
       amount: e.amount,
@@ -244,7 +251,7 @@ export default function FinancePage() {
       .filter((x) => x.date.startsWith(key) && x.source !== "goal")
       .reduce((s, x) => s + parseMoneyInput(x.amount), 0);
     const outSum = expenses
-      .filter((x) => x.date.startsWith(key))
+      .filter((x) => x.date.startsWith(key) && countsAgainstPrimary(x))
       .reduce((s, x) => s + parseMoneyInput(x.amount), 0);
     return {
       month: d.toLocaleDateString("uz-UZ", { month: "short" }),
@@ -626,7 +633,7 @@ export default function FinancePage() {
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
           <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-              Chiqimlar ({expenses.length})
+              Chiqimlar ({visibleExpenses.length})
             </h2>
           </div>
           {expenseGroups.length === 0 ? (

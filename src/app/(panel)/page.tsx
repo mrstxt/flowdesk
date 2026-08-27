@@ -44,7 +44,13 @@ type Income = {
   source: string;
   cardId: number | null;
 };
-type Expense = { id: number; amount: string; date: string; cardId: number | null };
+type Expense = {
+  id: number;
+  amount: string;
+  date: string;
+  category: string;
+  cardId: number | null;
+};
 type Goal = {
   id: number;
   title: string;
@@ -142,15 +148,15 @@ export default function Dashboard() {
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const totalOut = expenses
     .filter((e) => e.date >= ms)
+    .filter((e) => e.category !== "goal")
     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = totalIn - totalOut;
   const allTimeIn = incomes
     .filter((i) => i.source !== "goal")
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
-  const allTimeOut = expenses.reduce(
-    (s, e) => s + parseMoneyInput(e.amount),
-    0
-  );
+  const allTimeOut = expenses
+    .filter((e) => e.category !== "goal")
+    .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   // Umumiy foyda — BARCHA davrlar (o'tgan oy + bu oy + ...).
   // Shu pul asosiy kartada to'planadi, shuning uchun kartada umumiy
   // summa ko'rinishi kerak (ichki goal transferlar kirmaydi).
@@ -168,6 +174,7 @@ export default function Dashboard() {
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const prevOut = expenses
     .filter((e) => e.date.startsWith(prevKey))
+    .filter((e) => e.category !== "goal")
     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const prevNet = prevIn - prevOut;
   const activeOrders = orders.filter(

@@ -59,6 +59,7 @@ type Expense = {
   id: number;
   amount: string;
   date: string;
+  category: string;
   cardId: number | null;
 };
 
@@ -130,6 +131,7 @@ export default function GoalsPage() {
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const netOut = expenses
     .filter((e) => e.date >= ms)
+    .filter((e) => e.category !== "goal")
     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const net = netIn - netOut;
   // O'tgan oy sof foydasi
@@ -144,6 +146,7 @@ export default function GoalsPage() {
     .reduce((s, i) => s + parseMoneyInput(i.amount), 0);
   const prevOut = expenses
     .filter((e) => e.date.startsWith(prevKey))
+    .filter((e) => e.category !== "goal")
     .reduce((s, e) => s + parseMoneyInput(e.amount), 0);
   const prevNet = prevIn - prevOut;
 
