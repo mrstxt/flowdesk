@@ -30,7 +30,7 @@ const groups = [
       { href: "/finance", label: "Hisob-kitob", icon: Wallet },
       { href: "/goals", label: "Maqsadlar", icon: Target },
       { href: "/subscriptions", label: "Obunalar", icon: Calendar },
-      { href: "/work-roles", label: "Ish rollari", icon: BriefcaseBusiness },
+      { href: "/work-roles", label: "Ish bo'limi", icon: BriefcaseBusiness },
       { href: "/settings", label: "Sozlanmalar", icon: Settings },
     ],
   },

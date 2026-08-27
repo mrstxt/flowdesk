@@ -7,6 +7,7 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ClipboardList,
+  Send,
   MessageSquareText,
   Plus,
   Power,
@@ -72,6 +73,7 @@ export default function WorkRolesPage() {
   const [roles, setRoles] = useState<WorkRole[]>([]);
   const [reports, setReports] = useState<WorkReport[]>([]);
   const [saving, setSaving] = useState(false);
+  const [syncingId, setSyncingId] = useState<number | null>(null);
 
   async function load() {
     const [roleRows, reportRows] = await Promise.all([
@@ -152,25 +154,45 @@ export default function WorkRolesPage() {
     load();
   }
 
+  async function syncTasks(role: WorkRole) {
+    setSyncingId(role.id);
+    const res = await fetch("/api/work-roles/sync-tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roleId: role.id, date: today }),
+    });
+    const data = await res.json();
+    setSyncingId(null);
+    if (!res.ok) {
+      alert(data.error || "Intizomga chiqarishda xatolik");
+      return;
+    }
+    alert(
+      data.created > 0
+        ? `${data.created} ta ish Intizomga qo'shildi`
+        : "Bu ishlar bugungi Intizomda allaqachon bor"
+    );
+  }
+
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 mb-7">
         <div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900">
-            Ish rollari
+            Ish bo'limi
           </h1>
           <p className="text-slate-500 mt-1.5">
-            Har bir ishda nima qilinadi, qanday natija olinadi va kunlik hisobotlar
+            Qilinadigan ishlar, Intizomga chiqadigan vazifalar, bot hisobotlari va natijalar
           </p>
         </div>
         <div className="rounded-3xl bg-slate-900 text-white px-5 py-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center">
             <Bot className="w-5 h-5" />
           </div>
-          <div>
-            <div className="text-xs text-white/55">Telegram bot</div>
-            <div className="font-semibold">/ish_hisobot</div>
-          </div>
+            <div>
+              <div className="text-xs text-white/55">Telegram bot</div>
+              <div className="font-semibold">/ish_hisobot · data almashadi</div>
+            </div>
         </div>
       </div>
 
@@ -188,7 +210,7 @@ export default function WorkRolesPage() {
               <Plus className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-bold text-slate-900">Yangi ish roli</h2>
+              <h2 className="font-bold text-slate-900">Yangi ish bo'limi</h2>
               <p className="text-xs text-slate-500">
                 Vazifa, ish uslubi va natija savollarini kiriting
               </p>
@@ -225,7 +247,7 @@ export default function WorkRolesPage() {
               className="w-full rounded-full bg-accent text-white py-2.5 text-sm font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              {saving ? "Saqlanyapti..." : "Rol qo'shish"}
+              {saving ? "Saqlanyapti..." : "Ish bo'limi qo'shish"}
             </button>
           </form>
         </section>
@@ -234,9 +256,9 @@ export default function WorkRolesPage() {
           {roles.length === 0 ? (
             <div className="bg-white rounded-3xl border border-dashed border-slate-300 p-12 text-center">
               <BriefcaseBusiness className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-              <div className="font-semibold text-slate-800">Ish roli hali yo'q</div>
+              <div className="font-semibold text-slate-800">Ish bo'limi hali yo'q</div>
               <div className="text-sm text-slate-500 mt-1">
-                Chapdagi forma orqali birinchi ish kategoriyangizni qo'shing.
+                Chapdagi forma orqali birinchi ish bo'limingizni qo'shing.
               </div>
             </div>
           ) : (
@@ -351,13 +373,23 @@ export default function WorkRolesPage() {
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => toggleRole(role)}
-                      className="mt-5 rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold flex items-center gap-2"
-                    >
-                      {active ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
-                      {active ? "Faolsizlantirish" : "Faollashtirish"}
-                    </button>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => syncTasks(role)}
+                        disabled={syncingId === role.id}
+                        className="rounded-full bg-accent text-white px-4 py-2 text-xs font-semibold flex items-center gap-2 disabled:opacity-60"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {syncingId === role.id ? "Chiqarilyapti" : "Intizomga chiqarish"}
+                      </button>
+                      <button
+                        onClick={() => toggleRole(role)}
+                        className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold flex items-center gap-2"
+                      >
+                        {active ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
+                        {active ? "Faolsizlantirish" : "Faollashtirish"}
+                      </button>
+                    </div>
                   </article>
                 );
               })}

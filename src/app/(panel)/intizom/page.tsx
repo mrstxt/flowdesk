@@ -513,6 +513,11 @@ export default function IntizomPage() {
                         ⚡ Shoshilinch
                       </span>
                     )}
+                    {t.category === "work" && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-full">
+                        Ish
+                      </span>
+                    )}
                     <button
                       onClick={() => deleteTask(t.id)}
                       className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-accent transition-all"
