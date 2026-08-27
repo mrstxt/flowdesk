@@ -14,6 +14,7 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
+import { SecurityGate } from "@/components/SecurityGate";
 
 type StoredProfile = {
   username?: string;
@@ -57,7 +58,7 @@ const memoryLayers = [
 export default function DataAiPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(true);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -69,8 +70,6 @@ export default function DataAiPage() {
   const [analysis, setAnalysis] = useState<StoredAnalysis | null>(null);
 
   useEffect(() => {
-    setUnlocked(sessionStorage.getItem("flowdesk-data-ai-face") === "ok");
-
     const savedProfile = localStorage.getItem("flowdesk-content-ai-profile");
     if (savedProfile) {
       try {
@@ -175,8 +174,8 @@ export default function DataAiPage() {
   }
 
   function lockAgain() {
-    sessionStorage.removeItem("flowdesk-data-ai-face");
-    setUnlocked(false);
+    sessionStorage.removeItem("flowdesk-data-ai-verified");
+    window.location.reload();
     setCameraReady(false);
     setFaceScore(0);
     setFaceMessage("Kamerani oching va yuzingizni markazda ushlang.");
@@ -277,7 +276,13 @@ export default function DataAiPage() {
   const readiness = analysis?.readiness || 0;
 
   return (
-    <div className="p-8 max-w-7xl mx-auto fade-in">
+    <SecurityGate
+      scope="data-ai"
+      title="Data AI himoyalangan"
+      description="Bu bo'lim AI miyasi va ML xotirasi bo'lgani uchun Sozlanmalarda yoqilgan PIN, Face ID yoki Fingerprint bilan tasdiqlang."
+      requireSecurity
+    >
+      <div className="p-8 max-w-7xl mx-auto fade-in">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
           <div className="text-sm font-semibold text-accent mb-1.5 flex items-center gap-2">
@@ -405,7 +410,8 @@ export default function DataAiPage() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </SecurityGate>
   );
 }
 

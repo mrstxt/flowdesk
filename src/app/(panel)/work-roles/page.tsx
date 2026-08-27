@@ -13,7 +13,7 @@ import {
   PowerOff,
   Trash2,
 } from "lucide-react";
-import { formatCurrency, formatDateDisplay } from "@/lib/utils";
+import { formatCurrency, formatDateDisplay, todayISO } from "@/lib/utils";
 
 type WorkRole = {
   id: number;
@@ -107,6 +107,8 @@ export default function WorkRolesPage() {
     }
     return map;
   }, [reports]);
+  const today = todayISO();
+  const todayReports = reports.filter((report) => report.date === today);
 
   async function createRole(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -158,7 +160,7 @@ export default function WorkRolesPage() {
             Ish rollari
           </h1>
           <p className="text-slate-500 mt-1.5">
-            Ish joylari, rol vazifalari, oyliklar va bot so'raydigan kunlik hisobotlar
+            Har bir ishda nima qilinadi, qanday natija olinadi va kunlik hisobotlar
           </p>
         </div>
         <div className="rounded-3xl bg-slate-900 text-white px-5 py-4 flex items-center gap-3">
@@ -176,7 +178,7 @@ export default function WorkRolesPage() {
         <Metric icon={BriefcaseBusiness} title="Faol rollar" value={String(activeRoles.length)} />
         <Metric icon={BarChart3} title="Oylik jami" value={formatCurrency(monthlyTotal)} />
         <Metric icon={ClipboardList} title="Kunlik jami" value={formatCurrency(dailyTotal)} />
-        <Metric icon={MessageSquareText} title="Hisobotlar" value={String(reports.length)} />
+        <Metric icon={MessageSquareText} title="Bugungi hisobot" value={`${todayReports.length}/${activeRoles.length}`} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[410px_1fr] gap-5">
@@ -188,7 +190,7 @@ export default function WorkRolesPage() {
             <div>
               <h2 className="font-bold text-slate-900">Yangi ish roli</h2>
               <p className="text-xs text-slate-500">
-                Savollarni har qatorga bittadan yozing
+                Vazifa, ish uslubi va natija savollarini kiriting
               </p>
             </div>
           </div>
@@ -206,17 +208,17 @@ export default function WorkRolesPage() {
             <textarea
               name="description"
               className={`${fieldClass} min-h-20`}
-              placeholder="Rol haqida qisqa tavsif"
+              placeholder="Bu rolda nima maqsad bor va qaysi natija kutiladi?"
             />
             <textarea
               name="tasksText"
               className={`${fieldClass} min-h-32`}
-              placeholder={"Qilinadigan ishlar\nKontent reja tuzish\nMijozlarga javob berish\nHisobot topshirish"}
+              placeholder={"Nima qilishlar kerak\nKontent reja tuzish\nMijozlarga javob berish\nNatijani raqam bilan yozish"}
             />
             <textarea
               name="reportQuestions"
               className={`${fieldClass} min-h-36`}
-              placeholder={"Bot so'raydigan savollar\nBugun nima ish qildingiz?\nQanday natija chiqdi?\nQayerda to'xtalib qoldingiz?\nErtaga nima qilasiz?"}
+              placeholder={"Kunlik hisobot va natija savollari\nBugun nima ish qildingiz?\nQanday natija chiqdi?\nQaysi raqam o'sdi?\nErtaga nima qilasiz?"}
             />
             <button
               disabled={saving}
@@ -242,6 +244,13 @@ export default function WorkRolesPage() {
               {roles.map((role) => {
                 const active = role.active !== false;
                 const roleQuestions = questions(role.reportQuestions);
+                const roleReports = reports.filter(
+                  (report) => report.roleId === role.id
+                );
+                const latestReport = roleReports[0];
+                const reportedToday = roleReports.some(
+                  (report) => report.date === today
+                );
                 return (
                   <article
                     key={role.id}
@@ -263,6 +272,15 @@ export default function WorkRolesPage() {
                             }`}
                           >
                             {active ? "Faol" : "Faol emas"}
+                          </span>
+                          <span
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                              reportedToday
+                                ? "bg-blue-50 text-blue-700"
+                                : "bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {reportedToday ? "Bugun topshirildi" : "Hisobot kutilmoqda"}
                           </span>
                         </div>
                         <div className="text-xs text-slate-500 mt-1">
@@ -287,7 +305,7 @@ export default function WorkRolesPage() {
                     <div className="grid grid-cols-2 gap-3 mt-4">
                       <MiniStat title="Savollar" value={String(roleQuestions.length)} />
                       <MiniStat
-                        title="Hisobot"
+                        title="Jami hisobot"
                         value={String(reportCountByRole.get(role.id) || 0)}
                       />
                     </div>
@@ -302,6 +320,19 @@ export default function WorkRolesPage() {
                         </div>
                       </div>
                     )}
+
+                    <div className="mt-4">
+                      <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
+                        Kunlik natija
+                      </div>
+                      <div className="rounded-2xl bg-blue-50/70 p-3 text-xs text-blue-900 leading-relaxed">
+                        {latestReport
+                          ? `${formatDateDisplay(latestReport.date)}: ${
+                              latestReport.summary || "Hisobot saqlandi"
+                            }`
+                          : "Hali natija yo'q. Botda /ish_hisobot yuborilganda shu yer to'lib boradi."}
+                      </div>
+                    </div>
 
                     <div className="mt-4">
                       <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
