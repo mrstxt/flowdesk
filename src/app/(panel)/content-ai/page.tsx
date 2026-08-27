@@ -26,6 +26,7 @@ import {
   Trash2,
   UserRound,
   Wand2,
+  Zap,
 } from "lucide-react";
 import { Modal } from "@/components/Modal";
 
@@ -124,6 +125,38 @@ const contentPlan: Array<{
   type: string;
   score: number;
 }> = [];
+
+const growthFocus = [
+  {
+    title: "Bio va offer",
+    text: "Profil birinchi 5 soniyada kimga qanday natija berishini aniq aytishi kerak.",
+    status: "Profil data kutilmoqda",
+  },
+  {
+    title: "Hook laboratoriya",
+    text: "AI eng yaxshi retention bergan birinchi 2 soniya formulalarini ajratadi.",
+    status: "Reels insight kutilmoqda",
+  },
+  {
+    title: "Content pillar",
+    text: "Audience savollari va yaxshi ketgan mavzulardan 3-5 ta asosiy yo'nalish tuziladi.",
+    status: "Komment va benchmark kutilmoqda",
+  },
+  {
+    title: "Conversion CTA",
+    text: "Saqlash, izoh, DM yoki sotuvga olib boradigan bitta aniq chaqiriq tanlanadi.",
+    status: "Performance signal kutilmoqda",
+  },
+];
+
+const marketingActions = [
+  "Profil positioning audit",
+  "7 kunlik reels sprint",
+  "Hook A/B variantlar",
+  "Caption va CTA generator",
+  "Benchmark pattern extract",
+  "Kommentlardan kontent g'oya",
+];
 
 const pipeline = [
   {
@@ -542,12 +575,19 @@ export default function ContentAiPage() {
 
       {activeSection === "overview" && (
         <div className="fade-in">
-          <section className="mb-6 bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
-            <InstagramProfileCard
+          <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+              <InstagramProfileCard
+                profile={connectedProfile}
+                onConnect={openProfileModal}
+              />
+            </section>
+            <MarketingGrowthPanel
               profile={connectedProfile}
-              onConnect={openProfileModal}
+              inspirationCount={inspirationProfiles.length}
+              readiness={analysis?.readiness || 0}
             />
-          </section>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.05fr] gap-6 mb-6">
             <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
@@ -634,7 +674,24 @@ export default function ContentAiPage() {
       )}
 
       {activeSection === "profile" && (
-        <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6 mb-6 fade-in">
+        <div className="space-y-6 mb-6 fade-in">
+          <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6">
+            <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+              <InstagramProfileCard
+                profile={connectedProfile}
+                onConnect={openProfileModal}
+              />
+            </section>
+            <ProfileMirrorPanel
+              profile={connectedProfile}
+              mediaCount={media.length}
+              commentsCount={comments.length}
+              patternCount={winningPatterns.length}
+              onConnect={openProfileModal}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-6">
         <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
@@ -704,6 +761,7 @@ export default function ContentAiPage() {
             />
           )}
         </section>
+          </div>
         </div>
       )}
 
@@ -1476,6 +1534,178 @@ function InstagramProfileCard({
         ))}
       </div>
     </div>
+  );
+}
+
+function MarketingGrowthPanel({
+  profile,
+  inspirationCount,
+  readiness,
+}: {
+  profile: InstagramProfile | null;
+  inspirationCount: number;
+  readiness: number;
+}) {
+  return (
+    <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div>
+          <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+            Profil Growth Cockpit
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Profil marketingi, kontent pillar va reels growth qarorlari shu
+            joyda AI tomonidan boshqariladi.
+          </p>
+        </div>
+        <div className="w-10 h-10 rounded-2xl bg-accent-soft text-accent flex items-center justify-center">
+          <Zap className="w-5 h-5" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mb-5">
+        <MiniStat label="Profil" value={profile ? "1" : "0"} />
+        <MiniStat label="Benchmark" value={String(inspirationCount)} />
+        <MiniStat label="Readiness" value={`${readiness}%`} />
+      </div>
+
+      <div className="space-y-3 mb-5">
+        {growthFocus.map((item) => (
+          <div
+            key={item.title}
+            className="rounded-2xl border border-black/[0.06] dark:border-white/[0.08] bg-slate-50/70 dark:bg-slate-950 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-bold text-slate-900 dark:text-slate-100">
+                  {item.title}
+                </div>
+                <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1">
+                  {item.text}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-slate-400 border border-black/[0.06] dark:border-white/[0.08]">
+                {item.status}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {marketingActions.map((item) => (
+          <span
+            key={item}
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft/70 px-3 py-1.5 text-xs font-bold text-accent-ink dark:text-slate-100"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-accent" />
+            {item}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProfileMirrorPanel({
+  profile,
+  mediaCount,
+  commentsCount,
+  patternCount,
+  onConnect,
+}: {
+  profile: InstagramProfile | null;
+  mediaCount: number;
+  commentsCount: number;
+  patternCount: number;
+  onConnect: () => void;
+}) {
+  return (
+    <section className="bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] rounded-3xl p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div>
+          <h2 className="font-display text-xl font-extrabold text-slate-900 dark:text-slate-100">
+            Instagram profil ko'rinishi
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Profil shu sahifada klon ko'rinishida turadi, AI esa shu profilni
+            rivojlantirish uchun kontent va marketing qarorlarini chiqaradi.
+          </p>
+        </div>
+        <button
+          onClick={onConnect}
+          className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 dark:bg-white text-sm font-semibold text-white dark:text-slate-900 hover:opacity-90 transition-opacity"
+        >
+          <Camera className="w-4 h-4" />
+          {profile ? "Profilni yangilash" : "Profil ulash"}
+        </button>
+      </div>
+
+      <div className="rounded-[28px] border border-black/[0.08] dark:border-white/[0.1] bg-slate-50 dark:bg-slate-950 p-4">
+        <div className="rounded-[24px] bg-white dark:bg-slate-900 border border-black/[0.06] dark:border-white/[0.08] overflow-hidden">
+          <div className="h-12 border-b border-black/[0.06] dark:border-white/[0.08] flex items-center justify-between px-4">
+            <div className="font-bold text-slate-900 dark:text-slate-100">
+              {profile ? profile.username : "instagram"}
+            </div>
+            <div className="flex gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+            </div>
+          </div>
+          <div className="p-4">
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 rounded-full p-0.5 bg-gradient-to-br from-[#ff2d5d] via-[#ff9f0a] to-[#8f35d5] shrink-0">
+                <div className="w-full h-full rounded-full bg-white dark:bg-slate-900 p-1">
+                  {profile?.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={profile.avatarUrl}
+                      alt={profile.displayName || profile.username}
+                      className="w-full h-full rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                      <UserRound className="w-8 h-8" />
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4 flex-1 text-center">
+                <ProfileCount label="post" value={profile?.mediaCount || 0} />
+                <ProfileCount label="followers" value={profile?.followers || 0} />
+                <ProfileCount label="following" value={profile?.following || 0} />
+              </div>
+            </div>
+            <div className="mt-4">
+              <div className="font-bold text-slate-900 dark:text-slate-100">
+                {profile?.displayName || "Profil nomi"}
+              </div>
+              <p className="text-sm text-slate-500 dark:text-slate-400 leading-6 mt-1 whitespace-pre-wrap">
+                {profile?.bio ||
+                  "Bio, avatar va statistikalar profil ulangandan keyin shu yerda chiqadi."}
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-1 mt-4">
+              {Array.from({ length: 9 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="aspect-square rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-300 dark:text-slate-600"
+                >
+                  <Play className="w-4 h-4" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mt-4">
+        <MiniStat label="Media o'qildi" value={String(mediaCount)} />
+        <MiniStat label="Komment" value={String(commentsCount)} />
+        <MiniStat label="Pattern" value={String(patternCount)} />
+      </div>
+    </section>
   );
 }
 
