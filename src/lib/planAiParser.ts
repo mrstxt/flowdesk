@@ -15,16 +15,48 @@ export type ParsedPlan = {
 };
 
 /**
- * Matndan yoki transkripsiyadan o'zbekcha vaqt va vazifalarni ajratish
+ * Matndan sana (bugun yoki ertaga) ekanligini aniqlash
+ */
+export function detectPlanDate(
+  input: string,
+  currentHour: number = new Date().getHours()
+): { dateType: "today" | "tomorrow"; isExplicit: boolean } {
+  const lower = input.toLowerCase();
+  if (/(bugun|bugungi|bugunga)/i.test(lower)) {
+    return { dateType: "today", isExplicit: true };
+  }
+  if (/(ertag|ertangi|ertaga)/i.test(lower)) {
+    return { dateType: "tomorrow", isExplicit: true };
+  }
+  // Agar aniq aytilmagan bo'lsa: kechqurun 20:00 dan keyin ertangi kun, kunduzi esa bugungi kun
+  const defaultTomorrow = currentHour >= 20 || currentHour < 4;
+  return { dateType: defaultTomorrow ? "tomorrow" : "today", isExplicit: false };
+}
+
+/**
+ * Matndan yoki transkripsiyadan o'zbekcha vaqt va vazifalarni ajratish.
+ * MUHIM: Faqat haqiqiy rejalarni (vaqti bor yoki aniq reja strukturasi) oladi.
+ * Oddiy gap, savol yoki suhbatni reja deb qabul qilmaydi!
  */
 export function parseSpokenPlans(input: string): ParsedPlan[] {
   const results: ParsedPlan[] = [];
-  // Gaplar yoki vergul / 'va' orqali bo'lish
   const lines = input.split(/[\n,;]|\bva\b/gi);
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line.length < 3) continue;
+
+    const lower = line.toLowerCase();
+
+    // Savol, salom yoki xizmat gaplarini darhol o'tkazib yuborish
+    if (
+      /^(alo|salom|assalom|ha|yoq|yo'q|rahmat|xop|xo'p|nima|nimalar|qanaqa|qalay|qalesiz|manga tel|tel qil)/i.test(
+        lower
+      ) ||
+      /(kartada|balans|pulim|hisobim|savol|bormi|qancha|ozgartir|o'zgartir)/i.test(lower)
+    ) {
+      continue;
+    }
 
     // 09:00, 9:00, 09.00, 9-00, "soat 9 da", "soat 14 da", "14:30 da" formatlarini qidirish
     const timeMatch =
@@ -33,7 +65,6 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       line.match(/\b([0-2]?[0-9])\s*(?:da|gacha|yarimda)\b/i);
 
     let parsedTime: string | undefined;
-    let cleanTitle = line;
 
     if (timeMatch) {
       let rawTime = timeMatch[1].replace(".", ":").replace("-", ":");
@@ -51,22 +82,40 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
         const m = (parts[1] || "00").padStart(2, "0");
         parsedTime = `${h}:${m}`;
       }
-      cleanTitle = line.replace(timeMatch[0], "").replace(/\b(da|gacha|vaqtida|soat|yarimda|ertalab|kechqurun|tushlikda)\b/gi, "").trim();
     }
 
-    cleanTitle = cleanTitle
-      .replace(/^[-•*0-9.)\s]+/, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const hasExplicitPrefix = /^[-•*0-9.)\s]+/.test(line) || /^(reja|vazifa|ishim):/i.test(line);
 
-    // Salomlashish, tasdiq yoki bitta so'zli gaplarni reja deb olmaslik
-    if (/^(alo|salom|assalom|ha|yoq|yo'q|rahmat|xop|xo'p|nima|nimalar|qanaqa|qalay)$/i.test(cleanTitle)) {
+    // Agar aniq vaqti bo'lmasa VA punktlangan ro'yxat bo'lmasa -> bu reja emas, oddiy suhbat!
+    if (!parsedTime && !hasExplicitPrefix) {
       continue;
     }
 
-    const hasPlanKeywords = /(kerak|qilish|borish|uchrashuv|vazifa|ish|reja|tayyorlash|kitob|dars|mashq|zal|xarid|to'lov|ko'rish|yozish)/i.test(cleanTitle);
+    // Title ni tozalash: ortiqcha to'ldiruvchi so'zlarni olib tashlaymiz
+    let cleanTitle = line;
+    if (timeMatch) {
+      cleanTitle = cleanTitle.replace(timeMatch[0], "");
+    }
 
-    if (cleanTitle.length >= 2 && (Boolean(parsedTime) || hasPlanKeywords)) {
+    cleanTitle = cleanTitle
+      .replace(/\b(bugun|bugungi|bugunga|ertaga|ertangi)\b/gi, "")
+      .replace(/\b(soat\s*[0-2]?[0-9](?::[0-5][0-9])?)\b/gi, "")
+      .replace(/\b([0-2]?[0-9]\s*(?:yarim|yarimda|gacha|da))\b/gi, "")
+      .replace(/\b(da|gacha|vaqtida|soat|ertalab|kechqurun|tushlikda)\b/gi, "")
+      .replace(/\b(man|men|menga|manga|biz|bizga)\b/gi, "")
+      .replace(/\b(kerakda|kerak|lozim|shart|kerak edi)\b/gi, "")
+      .replace(/^[-•*0-9.)\s]+/, "")
+      .replace(/^(reja|vazifa|ishim):\s*/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Agar fe'l shakli bo'lsa (oqishim -> o'qish, borishim -> borish)
+    cleanTitle = cleanTitle
+      .replace(/\boqishim\b/gi, "kitob o'qish")
+      .replace(/\bborishim\b/gi, "borish")
+      .replace(/\bqilishim\b/gi, "qilish");
+
+    if (cleanTitle.length >= 3) {
       results.push({
         time: parsedTime,
         title: cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1),

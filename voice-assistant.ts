@@ -17,7 +17,11 @@ import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage } from "telegram/events";
 import { generateUzbekSpeechAudio } from "./src/lib/callService";
-import { parseSpokenPlans, saveParsedPlansToDb } from "./src/lib/planAiParser";
+import {
+  parseSpokenPlans,
+  saveParsedPlansToDb,
+  detectPlanDate,
+} from "./src/lib/planAiParser";
 import { db } from "./src/db";
 import { cards, tasks, routines, sleepLogs, settings } from "./src/db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
@@ -363,7 +367,8 @@ async function runWorker() {
     }
 
     // G) Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
-    const isToday = /(bugun|bugungi)/i.test(clean);
+    const { dateType } = detectPlanDate(clean, new Date().getHours());
+    const isToday = dateType === "today";
     const targetDate = isToday ? todayISO : tomorrowISO;
     const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";
 

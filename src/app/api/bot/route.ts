@@ -31,6 +31,7 @@ import {
   parseSpokenPlans,
   saveParsedPlansToDb,
   transcribeTelegramVoice,
+  detectPlanDate,
 } from "@/lib/planAiParser";
 import { sendVoiceAlert } from "@/lib/callService";
 
@@ -2837,32 +2838,37 @@ export async function POST(req: Request) {
         }
 
         const plans = speechText ? parseSpokenPlans(speechText) : [];
-        const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
+        const { dateType } = speechText ? detectPlanDate(speechText) : { dateType: "tomorrow" as const };
+        const isToday = dateType === "today";
+        const targetDate = isToday
+          ? todayDateISO()
+          : new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
+        const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";
 
         if (plans.length > 0) {
-          const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, tomorrow);
+          const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, targetDate);
           let report = speechText
-            ? `🎙️ <i>"${speechText}"</i>\n\n✅ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nErtangi kun (<b>${tomorrow}</b>) uchun saqlandi:\n`
-            : `✅ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nErtangi kun (<b>${tomorrow}</b>) uchun saqlandi:\n`;
+            ? `🎙️ <i>"${speechText}"</i>\n\n✅ <b>Qabul qilindi!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n`
+            : `✅ <b>Qabul qilindi!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n`;
           plans.forEach((p, i) => {
             report += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
           });
-          report += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Ertaga vaqtida telefon qilib eslataman!`;
+          report += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda eslatib turaman!`;
           await sendMessage(chatId, report, { reply_markup: MAIN_KEYBOARD });
-          sendVoiceAlert(chatId, `Ovozli xabaringiz qabul qilindi Sohibjon! ${savedTasks} ta vazifa platformaga saqlandi.`).catch(console.error);
+          sendVoiceAlert(chatId, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun saqlab qo'ydim.`).catch(console.error);
         } else if (speechText) {
           const handled = await handleAssistantVoiceOrTextQuery(chatId, speechText);
           if (!handled) {
             await sendMessage(
               chatId,
-              `🎙️ <i>"${speechText}"</i>\n\nBu ovozli xabaringizda aniq reja yoki savol tushunilmadi. Masalan: <i>"Ertaga 09:00 da bank, 14:00 da hisobot"</i> yoki <i>"Kartada qancha pul bor?"</i> deb yuborsangiz, darhol javob beraman! 🚀`,
+              `🎙️ <i>"${speechText}"</i>\n\nBu ovozli xabaringizda aniq reja yoki savol tushunilmadi. Masalan: <i>"Bugun 18:00 da kitob o'qish"</i> yoki <i>"Kartada qancha pul bor?"</i> deb yuborsangiz, darhol javob beraman! 🚀`,
               { reply_markup: MAIN_KEYBOARD }
             );
           }
         } else {
           await sendMessage(
             chatId,
-            "🎙️ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nAgar bu ertangi rejalar bo'lsa, iltimos, matn sifatida ham vaqtlari bilan (masalan: <i>09:00 bank, 14:00 hisobot</i>) yozib yuborsangiz, darhol platformaga tushiraman! 🚀",
+            "🎙️ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nAgar bu reja bo'lsa, iltimos, matn sifatida ham vaqtlari bilan (masalan: <i>09:00 bank, 14:00 hisobot</i>) yozib yuborsangiz, darhol platformaga tushiraman! 🚀",
             { reply_markup: MAIN_KEYBOARD }
           );
         }
@@ -2874,15 +2880,21 @@ export async function POST(req: Request) {
       // 1. Agar matnda reja/vaqtlar bo'lsa (erkin reja kiritish)
       const textPlans = parseSpokenPlans(msg.text.trim());
       if (textPlans.length > 0 && !msg.text.startsWith("/") && !["➕ Chiqim", "➕ Kirim", "📦 Buyurtma", "📋 Ishlar", "📊 Hisob", "🎯 Maqsad", "📚 Kitob", "🎬 Video", "⚙️ Sozlamalar", "🔁 Reja", "⏰ Uyg'onish"].includes(msg.text.trim())) {
-        const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
-        const { savedTasks, savedRoutines } = await saveParsedPlansToDb(textPlans, tomorrow);
-        let report = `✅ <b>Qabul qilindi Sohibjon!</b>\n\nErtangi kun (<b>${tomorrow}</b>) uchun platformaga saqlandi:\n`;
+        const { dateType } = detectPlanDate(msg.text.trim());
+        const isToday = dateType === "today";
+        const targetDate = isToday
+          ? todayDateISO()
+          : new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
+        const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";
+
+        const { savedTasks, savedRoutines } = await saveParsedPlansToDb(textPlans, targetDate);
+        let report = `✅ <b>Qabul qilindi Sohibjon!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun platformaga saqlandi:\n`;
         textPlans.forEach((p, i) => {
           report += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
         });
-        report += `\n📊 ${savedTasks} ta vazifa kiritildi. Ertaga vaqti kelganda telefon qilib eslataman! 🚀`;
+        report += `\n📊 ${savedTasks} ta vazifa kiritildi. Vaqti kelganda telefon qilib eslataman! 🚀`;
         await sendMessage(chatId, report, { reply_markup: MAIN_KEYBOARD });
-        sendVoiceAlert(chatId, `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga yozib qo'ydim.`).catch(console.error);
+        sendVoiceAlert(chatId, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun yozib qo'ydim.`).catch(console.error);
         return NextResponse.json({ ok: true });
       }
 
