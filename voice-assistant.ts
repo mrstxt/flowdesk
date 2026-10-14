@@ -400,7 +400,8 @@ async function runWorker() {
     }
 
     // G) Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
-    const { dateType } = detectPlanDate(clean, new Date().getHours());
+    const tashkentHour = Math.floor(getTashkentTimeString().minutes / 60);
+    const { dateType } = detectPlanDate(clean, tashkentHour);
     const isToday = dateType === "today";
     const targetDate = isToday ? todayISO : tomorrowISO;
     const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";

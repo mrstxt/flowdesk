@@ -15,11 +15,15 @@ export type ParsedPlan = {
 };
 
 /**
- * Matndan sana (bugun yoki ertaga) ekanligini aniqlash
+ * Matndan sana (bugun yoki ertaga) ekanligini aniqlash.
+ * Qat'iy qoida:
+ * 1. Agar "bugun" deb aytilsa — soat 00:00 dan 23:59 gacha qat'iy ravishda BUGUN (todayISO).
+ * 2. Agar "ertaga" deb aytilsa — qat'iy ravishda ERTAGA (tomorrowISO).
+ * 3. Agar sana aytilmasa — Toshkent vaqti bilan 00:00 dan 20:00 gacha bugun, 20:00 dan keyin ertaga.
  */
 export function detectPlanDate(
   input: string,
-  currentHour: number = new Date().getHours()
+  currentHour?: number
 ): { dateType: "today" | "tomorrow"; isExplicit: boolean } {
   const lower = input.toLowerCase();
   if (/(bugun|bugungi|bugunga)/i.test(lower)) {
@@ -28,8 +32,21 @@ export function detectPlanDate(
   if (/(ertag|ertangi|ertaga)/i.test(lower)) {
     return { dateType: "tomorrow", isExplicit: true };
   }
-  // Agar aniq aytilmagan bo'lsa: kechqurun 20:00 dan keyin ertangi kun, kunduzi esa bugungi kun
-  const defaultTomorrow = currentHour >= 20 || currentHour < 4;
+
+  // Toshkent vaqti bo'yicha soatni aniqlash
+  let hour = currentHour;
+  if (hour === undefined) {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Tashkent",
+      hour: "numeric",
+      hour12: false,
+    });
+    hour = parseInt(formatter.format(now), 10) || 0;
+  }
+
+  // 00:00 dan 19:59 gacha bugun, faqat kechki 20:00 dan 23:59 gacha ertaga deb qabul qilinadi
+  const defaultTomorrow = hour >= 20;
   return { dateType: defaultTomorrow ? "tomorrow" : "today", isExplicit: false };
 }
 
