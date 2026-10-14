@@ -23,12 +23,88 @@ import {
   detectPlanDate,
 } from "./src/lib/planAiParser";
 import { db } from "./src/db";
-import { cards, tasks, routines, sleepLogs, settings } from "./src/db/schema";
+import {
+  cards,
+  tasks,
+  routines,
+  sleepLogs,
+  settings,
+  orders,
+  videos,
+  incomes,
+  expenses,
+} from "./src/db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
 import { getCardAvailableBalance } from "./src/lib/cardActions";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import * as http from "http";
+
+async function fetchYouTubeTitle(url: string): Promise<string> {
+  try {
+    const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(3000) });
+    const data = await res.json();
+    if (data && data.title) return data.title;
+  } catch {}
+  return "YouTube video";
+}
+
+function parseOrderDetails(input: string, todayISO: string, tomorrowISO: string): { title: string; clientName: string | null; amount: number; deadline: string | null } | null {
+  // 1. Amount
+  let amount = 0;
+  const usdMatch = input.match(/(\d+(?:[.,]\d+)?)\s*(?:\$|dollar|usd)/i);
+  if (usdMatch) {
+    amount = parseFloat(usdMatch[1].replace(",", ".")) * 12800;
+  } else {
+    const sumMatch = input.match(/(\d+[\d\s.,]*)\s*(ming|mln|million)?\s*(?:so'?m|sum)?/i);
+    if (sumMatch) {
+      let num = parseFloat(sumMatch[1].replace(/[\s,]/g, ""));
+      if (/ming/i.test(sumMatch[2] || "")) num *= 1000;
+      if (/mln|million/i.test(sumMatch[2] || "")) num *= 1000000;
+      if (num > 0) amount = num;
+    }
+  }
+
+  // 2. Deadline
+  let deadline: string | null = null;
+  const monthNames: Record<string, string> = {
+    yanvar: "01", fevral: "02", mart: "03", aprel: "04", may: "05", iyun: "06",
+    iyul: "07", avgust: "08", sentabr: "09", oktyabr: "10", noyabr: "11", dekabr: "12",
+  };
+  const monthMatch = input.match(/(\d{1,2})[-. ]?(yanvar|fevral|mart|aprel|may|iyun|iyul|avgust|sentabr|oktyabr|noyabr|dekabr)/i);
+  if (monthMatch) {
+    const day = monthMatch[1].padStart(2, "0");
+    const m = monthNames[monthMatch[2].toLowerCase()] || "10";
+    const year = new Date().getFullYear();
+    deadline = `${year}-${m}-${day}`;
+  } else if (/ertag/i.test(input)) {
+    deadline = tomorrowISO;
+  } else if (/bugun/i.test(input)) {
+    deadline = todayISO;
+  }
+
+  // 3. Client Name
+  let clientName: string | null = null;
+  const clientMatch = input.match(/(?:uchun|mijoz|ism|buyurtmachi|klient)\s+([A-ZА-ЯЁa-zа-яё']+)/i) ||
+                      input.match(/([A-ZА-ЯЁ][a-zа-яё']+)\s+(?:uchun|ga)/i);
+  if (clientMatch) {
+    clientName = clientMatch[1].trim();
+  }
+
+  // 4. Title
+  let title = input;
+  title = title.replace(/(?:ish qiberish kerak|buyurtma|zakaz|mijoz|narxi|narx)/gi, "")
+               .replace(/(\d+[\d\s.,]*)\s*(?:ming|mln|million)?\s*(?:so'?m|sum|\$|dollar|usd)?/gi, "")
+               .replace(/(\d{1,2})[-. ]?(?:yanvar|fevral|mart|aprel|may|iyun|iyul|avgust|sentabr|oktyabr|noyabr|dekabr)(?:gacha|ga)?/gi, "")
+               .replace(/(?:ertagacha|bugungacha|ertaga|bugun)/gi, "")
+               .replace(/(?:uchun|ga|da|kerak|shunday qilish kerak|qilish kerak)/gi, "")
+               .trim();
+  if (clientName) title = title.replace(new RegExp(clientName, "gi"), "").trim();
+  title = title.replace(/^[-:, ]+|[-:, ]+$/g, "");
+  if (!title || title.length < 3) title = "Mijoz buyurtmasi";
+
+  return { title, clientName, amount, deadline };
+}
 
 function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
   const now = new Date();
@@ -290,6 +366,121 @@ async function runWorker() {
       await client.sendMessage(replyPeer, { message: reply });
       await sendVoiceNote(client, replyPeer, "Eshitaman Sohibjon, men tayyorman! Qanday yordam bera olaman?");
       return;
+    }
+
+    // A.3) YouTube Video havolasi
+    const ytMatch = clean.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
+    if (ytMatch) {
+      console.log("🎬 YouTube video aniqlandi...");
+      const videoId = ytMatch[1];
+      const fullUrl = ytMatch[0].startsWith("http") ? ytMatch[0] : `https://${ytMatch[0]}`;
+      const videoTitle = await fetchYouTubeTitle(fullUrl);
+
+      const tashkentMinutes = getTashkentTimeString().minutes;
+      const tashkentH = Math.floor(tashkentMinutes / 60);
+      const isTomorrowPreferred = /(ertag|ertangi)/i.test(q) || tashkentH >= 20;
+      const targetDate = isTomorrowPreferred ? tomorrowISO : todayISO;
+      const dateLabel = isTomorrowPreferred ? "Ertangi kun" : "Bugungi kun";
+
+      try {
+        await db.insert(videos).values({
+          title: videoTitle,
+          url: fullUrl,
+          videoId,
+          category: "other",
+          watched: false,
+        });
+
+        await db.insert(tasks).values({
+          title: `🎬 Video ko'rish: ${videoTitle}`,
+          date: targetDate,
+          category: "development",
+        });
+
+        const reply = `🎬 <b>YouTube video Rivojlanishga saqlandi!</b>\n\n📌 <b>${videoTitle}</b>\n🔗 <a href="${fullUrl}">Videoni ochish</a>\n\n⏰ <b>Rejaga qo'shildi:</b> ${dateLabel} (<b>${targetDate}</b>) bo'sh vaqtingizga kiritildi! 🚀`;
+        await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+        await sendVoiceNote(client, replyPeer, `Sohibjon, YouTube videoni saqlab qo'ydim. Uni ${dateLabel.toLowerCase()} bo'sh vaqtingizda ko'rish uchun rejalarga qo'shdim.`);
+      } catch (e) {
+        console.error("Video saqlash xatoligi:", e);
+      }
+      return;
+    }
+
+    // A.4) Buyurtma / Mijoz ishlari
+    if (/(buyurtma|zakaz|mijoz|ish qiberish|proyekt|klient|uchun logo|uchun sayt|uchun dizayn)/i.test(q) && /(narx|so'?m|\$|dollar|ming|sum|mln|gacha|deadline|\d)/i.test(q)) {
+      console.log("💼 Yangi buyurtma aniqlandi...");
+      const order = parseOrderDetails(clean, todayISO, tomorrowISO);
+      if (order && (order.amount > 0 || order.clientName)) {
+        try {
+          await db.insert(orders).values({
+            title: order.title,
+            clientName: order.clientName,
+            amount: String(order.amount),
+            deadline: order.deadline,
+            stage: "new",
+            paymentType: "cash",
+            description: clean,
+          });
+
+          const reply = `💼 <b>Yangi buyurtma qabul qilindi va saqlandi!</b>\n\n👤 <b>Mijoz:</b> ${order.clientName || "Ko'rsatilmagan"}\n📌 <b>Buyurtma:</b> ${order.title}\n💰 <b>Narxi:</b> ${fmt(order.amount)}${order.deadline ? `\n📅 <b>Muddati (Deadline):</b> ${order.deadline}` : ""}\n\nDashboard Buyurtmalar bo'limida ko'rishingiz mumkin! 🚀`;
+          await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+          await sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Yangi buyurtmani tizimga saqlab qo'ydim.`);
+          return;
+        } catch (e) {
+          console.error("Buyurtma saqlash xatoligi:", e);
+        }
+      }
+    }
+
+    // A.5) Chiqim qo'shish ("Chiqim 50000 tushlik", "Tushlikka 30000 ketdi")
+    const expenseMatch = clean.match(/(?:chiqim|harajat|xarajat)\s*(\d[\d\s.,]*)\s*(?:so'?m|sum)?\s*(.*)/i) ||
+                         clean.match(/(\d[\d\s.,]*)\s*(?:so'?m|sum)?\s*(?:tushlik|taksi|bozor|yo'?lkira|ovqat|choyxona|kafe|benzin|dorixona|aptek)/i);
+    if (expenseMatch) {
+      const amtStr = expenseMatch[1].replace(/[\s,]/g, "");
+      let amt = parseFloat(amtStr);
+      if (/ming/i.test(clean)) amt *= 1000;
+      if (amt > 0) {
+        const desc = expenseMatch[2]?.trim() || clean.replace(/\d+/g, "").trim() || "Xarajat";
+        try {
+          await db.insert(expenses).values({
+            title: desc,
+            amount: String(amt),
+            date: todayISO,
+            category: "other",
+          });
+          const reply = `💸 <b>Chiqim saqlandi:</b> ${fmt(amt)}\n📝 <b>Izoh:</b> ${desc}`;
+          await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+          await sendVoiceNote(client, replyPeer, `${fmt(amt)} chiqim bazaga kiritildi.`);
+          return;
+        } catch (e) {
+          console.error("Chiqim saqlash xatoligi:", e);
+        }
+      }
+    }
+
+    // A.6) Kirim qo'shish ("Kirim 1000000 oylik", "Oylik tushdi 2000000")
+    const incomeMatch = clean.match(/(?:kirim|daromad|foyda|tushum)\s*(\d[\d\s.,]*)\s*(?:so'?m|sum)?\s*(.*)/i);
+    if (incomeMatch) {
+      const amtStr = incomeMatch[1].replace(/[\s,]/g, "");
+      let amt = parseFloat(amtStr);
+      if (/ming/i.test(clean)) amt *= 1000;
+      if (amt > 0) {
+        const desc = incomeMatch[2]?.trim() || "Daromad";
+        try {
+          await db.insert(incomes).values({
+            title: desc,
+            amount: String(amt),
+            date: todayISO,
+            source: "other",
+          });
+          const reply = `💰 <b>Kirim saqlandi:</b> ${fmt(amt)}\n📝 <b>Izoh:</b> ${desc}`;
+          await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+          await sendVoiceNote(client, replyPeer, `${fmt(amt)} daromad qabul qilindi.`);
+          return;
+        } catch (e) {
+          console.error("Kirim saqlash xatoligi:", e);
+        }
+      }
     }
 
     // B) Uyg'onish vaqtini o'zgartirish ("5:30 da turishim kerak", "soat 6 da uyg'ot")
