@@ -19,30 +19,39 @@ export type ParsedPlan = {
  */
 export function parseSpokenPlans(input: string): ParsedPlan[] {
   const results: ParsedPlan[] = [];
+  // Gaplar yoki vergul / 'va' orqali bo'lish
   const lines = input.split(/[\n,;]|\bva\b/gi);
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line.length < 3) continue;
 
-    // 09:00 yoki 9:00 yoki "soat 9 da" yoki "14:30 da" formatlarini qidirish
+    // 09:00, 9:00, 09.00, 9-00, "soat 9 da", "soat 14 da", "14:30 da" formatlarini qidirish
     const timeMatch =
-      line.match(/(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)/) ||
-      line.match(/soat\s*([0-2]?[0-9])(?::([0-5][0-9]))?/i);
+      line.match(/(\b[0-2]?[0-9][:.-][0-5][0-9]\b)/) ||
+      line.match(/soat\s*([0-2]?[0-9])(?::([0-5][0-9]))?/i) ||
+      line.match(/\b([0-2]?[0-9])\s*(?:da|gacha|yarimda)\b/i);
 
     let parsedTime: string | undefined;
     let cleanTitle = line;
 
     if (timeMatch) {
-      let rawTime = timeMatch[1].replace(".", ":");
+      let rawTime = timeMatch[1].replace(".", ":").replace("-", ":");
       if (!rawTime.includes(":")) {
-        const min = timeMatch[2] || "00";
-        rawTime = `${rawTime.padStart(2, "0")}:${min}`;
-      } else if (rawTime.length === 4) {
-        rawTime = `0${rawTime}`;
+        const hourNum = parseInt(rawTime, 10);
+        if (!isNaN(hourNum) && hourNum >= 0 && hourNum <= 24) {
+          const isHalf = line.toLowerCase().includes("yarim");
+          const min = isHalf ? "30" : "00";
+          rawTime = `${String(hourNum).padStart(2, "0")}:${min}`;
+          parsedTime = rawTime;
+        }
+      } else {
+        const parts = rawTime.split(":");
+        const h = parts[0].padStart(2, "0");
+        const m = (parts[1] || "00").padStart(2, "0");
+        parsedTime = `${h}:${m}`;
       }
-      parsedTime = rawTime;
-      cleanTitle = line.replace(timeMatch[0], "").replace(/\b(da|gacha|vaqtida|soat)\b/gi, "").trim();
+      cleanTitle = line.replace(timeMatch[0], "").replace(/\b(da|gacha|vaqtida|soat|yarimda|ertalab|kechqurun|tushlikda)\b/gi, "").trim();
     }
 
     cleanTitle = cleanTitle
@@ -97,3 +106,55 @@ export async function saveParsedPlansToDb(
 
   return { savedTasks, savedRoutines };
 }
+
+/**
+ * Telegram ovozli xabarini yuklab olib, Gemini orqali o'zbekcha matnga aylantirish (Transcribe)
+ */
+export async function transcribeTelegramVoice(fileId: string, botToken: string): Promise<string | null> {
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  if (!geminiApiKey || !botToken || !fileId) return null;
+
+  try {
+    // 1. Fayl yo'lini Telegram dan olish
+    const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+    const fileData = await fileRes.json();
+    if (!fileData.ok || !fileData.result?.file_path) return null;
+
+    // 2. Audio faylni yuklab olish
+    const audioRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`);
+    const arrayBuffer = await audioRes.arrayBuffer();
+    const base64Audio = Buffer.from(arrayBuffer).toString("base64");
+
+    // 3. Gemini 2.5 Flash / 1.5 Flash ga yuborish
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: "Sen o'zbek tilidagi audio xabarlarni juda aniq matnga aylantiruvchi yordamchisan. Ushbu ovozli xabarda aytilgan gaplarni aynan o'zbek tilida yozib ber. Hech qanday boshqa izoh, xulosa yoki belgi qo'shma, faqatgina aytilgan gaplarni matnini qaytar.",
+              },
+              {
+                inline_data: {
+                  mime_type: "audio/ogg",
+                  data: base64Audio,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text ? text.trim() : null;
+  } catch (err) {
+    console.error("Gemini voice transcribe error:", err);
+    return null;
+  }
+}
+

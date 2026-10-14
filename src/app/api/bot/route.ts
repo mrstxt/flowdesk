@@ -27,6 +27,12 @@ import {
   getPrimaryCard,
   getCardAvailableBalance,
 } from "@/lib/cardActions";
+import {
+  parseSpokenPlans,
+  saveParsedPlansToDb,
+  transcribeTelegramVoice,
+} from "@/lib/planAiParser";
+import { sendVoiceAlert } from "@/lib/callService";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -2695,41 +2701,98 @@ export async function POST(req: Request) {
 
       if (msg.video && !msg.video_note) {
         const state = userState.get(chatId);
-      if (state?.mode === "result_response") {
-        const fileId = msg.video.file_id;
-        const today = todayDateISO();
-        try {
-          const [existing] = await db
-            .select()
-            .from(dailyResults)
-            .where(eq(dailyResults.date, today))
-            .limit(1);
-          if (existing) {
-            await db
-              .update(dailyResults)
-              .set({ videoFileId: fileId, responseType: "video" })
-              .where(eq(dailyResults.id, existing.id));
-          } else {
-            await db.insert(dailyResults).values({
-              date: today,
-              videoFileId: fileId,
-              responseType: "video",
-            });
+        if (state?.mode === "result_response") {
+          const fileId = msg.video.file_id;
+          const today = todayDateISO();
+          try {
+            const [existing] = await db
+              .select()
+              .from(dailyResults)
+              .where(eq(dailyResults.date, today))
+              .limit(1);
+            if (existing) {
+              await db
+                .update(dailyResults)
+                .set({ videoFileId: fileId, responseType: "video" })
+                .where(eq(dailyResults.id, existing.id));
+            } else {
+              await db.insert(dailyResults).values({
+                date: today,
+                videoFileId: fileId,
+                responseType: "video",
+              });
+            }
+            await finishWizard(chatId);
+            await sendMessage(
+              chatId,
+              "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
+              { reply_markup: MAIN_KEYBOARD }
+            );
+          } catch (e) {
+            console.error("video save error:", e);
           }
-          await finishWizard(chatId);
+          return NextResponse.json({ ok: true });
+        }
+      }
+      // Ovozli xabarlar (Voice note / Audio)
+      if (msg.voice || msg.audio) {
+        const fileId = msg.voice?.file_id || msg.audio?.file_id;
+        let speechText = msg.caption || "";
+
+        // Agar GEMINI_API_KEY bo'lsa, Telegram ovozli xabarni bevosita matnga o'giramiz
+        if (!speechText && fileId && TOKEN) {
+          try {
+            const transcribed = await transcribeTelegramVoice(fileId, TOKEN);
+            if (transcribed) {
+              speechText = transcribed;
+            }
+          } catch (e) {
+            console.error("Transcribe failed:", e);
+          }
+        }
+
+        const plans = speechText ? parseSpokenPlans(speechText) : [];
+        const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
+
+        if (plans.length > 0) {
+          const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, tomorrow);
+          let report = speechText
+            ? `🎙️ <i>"${speechText}"</i>\n\n✅ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nErtangi kun (<b>${tomorrow}</b>) uchun saqlandi:\n`
+            : `✅ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nErtangi kun (<b>${tomorrow}</b>) uchun saqlandi:\n`;
+          plans.forEach((p, i) => {
+            report += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
+          });
+          report += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Ertaga vaqtida telefon qilib eslataman!`;
+          await sendMessage(chatId, report, { reply_markup: MAIN_KEYBOARD });
+          sendVoiceAlert(chatId, `Ovozli xabaringiz qabul qilindi Sohibjon! ${savedTasks} ta vazifa platformaga saqlandi.`).catch(console.error);
+        } else {
           await sendMessage(
             chatId,
-            "🎥 Video saqlandi! Analitika sahifasida ko'rishingiz mumkin. Ertaga yaxshiroq harakat qiling! 💪",
+            speechText
+              ? `🎙️ <i>"${speechText}"</i>\n\nBu ovozli xabaringizda aniq vaqt yoki reja topilmadi. Masalan: <i>"Ertaga 09:00 da bank, 14:00 da hisobot"</i> deb yuborsangiz, darhol platformaga tushiraman! 🚀`
+              : "🎙️ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nAgar bu ertangi rejalar bo'lsa, iltimos, matn sifatida ham vaqtlari bilan (masalan: <i>09:00 bank, 14:00 hisobot</i>) yozib yuborsangiz, darhol platformaga tushiraman! 🚀",
             { reply_markup: MAIN_KEYBOARD }
           );
-        } catch (e) {
-          console.error("video save error:", e);
         }
         return NextResponse.json({ ok: true });
       }
-    }
 
       if (!msg.text) return NextResponse.json({ ok: true });
+
+      // Agar matnda reja/vaqtlar bo'lsa (erkin reja kiritish)
+      const textPlans = parseSpokenPlans(msg.text.trim());
+      if (textPlans.length > 0 && !msg.text.startsWith("/") && !["➕ Chiqim", "➕ Kirim", "📦 Buyurtma", "📋 Ishlar", "📊 Hisob", "🎯 Maqsad", "📚 Kitob", "🎬 Video", "⚙️ Sozlamalar", "🔁 Reja", "⏰ Uyg'onish"].includes(msg.text.trim())) {
+        const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
+        const { savedTasks, savedRoutines } = await saveParsedPlansToDb(textPlans, tomorrow);
+        let report = `✅ <b>Qabul qilindi Sohibjon!</b>\n\nErtangi kun (<b>${tomorrow}</b>) uchun platformaga saqlandi:\n`;
+        textPlans.forEach((p, i) => {
+          report += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
+        });
+        report += `\n📊 ${savedTasks} ta vazifa kiritildi. Ertaga vaqti kelganda telefon qilib eslataman! 🚀`;
+        await sendMessage(chatId, report, { reply_markup: MAIN_KEYBOARD });
+        sendVoiceAlert(chatId, `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga yozib qo'ydim.`).catch(console.error);
+        return NextResponse.json({ ok: true });
+      }
 
       await handleCommand(chatId, msg.text.trim(), msg.message_id);
     } finally {
