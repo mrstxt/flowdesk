@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { verifyCaptchaChallenge } from "@/lib/auth";
 import { parseProfileCookie } from "@/lib/instagram";
 
 export const dynamic = "force-dynamic";
@@ -22,17 +21,7 @@ function readProfile(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const verified = await verifyCaptchaChallenge(
-    String(body.captchaToken || ""),
-    String(body.captchaAnswer || "")
-  );
 
-  if (!verified) {
-    return NextResponse.json(
-      { error: "Verification javobi noto'g'ri yoki muddati o'tgan" },
-      { status: 400 }
-    );
-  }
 
   const profile = readProfile(req);
   const inspirations = Array.isArray(body.inspirationProfiles)

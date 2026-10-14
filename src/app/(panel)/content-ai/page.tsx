@@ -307,11 +307,6 @@ export default function ContentAiPage() {
   );
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [trainModal, setTrainModal] = useState(false);
-  const [trainChallenge, setTrainChallenge] = useState({
-    question: "",
-    token: "",
-  });
-  const [trainAnswer, setTrainAnswer] = useState("");
   const [trainError, setTrainError] = useState("");
   const [trainLoading, setTrainLoading] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -504,19 +499,7 @@ export default function ContentAiPage() {
     );
   }
 
-  async function loadTrainChallenge() {
-    const res = await fetch("/api/auth/challenge");
-    const data = await res.json();
-    setTrainChallenge({
-      question: data.question || "",
-      token: data.token || "",
-    });
-    setTrainAnswer("");
-    setTrainError("");
-  }
-
   async function openTrainModal() {
-    await loadTrainChallenge();
     setTrainModal(true);
   }
 
@@ -529,8 +512,6 @@ export default function ContentAiPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        captchaToken: trainChallenge.token,
-        captchaAnswer: trainAnswer,
         inspirationProfiles,
         mediaCount: media.length,
         commentsCount: comments.length,
@@ -541,7 +522,6 @@ export default function ContentAiPage() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setTrainError(data.error || "Tahlilni tasdiqlashda xatolik yuz berdi");
-      await loadTrainChallenge();
       setTrainLoading(false);
       return;
     }
@@ -1475,44 +1455,16 @@ export default function ContentAiPage() {
         title="ML tahlilni tasdiqlash"
       >
         <form onSubmit={runVerifiedAnalysis} className="space-y-4">
-          <div className="rounded-2xl bg-[#fff4d8] border border-[#ff9f0a]/15 p-4">
-            <p className="text-sm text-slate-600 leading-6">
-              Bu amal Content AI xotirasini yangilaydi. Tahlil verified bo'lishi
-              uchun robot emasligingizni tasdiqlang.
+          <div className="rounded-2xl bg-accent-soft border border-accent/15 p-4">
+            <p className="text-sm text-slate-700 dark:text-slate-300 leading-6">
+              Bu amal barcha kiritilgan ilhom profillari, media va kommentlar asosida Content AI tahlilini yangilaydi.
             </p>
           </div>
 
-          <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Verification
-            </label>
-            <div className="flex items-center gap-2 mt-2">
-              <div className="px-4 py-3 rounded-full bg-slate-100 dark:bg-slate-800 text-sm font-bold text-slate-700 dark:text-slate-200 min-w-28 text-center">
-                {trainChallenge.question || "..."}
-              </div>
-              <input
-                value={trainAnswer}
-                onChange={(e) => {
-                  setTrainAnswer(e.target.value);
-                  setTrainError("");
-                }}
-                inputMode="numeric"
-                placeholder="Javob"
-                required
-                className="min-w-0 flex-1 rounded-full border border-black/[0.07] dark:border-white/[0.09] bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-4 focus:ring-accent/10 focus:border-accent"
-              />
-              <button
-                type="button"
-                onClick={loadTrainChallenge}
-                className="w-11 h-11 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-accent transition-colors flex items-center justify-center"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-            </div>
-            {trainError && (
-              <div className="text-sm text-red-500 mt-2">{trainError}</div>
-            )}
-          </div>
+          {trainError && (
+            <div className="text-sm text-red-500">{trainError}</div>
+          )}
+
 
           <div className="grid grid-cols-2 gap-2">
             <MiniStat label="Profil" value={connectedProfile ? "1" : "0"} />
