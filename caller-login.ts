@@ -53,9 +53,23 @@ async function main() {
   console.log("\n📲 Telegram profilingizga ulanilmoqda...");
 
   await client.start({
-    phoneNumber: async () => await ask("Ikkinchi profil telefon raqami (+998...): "),
-    password: async () => await ask("Ikki bosqichli parol (agar bo'lsa, yo'q bo'lsa Enter): "),
-    phoneCode: async () => await ask("Telegramdan kelgan SMS kod: "),
+    phoneNumber: async () => {
+      const raw = await ask("Ikkinchi profil telefon raqami (masalan: +998901234567): ");
+      let cleaned = raw.trim().replace(/[^0-9+]/g, "");
+      if (!cleaned.startsWith("+")) {
+        cleaned = `+${cleaned}`;
+      }
+      console.log(`➡️ Qabul qilingan format: ${cleaned}`);
+      return cleaned;
+    },
+    password: async () => {
+      const pwd = await ask("Ikki bosqichli parol (agar bo'lsa kiriting, yo'q bo'lsa shunchaki Enter bosing): ");
+      return pwd.trim();
+    },
+    phoneCode: async () => {
+      const code = await ask("Telegram ilovasiga kelgan kod: ");
+      return code.trim().replace(/[^0-9]/g, "");
+    },
     onError: (err) => console.error("Xatolik:", err.message),
   });
 
@@ -98,3 +112,4 @@ main().catch((err) => {
   rl.close();
   process.exit(1);
 });
+
