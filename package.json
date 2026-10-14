@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "db:push": "drizzle-kit push",
-    "db:init": "tsx db-push.ts"
+    "db:init": "tsx db-push.ts",
+    "worker": "tsx voice-assistant.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
