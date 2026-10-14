@@ -262,12 +262,33 @@ async function runWorker() {
 
     const q = clean.toLowerCase();
 
-    // A) Hozir telefon qilish buyrug'i ("Hozir tel qil", "Qo'ng'iroq qil")
-    if (/(hozir tel|hozir telefon|qo'ng'iroq qil|qongiroq qil|manga qo'ng'iroq)/i.test(q)) {
-      console.log("📲 Foydalanuvchi darhol qo'ng'iroq so'radi...");
+    // A) Qo'ng'iroq qilish buyrug'i ("tel qil", "telefon qil", "qo'ng'iroq qil", "manga tel qil")
+    if (/(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil|chaqir|manga\s*tel|menga\s*tel)/i.test(q)) {
+      console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
       await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
-      await sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!");
       await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
+      await sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!");
+      return;
+    }
+
+    // A.1) Minnatdorchilik ("raxmat", "rahmat", "katta rahmat", "spasibo", "tashakkur")
+    if (/(rahmat|raxmat|tashakkur|barakalla|katta rahmat|spasibo|gap yo'?q|zo'?r)/i.test(q)) {
+      console.log("🙏 Minnatdorchilik qabul qilindi...");
+      const reply = "Arzimaydi, Sohibjon! 😊 Sizga yordam berishdan doim mamnunman. Biror reja yoki savolingiz bo'lsa bemalol aytavering!";
+      await client.sendMessage(replyPeer, { message: reply });
+      await sendVoiceNote(client, replyPeer, "Arzimaydi Sohibjon! Sizga yordam berishdan doim xursandman.");
+      return;
+    }
+
+    // A.2) Aloqa tekshiruvi, nuqta yoki qisqa tasdiq (".", "..", "alo", "ha", "ok", "shu yerdamisan")
+    if (
+      /^(\.|\.\.|\.\.\.|alo|qani|ok|hop|xo'?p|ha|ha bo'?ldi|yaxshi|tushundim)$/i.test(q) ||
+      /(shu yerdamisan|ishlayapsanmi|eshtyapsanmi|eshityapsanmi|nima gap)/i.test(q)
+    ) {
+      console.log("💬 Muloqot / tekshiruv qabul qilindi...");
+      const reply = "Eshitaman Sohibjon! Men 24/7 siz bilanmanki, buyrug'ingizga tayyorman. Biror vazifa belgilaymizmi yoki telefon qilaymi? 😊";
+      await client.sendMessage(replyPeer, { message: reply });
+      await sendVoiceNote(client, replyPeer, "Eshitaman Sohibjon, men tayyorman! Qanday yordam bera olaman?");
       return;
     }
 
@@ -401,7 +422,7 @@ async function runWorker() {
     }
 
     // Noma'lum xabar bo'lsa
-    const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), bazaga saqlayman. Qo'ng'iroq qilishimni xohlasangiz <i>"Hozir tel qil"</i> deb yozing! 🚀`;
+    const fallback = `Eshitdim Sohibjon! 😊 Agar bu yangi rejangiz bo'lsa (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), aytib yuborsangiz saqlab qo'yaman. Qo'ng'iroq qilishimni xohlasangiz <i>"Tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });
   }, new NewMessage({ incoming: true }));
 
