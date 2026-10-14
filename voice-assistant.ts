@@ -188,7 +188,16 @@ async function main() {
 
     const q = clean.toLowerCase();
 
-    // 1-HOLAT: Karta / Pul / Balans savollari
+    // 1-HOLAT: Salomlashish yoki umumiy murojaat
+    if (/(salom|assalom|qalaysan|qandaysan|tuzikmisan|qalesiz)/i.test(q)) {
+      console.log("👋 Salomlashish qabul qilindi...");
+      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Ertangi rejalaringizni ayting;\n• "Kartada qancha pul bor?" deb so'rang;\n• "Ertaga qanday vazifalar bor?" deb tekshiring!\n\nVaqti kelganda esa o'zim sizga telefon qilib ogohlantiraman!`;
+      await client.sendMessage(entity, { message: greeting, parseMode: "html" });
+      await sendVoiceNote(client, entity, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
+      return;
+    }
+
+    // 2-HOLAT: Karta / Pul / Balans savollari
     if (/(karta|pul|balans|moliya|hisob|hisobimda|qancha pul|qancha bor)/i.test(q)) {
       console.log("💳 Karta balansi so'raldi...");
       const allCards = await db.select().from(cards).where(eq(cards.archived, false));
@@ -211,7 +220,7 @@ async function main() {
       return;
     }
 
-    // 2-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
+    // 3-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
     if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar bor)/i.test(q) && !/(ertaga soat|ertaga \d|09:|10:|11:|12:|13:|14:|15:|16:|17:|18:|19:|20:)/i.test(q)) {
       console.log("📋 Rejalar ro'yxati so'raldi...");
       const isTomorrow = /(ertag|ertangi)/i.test(q);
@@ -252,7 +261,7 @@ async function main() {
       return;
     }
 
-    // 3-HOLAT: Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
+    // 4-HOLAT: Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
     const plans = parseSpokenPlans(clean);
     if (plans.length > 0) {
       console.log(`💾 Aniqlangan vazifalar: ${plans.length} ta. Bazaga saqlanmoqda...`);
@@ -266,14 +275,6 @@ async function main() {
 
       await client.sendMessage(entity, { message: reportMsg, parseMode: "html" });
       await sendVoiceNote(client, entity, `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga yozib qo'ydim.`);
-      return;
-    }
-
-    // 4-HOLAT: Salomlashish yoki umumiy murojaat
-    if (/(salom|assalom|qalaysan|qandaysan|tuzikmisan)/i.test(q)) {
-      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Ertangi rejalaringizni ayting;\n• "Kartada qancha pul bor?" deb so'rang;\n• "Ertaga qanday vazifalar bor?" deb tekshiring!\n\nVaqti kelganda esa o'zim sizga telefon qilib ogohlantiraman!`;
-      await client.sendMessage(entity, { message: greeting, parseMode: "html" });
-      await sendVoiceNote(client, entity, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
       return;
     }
 
