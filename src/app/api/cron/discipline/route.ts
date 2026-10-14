@@ -6,6 +6,7 @@ import {
   botReminders,
   tasks,
   orders,
+  sleepLogs,
 } from "@/db/schema";
 import { asc, and, eq, sql } from "drizzle-orm";
 import { sendVoiceAlert, triggerTelegramCall } from "@/lib/callService";
@@ -231,52 +232,62 @@ export async function GET(req: Request) {
       return nowMin >= targetMin && nowMin <= targetMin + 59;
     };
 
-    // ── Wake up reminder (ANIQ wakeTime da) ──
+    // ── Wake up reminder (ANIQ wakeTime da va javob bermaguncha qayta qo'ng'iroq) ──
     const wakeMin = safeMinutes(wakeTime, 4 * 60 + 30);
     if (reminderDue(wakeMin)) {
-      const exists = await db
-        .select({ id: botReminders.id })
-        .from(botReminders)
-        .where(
-          and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
-        )
+      const [todaySleep] = await db
+        .select()
+        .from(sleepLogs)
+        .where(eq(sleepLogs.date, today))
         .limit(1);
+      const confirmedAwake = Boolean(todaySleep?.actualWake);
 
-      if (force || exists.length === 0) {
-        let anyOk = false;
-        for (const chatId of chatIds) {
-          const wakeVoiceText = `Assalomu alaykum! Soat ${wakeTime} bo'ldi, uyg'onish vaqti! Yengillik bilan ko'zni oching, suv iching va bugungi rejalarni boshlang!`;
-          sendVoiceAlert(chatId, wakeVoiceText).catch(console.error);
-          triggerTelegramCall(chatId, `Uyg'onish vaqti: ${wakeTime}`).catch(console.error);
+      // Agar hali "Ha, turdim!" deb tasdiqlanmagan bo'lsa va 1 soat ichida bo'lsa
+      if (!confirmedAwake && nowMin >= wakeMin && nowMin <= wakeMin + 60) {
+        const isRepeatTick = (nowMin - wakeMin) % 5 === 0;
+        const exists = await db
+          .select({ id: botReminders.id })
+          .from(botReminders)
+          .where(
+            and(eq(botReminders.date, today), eq(botReminders.type, "wake_up"))
+          )
+          .limit(1);
 
-          const sent = await botSend("sendMessage", {
-            chat_id: chatId,
-            text: `☀️ <b>SALOM! ${wakeTime} da turing!</b>\n\nYengillik bilan ko'zni oching, birinchi ishi suv iching 💧`,
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "✅ Ha, turdim!", callback_data: "woke_yes" },
-                  { text: "😴 Uxlab qoldim", callback_data: "woke_no" },
+        if (force || exists.length === 0 || isRepeatTick) {
+          let anyOk = false;
+          for (const chatId of chatIds) {
+            const wakeVoiceText =
+              exists.length === 0
+                ? `Assalomu alaykum! Soat ${wakeTime} bo'ldi, uyg'onish vaqti! Yengillik bilan ko'zni oching, suv iching va bugungi rejalarni boshlang!`
+                : `Sohibjon! Hali 'Ha, turdim' deb javob bermadingiz. Iltimos, o'rningizdan turing!`;
+            sendVoiceAlert(chatId, wakeVoiceText).catch(console.error);
+            triggerTelegramCall(chatId, `Uyg'onish vaqti: ${wakeTime}`).catch(console.error);
+
+            const sent = await botSend("sendMessage", {
+              chat_id: chatId,
+              text: `☀️ <b>SALOM! ${wakeTime} da turing!</b>\n\nYengillik bilan ko'zni oching, birinchi ishi suv iching 💧`,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "✅ Ha, turdim!", callback_data: "woke_yes" },
+                    { text: "😴 Uxlab qoldim", callback_data: "woke_no" },
+                  ],
                 ],
-              ],
-            },
-          });
-          if (sent.ok) anyOk = true;
-          else console.error(`wake_up (${chatId}) yuborilmadi:`, sent.error);
-        }
-        // Xabar muvaffaqiyatli yuborilgandagina "sent" deb belgilaymiz.
-        // Aks holda keyingi tick/cron da qayta uriniladi.
-        if (anyOk) {
-          if (exists.length === 0) {
+              },
+            });
+            if (sent.ok) anyOk = true;
+            else console.error(`wake_up (${chatId}) yuborilmadi:`, sent.error);
+          }
+          if (anyOk && exists.length === 0) {
             await db.insert(botReminders).values({
               routineId: null,
               date: today,
               type: "wake_up",
               sent: true,
             });
+            messagesSent++;
           }
-          messagesSent++;
         }
       }
     }
@@ -590,6 +601,14 @@ export async function GET(req: Request) {
       if (force || exists.length === 0) {
         let anyOk = false;
         for (const chatId of chatIds) {
+          // Ertangi rejalar kiritilganligini tekshirish
+          const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
+          const tomorrowTasks = await db.select().from(tasks).where(eq(tasks.date, tomorrow)).limit(1);
+          if (tomorrowTasks.length === 0) {
+            triggerTelegramCall(chatId, "Ertangi rejalar kiritilmagan").catch(console.error);
+            sendVoiceAlert(chatId, "Sohibjon, ertangi kun uchun hali birorta vazifa kiritilmadi. Iltimos, ertangi rejalaringizni ovozli xabar orqali yuboring!").catch(console.error);
+          }
+
           const sent = await botSend("sendMessage", {
             chat_id: chatId,
             text:

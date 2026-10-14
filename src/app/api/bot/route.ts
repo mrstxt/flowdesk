@@ -2594,6 +2594,91 @@ async function handleCommand(
   }
 }
 
+/**
+ * Foydalanuvchi ovozda yoki erkin matnda savol berganida (moliya, vazifalar, rejalar)
+ * ma'lumotlar bazasidan qidirib javob berish va ovozli xabar qaytarish
+ */
+async function handleAssistantVoiceOrTextQuery(chatId: number, query: string): Promise<boolean> {
+  const q = query.toLowerCase().trim();
+  if (!q) return false;
+
+  // 1. Karta / Pul / Balans savollari
+  if (/(karta|pul|balans|moliya|hisob|hisobimda|qancha pul|qancha bor)/i.test(q)) {
+    const allCards = await db.select().from(cards).where(eq(cards.archived, false));
+    if (allCards.length === 0) {
+      await sendMessage(chatId, "💳 <b>Hozircha hech qanday karta qo'shilmagan.</b>", { reply_markup: MAIN_KEYBOARD });
+      sendVoiceAlert(chatId, "Sohibjon, platformada hozircha birorta ham karta kiritilmagan.").catch(console.error);
+      return true;
+    }
+
+    let total = 0;
+    const lines: string[] = [];
+    for (const c of allCards) {
+      const bal = c.type === "primary" ? await getCardAvailableBalance(c.id) : Number(c.balance);
+      total += bal;
+      lines.push(`• <b>${c.name}</b> (${c.type === "primary" ? "Asosiy" : "Qo'shimcha"}): ${fmt(bal)}`);
+    }
+
+    const textReply = `💳 <b>Sizning kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami mavjud balans:</b> <b>${fmt(total)}</b>`;
+    await sendMessage(chatId, textReply, { reply_markup: MAIN_KEYBOARD });
+    sendVoiceAlert(chatId, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`).catch(console.error);
+    return true;
+  }
+
+  // 2. Vazifalar / Rejalar / Ishlar savollari
+  if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar bor)/i.test(q)) {
+    const isTomorrow = /(ertag|ertangi)/i.test(q);
+    const targetDate = isTomorrow
+      ? new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0]
+      : todayDateISO();
+
+    const [dayTasks, dayRoutines] = await Promise.all([
+      db.select().from(tasks).where(eq(tasks.date, targetDate)).orderBy(desc(tasks.id)),
+      db.select().from(routines).where(sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${targetDate}`).orderBy(asc(routines.time)),
+    ]);
+
+    const dayLabel = isTomorrow ? "Ertangi" : "Bugungi";
+    const totalCount = dayTasks.length + dayRoutines.length;
+
+    if (totalCount === 0) {
+      const textReply = `📋 <b>${dayLabel} kun (${targetDate}) uchun rejalashtirilgan vazifa yo'q.</b>\n\nYangi rejalaringizni ovozli yoki matnli xabar orqali yuborsangiz, darhol saqlab qo'yaman!`;
+      await sendMessage(chatId, textReply, { reply_markup: MAIN_KEYBOARD });
+      sendVoiceAlert(chatId, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hech qanday vazifa belgilanmagan.`).catch(console.error);
+      return true;
+    }
+
+    const lines: string[] = [];
+    if (dayRoutines.length > 0) {
+      lines.push("⏰ <b>Vaqtli rejalar (Intizom):</b>");
+      dayRoutines.forEach((r) => {
+        lines.push(`• <b>${r.time}</b> — ${r.title} ${r.lastDoneDate === targetDate ? "✅" : "⬜"}`);
+      });
+    }
+    if (dayTasks.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("📋 <b>Vazifalar ro'yxati:</b>");
+      dayTasks.forEach((t) => {
+        lines.push(`• ${t.completed ? "✅" : "⬜"} ${t.title}`);
+      });
+    }
+
+    const textReply = `📋 <b>${dayLabel} vazifalaringiz (${totalCount} ta):</b>\n\n${lines.join("\n")}`;
+    await sendMessage(chatId, textReply, { reply_markup: MAIN_KEYBOARD });
+    sendVoiceAlert(chatId, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta reja mavjud. Ro'yxatni Telegramga yubordim.`).catch(console.error);
+    return true;
+  }
+
+  // 3. Salomlashish / Hol-ahvol
+  if (/(salom|assalom|qalaysan|qandaysan|tuzikmisan)/i.test(q)) {
+    const textReply = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning FlowDesk shaxsiy yordamchingizman. Sizga qanday yordam bera olaman?\n\n• Ovozli xabar orqali ertangi rejalaringizni aytishingiz mumkin;\n• "Kartada qancha pul bor?" deb so'rashingiz mumkin;\n• "Ertaga qanday vazifalar bor?" deb tekshirishingiz mumkin.`;
+    await sendMessage(chatId, textReply, { reply_markup: MAIN_KEYBOARD });
+    sendVoiceAlert(chatId, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam berishim mumkin?").catch(console.error);
+    return true;
+  }
+
+  return false;
+}
+
 /* ── Webhook ── */
 
 export async function POST(req: Request) {
@@ -2765,12 +2850,19 @@ export async function POST(req: Request) {
           report += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Ertaga vaqtida telefon qilib eslataman!`;
           await sendMessage(chatId, report, { reply_markup: MAIN_KEYBOARD });
           sendVoiceAlert(chatId, `Ovozli xabaringiz qabul qilindi Sohibjon! ${savedTasks} ta vazifa platformaga saqlandi.`).catch(console.error);
+        } else if (speechText) {
+          const handled = await handleAssistantVoiceOrTextQuery(chatId, speechText);
+          if (!handled) {
+            await sendMessage(
+              chatId,
+              `🎙️ <i>"${speechText}"</i>\n\nBu ovozli xabaringizda aniq reja yoki savol tushunilmadi. Masalan: <i>"Ertaga 09:00 da bank, 14:00 da hisobot"</i> yoki <i>"Kartada qancha pul bor?"</i> deb yuborsangiz, darhol javob beraman! 🚀`,
+              { reply_markup: MAIN_KEYBOARD }
+            );
+          }
         } else {
           await sendMessage(
             chatId,
-            speechText
-              ? `🎙️ <i>"${speechText}"</i>\n\nBu ovozli xabaringizda aniq vaqt yoki reja topilmadi. Masalan: <i>"Ertaga 09:00 da bank, 14:00 da hisobot"</i> deb yuborsangiz, darhol platformaga tushiraman! 🚀`
-              : "🎙️ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nAgar bu ertangi rejalar bo'lsa, iltimos, matn sifatida ham vaqtlari bilan (masalan: <i>09:00 bank, 14:00 hisobot</i>) yozib yuborsangiz, darhol platformaga tushiraman! 🚀",
+            "🎙️ <b>Ovozli xabaringiz qabul qilindi!</b>\n\nAgar bu ertangi rejalar bo'lsa, iltimos, matn sifatida ham vaqtlari bilan (masalan: <i>09:00 bank, 14:00 hisobot</i>) yozib yuborsangiz, darhol platformaga tushiraman! 🚀",
             { reply_markup: MAIN_KEYBOARD }
           );
         }
@@ -2779,7 +2871,7 @@ export async function POST(req: Request) {
 
       if (!msg.text) return NextResponse.json({ ok: true });
 
-      // Agar matnda reja/vaqtlar bo'lsa (erkin reja kiritish)
+      // 1. Agar matnda reja/vaqtlar bo'lsa (erkin reja kiritish)
       const textPlans = parseSpokenPlans(msg.text.trim());
       if (textPlans.length > 0 && !msg.text.startsWith("/") && !["➕ Chiqim", "➕ Kirim", "📦 Buyurtma", "📋 Ishlar", "📊 Hisob", "🎯 Maqsad", "📚 Kitob", "🎬 Video", "⚙️ Sozlamalar", "🔁 Reja", "⏰ Uyg'onish"].includes(msg.text.trim())) {
         const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split("T")[0];
@@ -2792,6 +2884,12 @@ export async function POST(req: Request) {
         await sendMessage(chatId, report, { reply_markup: MAIN_KEYBOARD });
         sendVoiceAlert(chatId, `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga yozib qo'ydim.`).catch(console.error);
         return NextResponse.json({ ok: true });
+      }
+
+      // 2. Agar matnda savol yoki murojaat bo'lsa (kartada pul qancha, qanday vazifa bor va h.k.)
+      if (!msg.text.startsWith("/") && !["➕ Chiqim", "➕ Kirim", "📦 Buyurtma", "📋 Ishlar", "📊 Hisob", "🎯 Maqsad", "📚 Kitob", "🎬 Video", "⚙️ Sozlamalar", "🔁 Reja", "⏰ Uyg'onish"].includes(msg.text.trim())) {
+        const handled = await handleAssistantVoiceOrTextQuery(chatId, msg.text.trim());
+        if (handled) return NextResponse.json({ ok: true });
       }
 
       await handleCommand(chatId, msg.text.trim(), msg.message_id);
