@@ -188,16 +188,38 @@ async function main() {
 
     const q = clean.toLowerCase();
 
-    // 1-HOLAT: Salomlashish yoki umumiy murojaat
+    // 1-HOLAT: Qo'ng'iroq so'rovi ("Manga tel qil", "Qo'ng'iroq qil")
+    if (/(tel qil|telefon qil|qongiroq qil|qo'ng'iroq qil|manga tel|manga telefon)/i.test(q)) {
+      console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
+      await client.sendMessage(entity, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
+      await sendVoiceNote(client, entity, "Hozir telefon qilmoqdaman, Sohibjon!");
+      await triggerTelegramCall(target, "Siz so'ragan qo'ng'iroq");
+      return;
+    }
+
+    // 2-HOLAT: Bugungi kunga o'zgartirish yoki tuzatish
+    if (/(ozgartir|o'zgartir|bugunga otkaz|bugunga o'tkaz|bugungi kunga)/i.test(q)) {
+      console.log("🔄 Oxirgi vazifalarni bugungi kunga o'tkazish...");
+      const recentTasks = await db.select().from(tasks).orderBy(desc(tasks.id)).limit(5);
+      for (const t of recentTasks) {
+        await db.update(tasks).set({ date: todayISO }).where(eq(tasks.id, t.id));
+      }
+      const reply = `✅ Oxirgi kiritilgan vazifalar bugungi kun (<b>${todayISO}</b>) ga o'zgartirildi!`;
+      await client.sendMessage(entity, { message: reply, parseMode: "html" });
+      await sendVoiceNote(client, entity, "Barcha kiritilgan vazifalar bugungi kunga o'tkazildi Sohibjon!");
+      return;
+    }
+
+    // 3-HOLAT: Salomlashish yoki umumiy murojaat
     if (/(salom|assalom|qalaysan|qandaysan|tuzikmisan|qalesiz)/i.test(q)) {
       console.log("👋 Salomlashish qabul qilindi...");
-      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Ertangi rejalaringizni ayting;\n• "Kartada qancha pul bor?" deb so'rang;\n• "Ertaga qanday vazifalar bor?" deb tekshiring!\n\nVaqti kelganda esa o'zim sizga telefon qilib ogohlantiraman!`;
+      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Manga tel qil" deb buyruq bering!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
       await client.sendMessage(entity, { message: greeting, parseMode: "html" });
       await sendVoiceNote(client, entity, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
       return;
     }
 
-    // 2-HOLAT: Karta / Pul / Balans savollari
+    // 4-HOLAT: Karta / Pul / Balans savollari
     if (/(karta|pul|balans|moliya|hisob|hisobimda|qancha pul|qancha bor)/i.test(q)) {
       console.log("💳 Karta balansi so'raldi...");
       const allCards = await db.select().from(cards).where(eq(cards.archived, false));
@@ -220,8 +242,8 @@ async function main() {
       return;
     }
 
-    // 3-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
-    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar bor)/i.test(q) && !/(ertaga soat|ertaga \d|09:|10:|11:|12:|13:|14:|15:|16:|17:|18:|19:|20:)/i.test(q)) {
+    // 5-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
+    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar bor)/i.test(q) && !/(soat \d|\d:\d|\d da)/i.test(q)) {
       console.log("📋 Rejalar ro'yxati so'raldi...");
       const isTomorrow = /(ertag|ertangi)/i.test(q);
       const targetDate = isTomorrow ? tomorrowISO : todayISO;
@@ -261,25 +283,29 @@ async function main() {
       return;
     }
 
-    // 4-HOLAT: Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
+    // 6-HOLAT: Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
+    const isToday = /(bugun|bugungi)/i.test(clean);
+    const targetDate = isToday ? todayISO : tomorrowISO;
+    const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";
+
     const plans = parseSpokenPlans(clean);
     if (plans.length > 0) {
-      console.log(`💾 Aniqlangan vazifalar: ${plans.length} ta. Bazaga saqlanmoqda...`);
-      const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, tomorrowISO);
+      console.log(`💾 Aniqlangan vazifalar: ${plans.length} ta (${dateLabel}: ${targetDate}). Bazaga saqlanmoqda...`);
+      const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, targetDate);
 
-      let reportMsg = `✅ <b>Qabul qilindi Sohibjon!</b>\n\nErtangi kun (<b>${tomorrowISO}</b>) uchun saqlandi:\n\n`;
+      let reportMsg = `✅ <b>Qabul qilindi Sohibjon!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n\n`;
       plans.forEach((p, i) => {
         reportMsg += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
       });
-      reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Ertaga o'zim telefon qilib eslatib turaman! 🚀`;
+      reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda o'zim telefon qilib eslatib turaman! 🚀`;
 
       await client.sendMessage(entity, { message: reportMsg, parseMode: "html" });
-      await sendVoiceNote(client, entity, `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga yozib qo'ydim.`);
+      await sendVoiceNote(client, entity, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
       return;
     }
 
     // Noma'lum xabar bo'lsa
-    const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Ertaga 09:00 da bank, 14:00 da hisobot"</i>), bazaga saqlayman. Pulni bilish uchun <i>"Kartada qancha pul bor?"</i> deb so'rashingiz mumkin! 🚀`;
+    const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), bazaga saqlayman. Qo'ng'iroq qilishimni xohlasangiz <i>"Manga tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(entity, { message: fallback, parseMode: "html" });
   }, new NewMessage({ incoming: true }));
 
