@@ -28,6 +28,7 @@ import { eq, desc, asc, sql } from "drizzle-orm";
 import { getCardAvailableBalance } from "./src/lib/cardActions";
 import * as fs from "fs";
 import * as crypto from "crypto";
+import * as http from "http";
 
 function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
   const now = new Date();
@@ -174,6 +175,17 @@ async function runWorker() {
   console.log("🤖 FLOWDESK PROFIL YORDAMCHISI (USERBOT AI ASSISTANT)");
   console.log(`🎯 Aloqa profilingiz: ${target}`);
   console.log("==========================================================\n");
+
+  const port = process.env.PORT;
+  if (port) {
+    const healthServer = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("FlowDesk Telegram Userbot Assistant is running 24/7\n");
+    });
+    healthServer.listen(parseInt(port, 10), "0.0.0.0", () => {
+      console.log(`🌐 Web/Healthcheck server listening on 0.0.0.0:${port}`);
+    });
+  }
 
   const apiIdStr = process.env.TELEGRAM_CALLER_API_ID;
   const apiHash = process.env.TELEGRAM_CALLER_API_HASH;
