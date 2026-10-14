@@ -10,19 +10,20 @@
  */
 
 import { config } from "dotenv";
+config({ path: ".env.local" });
+config();
+
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage } from "telegram/events";
-import { generateUzbekSpeechAudio, triggerTelegramCall } from "./src/lib/callService";
+import { generateUzbekSpeechAudio } from "./src/lib/callService";
 import { parseSpokenPlans, saveParsedPlansToDb } from "./src/lib/planAiParser";
 import { db } from "./src/db";
 import { cards, tasks, routines, sleepLogs, settings } from "./src/db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
 import { getCardAvailableBalance } from "./src/lib/cardActions";
 import * as fs from "fs";
-
-config({ path: ".env.local" });
-config();
+import * as crypto from "crypto";
 
 function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
   const now = new Date();
@@ -54,13 +55,67 @@ function fmt(n: number): string {
   return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
 }
 
-async function sendVoiceNote(client: TelegramClient, entity: any, text: string) {
+function modPow(b: bigint, e: bigint, m: bigint): bigint {
+  let res = BigInt(1);
+  const zero = BigInt(0);
+  const one = BigInt(1);
+  const two = BigInt(2);
+  b = b % m;
+  while (e > zero) {
+    if (e % two === one) res = (res * b) % m;
+    e = e / two;
+    b = (b * b) % m;
+  }
+  return res;
+}
+
+/**
+ * Mavjud GramJS mijozi orqali uzilishsiz qo'ng'iroq chaqirish
+ */
+async function makeCallWithClient(client: TelegramClient, targetEntity: any, reason?: string) {
+  try {
+    const dh = (await client.invoke(
+      new Api.messages.GetDhConfig({ version: 0, randomLength: 256 })
+    )) as Api.messages.DhConfig;
+
+    const p = BigInt("0x" + Buffer.from(dh.p).toString("hex"));
+    const g = BigInt(dh.g);
+    const aBytes = crypto.randomBytes(256);
+    const a = BigInt("0x" + aBytes.toString("hex"));
+    const g_a = modPow(g, a, p);
+
+    let gAHex = g_a.toString(16);
+    if (gAHex.length % 2 !== 0) gAHex = "0" + gAHex;
+    const gABuffer = Buffer.from(gAHex, "hex");
+    const gAHash = crypto.createHash("sha256").update(gABuffer).digest();
+
+    await client.invoke(
+      new Api.phone.RequestCall({
+        userId: targetEntity,
+        randomId: Math.floor(Math.random() * 10000000),
+        gAHash: gAHash,
+        protocol: new Api.PhoneCallProtocol({
+          minLayer: 93,
+          maxLayer: 93,
+          udpP2p: true,
+          udpReflector: true,
+          libraryVersions: ["1.16.0"],
+        }),
+      })
+    );
+    console.log(`📲 [CALLER] Qo'ng'iroq muvaffaqiyatli amalga oshirildi: ${reason || ""}`);
+  } catch (err) {
+    console.error("makeCallWithClient xatolik:", err);
+  }
+}
+
+async function sendVoiceNote(client: TelegramClient, peer: any, text: string) {
   try {
     const audioBuffer = await generateUzbekSpeechAudio(text);
     if (!audioBuffer) return;
     const tempFile = `temp_voice_${Date.now()}.mp3`;
     fs.writeFileSync(tempFile, audioBuffer);
-    await client.sendFile(entity, {
+    await client.sendFile(peer, {
       file: tempFile,
       voiceNote: true,
       caption: text.length > 200 ? text.slice(0, 197) + "..." : text,
@@ -108,7 +163,7 @@ async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null>
   }
 }
 
-async function main() {
+async function runWorker() {
   const target = process.env.TELEGRAM_TARGET_USER || "@sulaymonovss";
 
   console.log("==========================================================");
@@ -127,7 +182,8 @@ async function main() {
 
   const apiId = parseInt(apiIdStr, 10);
   const client = new TelegramClient(new StringSession(sessionStr), apiId, apiHash, {
-    connectionRetries: 5,
+    connectionRetries: 10,
+    autoReconnect: true,
   });
 
   console.log("📲 Telegramga ulanilmoqda...");
@@ -166,19 +222,18 @@ async function main() {
     }
 
     const clean = receivedText.trim();
+    const replyPeer = msg.chatId || msg.senderId || entity;
+
     if (!clean) {
       if (isVoice) {
-        const reply = "🎙️ Ovozli xabaringiz qabul qilindi, lekin ovozni aniqlab bo'lmadi. Iltimos, ertangi rejalaringizni yoki savolingizni aniqroq ayting yoki matn qilib yozing!";
-        await client.sendMessage(entity, { message: reply });
-        await sendVoiceNote(client, entity, reply);
+        const replyText = "🎙️ Ovozli xabaringiz qabul qilindi, lekin ovozni aniqlab bo'lmadi. Iltimos, rejalaringizni aniqroq ayting yoki matn qilib yozing!";
+        await client.sendMessage(replyPeer, { message: replyText });
+        await sendVoiceNote(client, replyPeer, replyText);
       }
       return;
     }
 
     console.log(`📥 Kelgan xabar: "${clean}"`);
-
-    // Har doim xabar kelgan chatga javob qaytarish!
-    const replyPeer = msg.chatId || msg.senderId || entity;
 
     // Foydalanuvchi javob yozdi -> bugungi uyg'onish holatini qayd etamiz
     const { todayISO, tomorrowISO } = getTashkentTimeString();
@@ -191,16 +246,37 @@ async function main() {
 
     const q = clean.toLowerCase();
 
-    // 1-HOLAT: Qo'ng'iroq so'rovi ("Manga tel qil", "Qo'ng'iroq qil")
-    if (/(tel qil|telefon qil|qongiroq qil|qo'ng'iroq qil|manga tel|manga telefon)/i.test(q)) {
-      console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
+    // A) Hozir telefon qilish buyrug'i ("Hozir tel qil", "Qo'ng'iroq qil")
+    if (/(hozir tel|hozir telefon|qo'ng'iroq qil|qongiroq qil|manga qo'ng'iroq)/i.test(q)) {
+      console.log("📲 Foydalanuvchi darhol qo'ng'iroq so'radi...");
       await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
       await sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!");
-      await triggerTelegramCall(target, "Siz so'ragan qo'ng'iroq");
+      await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
       return;
     }
 
-    // 2-HOLAT: Bugungi kunga o'zgartirish yoki tuzatish
+    // B) Uyg'onish vaqtini o'zgartirish ("5:30 da turishim kerak", "soat 6 da uyg'ot")
+    const wakeMatch =
+      clean.match(/(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)\s*(?:da|gacha)?\s*(?:turish|uygon|uyg'on)/i) ||
+      clean.match(/(?:turish|uygon|uyg'on)\S*\s*(?:vaqti\s*)?(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)/i) ||
+      clean.match(/(?:soat\s*)?(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)\s*(?:da|gacha)?\s*(?:uyg'ot|uygot)/i);
+
+    if (wakeMatch) {
+      let wt = wakeMatch[1].replace(".", ":");
+      if (!wt.includes(":")) wt = `${wt.padStart(2, "0")}:00`;
+      else {
+        const [h, m] = wt.split(":");
+        wt = `${h.padStart(2, "0")}:${(m || "00").padStart(2, "0")}`;
+      }
+      console.log(`⏰ Uyg'onish vaqti yangilandi: ${wt}`);
+      await db.insert(settings).values({ key: "wake_time", value: wt }).onConflictDoUpdate({ target: settings.key, set: { value: wt } });
+      const wakeReply = `⏰ Tushundim Sohibjon! Uyg'onish vaqti soat <b>${wt}</b> ga belgilandi. Shu vaqtda o'zim sizga telefon qilaman va uyg'otaman! 🚀`;
+      await client.sendMessage(replyPeer, { message: wakeReply, parseMode: "html" });
+      await sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Uyg'onish vaqtini soat ${wt} ga belgilab qo'ydim.`);
+      return;
+    }
+
+    // C) Bugungi kunga o'zgartirish yoki tuzatish
     if (/(ozgartir|o'zgartir|bugunga otkaz|bugunga o'tkaz|bugungi kunga)/i.test(q)) {
       console.log("🔄 Oxirgi vazifalarni bugungi kunga o'tkazish...");
       const recentTasks = await db.select().from(tasks).orderBy(desc(tasks.id)).limit(5);
@@ -213,16 +289,16 @@ async function main() {
       return;
     }
 
-    // 3-HOLAT: Salomlashish yoki umumiy murojaat
+    // D) Salomlashish yoki umumiy murojaat
     if (/(salom|assalom|alo|qalaysan|qandaysan|tuzikmisan|qalesiz)/i.test(q)) {
       console.log("👋 Salomlashish qabul qilindi...");
-      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Nimalar bor?" deb vazifalaringizni so'rang;\n• "Manga tel qil" deb buyruq bering!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
+      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Nimalar bor?" deb vazifalaringizni so'rang;\n• "5:30 da turishim kerak" deb uyg'onish vaqtini ayting!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
       await client.sendMessage(replyPeer, { message: greeting, parseMode: "html" });
       await sendVoiceNote(client, replyPeer, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
       return;
     }
 
-    // 4-HOLAT: Karta / Pul / Balans savollari
+    // E) Karta / Pul / Balans savollari
     if (/(karta|pul|balans|moliya|hisob|hisobimda|qancha pul|qancha bor)/i.test(q)) {
       console.log("💳 Karta balansi so'raldi...");
       const allCards = await db.select().from(cards).where(eq(cards.archived, false));
@@ -245,8 +321,8 @@ async function main() {
       return;
     }
 
-    // 5-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
-    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar|qanaqa vazifa|nima)/i.test(q) && !/(soat \d|\d:\d|\d da)/i.test(q)) {
+    // F) Vazifalar / Rejalar / Ishlar ro'yxati savoli
+    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar|qanaqa vazifa)/i.test(q) && !/(soat \d|\d:\d|\d da|kerak|borish|qilish)/i.test(q)) {
       console.log("📋 Rejalar ro'yxati so'raldi...");
       const isTomorrow = /(ertag|ertangi)/i.test(q);
       const targetDate = isTomorrow ? tomorrowISO : todayISO;
@@ -286,7 +362,7 @@ async function main() {
       return;
     }
 
-    // 6-HOLAT: Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
+    // G) Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
     const isToday = /(bugun|bugungi)/i.test(clean);
     const targetDate = isToday ? todayISO : tomorrowISO;
     const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";
@@ -308,7 +384,7 @@ async function main() {
     }
 
     // Noma'lum xabar bo'lsa
-    const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), bazaga saqlayman. Qo'ng'iroq qilishimni xohlasangiz <i>"Manga tel qil"</i> deb yozing! 🚀`;
+    const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), bazaga saqlayman. Qo'ng'iroq qilishimni xohlasangiz <i>"Hozir tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });
   }, new NewMessage({ incoming: true }));
 
@@ -342,11 +418,10 @@ async function main() {
         const isAwake = Boolean(sleepRow?.actualWake);
 
         if (!isAwake) {
-          // Har 5 daqiqada bir marta qo'ng'iroq qilish
           if (minutes !== lastWakeCallMinute && (minutes - wakeMinutes) % 5 === 0) {
             lastWakeCallMinute = minutes;
             console.log(`🔔 Uyg'otish qo'ng'irog'i amalga oshirilmoqda (${timeStr})...`);
-            await triggerTelegramCall(target, `Uyg'onish vaqti: ${wakeTime}`);
+            await makeCallWithClient(client, entity, `Uyg'onish vaqti: ${wakeTime}`);
             const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, UYG'ONISH VAQTI!</b>\n\nYengillik bilan o'rningizdan turing va suv iching 💧. Menga xabar yozing!`;
             await client.sendMessage(entity, { message: wakeMsg, parseMode: "html" });
             await sendVoiceNote(client, entity, `Assalomu alaykum Sohibjon! Soat ${wakeTime} bo'ldi, o'rningizdan turing!`);
@@ -354,14 +429,14 @@ async function main() {
         }
       }
 
-      // B) KECHQURUN ERTANGI REJALARNI SO'RASH (sleepTime da yoki 20 daqiqa oldin)
+      // B) KECHQURUN ERTANGI REJALARNI SO'RASH
       if (minutes >= sleepMinutes - 20 && minutes <= sleepMinutes + 30) {
         const tomorrowTasks = await db.select().from(tasks).where(eq(tasks.date, tomorrowISO)).limit(1);
         if (tomorrowTasks.length === 0) {
           if (minutes !== lastSleepCallMinute && (minutes - sleepMinutes) % 10 === 0) {
             lastSleepCallMinute = minutes;
             console.log(`🌙 Ertangi rejalar bo'sh! Qo'ng'iroq qilinmoqda (${timeStr})...`);
-            await triggerTelegramCall(target, "Ertangi rejalar kiritilmagan");
+            await makeCallWithClient(client, entity, "Ertangi rejalar kiritilmagan");
             const sleepMsg = `🌙 <b>Ertangi rejalaringizni ayting!</b>\n\nSohibjon, ertangi kun (${tomorrowISO}) uchun hali birorta vazifa kiritilmadi. Iltimos, nimalar qilmoqchi ekanligingizni ovozli xabar orqali menga aytib bering!`;
             await client.sendMessage(entity, { message: sleepMsg, parseMode: "html" });
             await sendVoiceNote(client, entity, "Sohibjon, ertangi kun uchun rejalaringizni ovozli xabar qilib aytib bering!");
@@ -371,9 +446,21 @@ async function main() {
     } catch (err) {
       console.error("Interval loop error:", err);
     }
-  }, 30000); // Har 30 soniyada tekshirish
+  }, 30000);
+
+  // Connection uzilmasligi uchun kutish
+  await new Promise(() => {});
 }
 
-main().catch((err) => {
-  console.error("Asosiy xatolik:", err);
-});
+async function start() {
+  while (true) {
+    try {
+      await runWorker();
+    } catch (e) {
+      console.error("Worker xatosi, 5 soniyadan keyin qayta ulanadi:", e);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+}
+
+start();
