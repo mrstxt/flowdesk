@@ -5,8 +5,10 @@ import {
   settings,
   botReminders,
   tasks,
+  orders,
 } from "@/db/schema";
 import { asc, and, eq, sql } from "drizzle-orm";
+import { sendVoiceAlert, triggerTelegramCall } from "@/lib/callService";
 
 export const dynamic = "force-dynamic";
 // Vercel serverless funksiyada setTimeout ishlamasligi uchun
@@ -243,6 +245,10 @@ export async function GET(req: Request) {
       if (force || exists.length === 0) {
         let anyOk = false;
         for (const chatId of chatIds) {
+          const wakeVoiceText = `Assalomu alaykum! Soat ${wakeTime} bo'ldi, uyg'onish vaqti! Yengillik bilan ko'zni oching, suv iching va bugungi rejalarni boshlang!`;
+          sendVoiceAlert(chatId, wakeVoiceText).catch(console.error);
+          triggerTelegramCall(chatId, `Uyg'onish vaqti: ${wakeTime}`).catch(console.error);
+
           const sent = await botSend("sendMessage", {
             chat_id: chatId,
             text: `☀️ <b>SALOM! ${wakeTime} da turing!</b>\n\nYengillik bilan ko'zni oching, birinchi ishi suv iching 💧`,
@@ -364,6 +370,10 @@ export async function GET(req: Request) {
         if (force || exists.length === 0) {
           let anyOk = false;
           for (const chatId of chatIds) {
+            const rDeadlineVoice = `Diqqat! ${r.title} rejangiz muddati tugamoqda. Bajarish holatini belgilang!`;
+            sendVoiceAlert(chatId, rDeadlineVoice).catch(console.error);
+            triggerTelegramCall(chatId, `Reja muddati: ${r.title}`).catch(console.error);
+
             const sent = await botSend("sendMessage", {
               chat_id: chatId,
               text: `⏳ <b>${escapeHtml(r.title)}</b>\n\nDeadline vaqti keldi: <b>${escapeHtml(
@@ -399,6 +409,87 @@ export async function GET(req: Request) {
               });
             }
             messagesSent++;
+          }
+        }
+      }
+    }
+
+    // ── 14:00 va 18:00 — Vazifalar va Deadlinelar eslatmasi ──
+    for (const checkHour of [14, 18]) {
+      const checkMin = checkHour * 60;
+      const reminderType = `tasks_deadline_${checkHour}`;
+      if (reminderDue(checkMin)) {
+        const exists = await db
+          .select({ id: botReminders.id })
+          .from(botReminders)
+          .where(
+            and(
+              eq(botReminders.date, today),
+              eq(botReminders.type, reminderType)
+            )
+          )
+          .limit(1);
+
+        if (force || exists.length === 0) {
+          const pendingTasks = await db
+            .select()
+            .from(tasks)
+            .where(and(eq(tasks.date, today), eq(tasks.completed, false)));
+
+          const dueOrders = await db
+            .select()
+            .from(orders)
+            .where(
+              and(
+                eq(orders.deadline, today),
+                eq(orders.archived, false)
+              )
+            );
+
+          if (pendingTasks.length > 0 || dueOrders.length > 0) {
+            let taskText = `⚠️ <b>DEADLINE VA VAZIFALAR NAZORATI (${checkHour}:00)</b>\n\n`;
+            if (pendingTasks.length > 0) {
+              taskText += `📋 <b>Bajarilmagan vazifalar (${pendingTasks.length} ta):</b>\n`;
+              pendingTasks.slice(0, 5).forEach((t, i) => {
+                taskText += `${i + 1}. ${escapeHtml(t.title)}\n`;
+              });
+              taskText += "\n";
+            }
+            if (dueOrders.length > 0) {
+              taskText += `📦 <b>Bugungi buyurtmalar (${dueOrders.length} ta):</b>\n`;
+              dueOrders.slice(0, 3).forEach((o, i) => {
+                taskText += `${i + 1}. ${escapeHtml(o.title)} (${o.stage})\n`;
+              });
+              taskText += "\n";
+            }
+            taskText += "Vazifalarni bajarib, botga belgilab qo'ying!";
+
+            const voiceAlertMsg = `Diqqat! Soat ${checkHour}:00 bo'ldi. Sizda ${pendingTasks.length} ta bajarilmagan vazifa va deadlinelar bor. Iltimos, ularni bajaring!`;
+
+            let anyOk = false;
+            for (const chatId of chatIds) {
+              sendVoiceAlert(chatId, voiceAlertMsg).catch(console.error);
+              triggerTelegramCall(chatId, `Deadline nazorati ${checkHour}:00`).catch(console.error);
+
+              const sent = await botSend("sendMessage", {
+                chat_id: chatId,
+                text: taskText,
+                parse_mode: "HTML",
+              });
+              if (sent.ok) anyOk = true;
+            }
+
+            if (anyOk) {
+              if (exists.length === 0) {
+                await db.insert(botReminders).values({
+                  routineId: null,
+                  date: today,
+                  type: reminderType,
+                  sent: true,
+                });
+              }
+              messagesSent++;
+            }
           }
         }
       }
