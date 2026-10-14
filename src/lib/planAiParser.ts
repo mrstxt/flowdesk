@@ -59,7 +59,14 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       .replace(/\s+/g, " ")
       .trim();
 
-    if (cleanTitle.length >= 2) {
+    // Salomlashish, tasdiq yoki bitta so'zli gaplarni reja deb olmaslik
+    if (/^(alo|salom|assalom|ha|yoq|yo'q|rahmat|xop|xo'p|nima|nimalar|qanaqa|qalay)$/i.test(cleanTitle)) {
+      continue;
+    }
+
+    const hasPlanKeywords = /(kerak|qilish|borish|uchrashuv|vazifa|ish|reja|tayyorlash|kitob|dars|mashq|zal|xarid|to'lov|ko'rish|yozish)/i.test(cleanTitle);
+
+    if (cleanTitle.length >= 2 && (Boolean(parsedTime) || hasPlanKeywords)) {
       results.push({
         time: parsedTime,
         title: cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1),

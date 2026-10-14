@@ -177,6 +177,9 @@ async function main() {
 
     console.log(`📥 Kelgan xabar: "${clean}"`);
 
+    // Har doim xabar kelgan chatga javob qaytarish!
+    const replyPeer = msg.chatId || msg.senderId || entity;
+
     // Foydalanuvchi javob yozdi -> bugungi uyg'onish holatini qayd etamiz
     const { todayISO, tomorrowISO } = getTashkentTimeString();
     try {
@@ -191,8 +194,8 @@ async function main() {
     // 1-HOLAT: Qo'ng'iroq so'rovi ("Manga tel qil", "Qo'ng'iroq qil")
     if (/(tel qil|telefon qil|qongiroq qil|qo'ng'iroq qil|manga tel|manga telefon)/i.test(q)) {
       console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
-      await client.sendMessage(entity, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
-      await sendVoiceNote(client, entity, "Hozir telefon qilmoqdaman, Sohibjon!");
+      await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
+      await sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!");
       await triggerTelegramCall(target, "Siz so'ragan qo'ng'iroq");
       return;
     }
@@ -205,17 +208,17 @@ async function main() {
         await db.update(tasks).set({ date: todayISO }).where(eq(tasks.id, t.id));
       }
       const reply = `✅ Oxirgi kiritilgan vazifalar bugungi kun (<b>${todayISO}</b>) ga o'zgartirildi!`;
-      await client.sendMessage(entity, { message: reply, parseMode: "html" });
-      await sendVoiceNote(client, entity, "Barcha kiritilgan vazifalar bugungi kunga o'tkazildi Sohibjon!");
+      await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+      await sendVoiceNote(client, replyPeer, "Barcha kiritilgan vazifalar bugungi kunga o'tkazildi Sohibjon!");
       return;
     }
 
     // 3-HOLAT: Salomlashish yoki umumiy murojaat
-    if (/(salom|assalom|qalaysan|qandaysan|tuzikmisan|qalesiz)/i.test(q)) {
+    if (/(salom|assalom|alo|qalaysan|qandaysan|tuzikmisan|qalesiz)/i.test(q)) {
       console.log("👋 Salomlashish qabul qilindi...");
-      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Manga tel qil" deb buyruq bering!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
-      await client.sendMessage(entity, { message: greeting, parseMode: "html" });
-      await sendVoiceNote(client, entity, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
+      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Nimalar bor?" deb vazifalaringizni so'rang;\n• "Manga tel qil" deb buyruq bering!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
+      await client.sendMessage(replyPeer, { message: greeting, parseMode: "html" });
+      await sendVoiceNote(client, replyPeer, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
       return;
     }
 
@@ -225,8 +228,8 @@ async function main() {
       const allCards = await db.select().from(cards).where(eq(cards.archived, false));
       if (allCards.length === 0) {
         const textReply = "💳 Hozircha hech qanday karta kiritilmagan.";
-        await client.sendMessage(entity, { message: textReply });
-        await sendVoiceNote(client, entity, "Sohibjon, platformada hozircha birorta ham karta mavjud emas.");
+        await client.sendMessage(replyPeer, { message: textReply });
+        await sendVoiceNote(client, replyPeer, "Sohibjon, platformada hozircha birorta ham karta mavjud emas.");
         return;
       }
       let total = 0;
@@ -237,13 +240,13 @@ async function main() {
         lines.push(`• <b>${c.name}</b> (${c.type === "primary" ? "Asosiy" : "Qo'shimcha"}): ${fmt(bal)}`);
       }
       const textReply = `💳 <b>Sizning kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami balans:</b> <b>${fmt(total)}</b>`;
-      await client.sendMessage(entity, { message: textReply, parseMode: "html" });
-      await sendVoiceNote(client, entity, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`);
+      await client.sendMessage(replyPeer, { message: textReply, parseMode: "html" });
+      await sendVoiceNote(client, replyPeer, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`);
       return;
     }
 
     // 5-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
-    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar bor)/i.test(q) && !/(soat \d|\d:\d|\d da)/i.test(q)) {
+    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar|qanaqa vazifa|nima)/i.test(q) && !/(soat \d|\d:\d|\d da)/i.test(q)) {
       console.log("📋 Rejalar ro'yxati so'raldi...");
       const isTomorrow = /(ertag|ertangi)/i.test(q);
       const targetDate = isTomorrow ? tomorrowISO : todayISO;
@@ -257,8 +260,8 @@ async function main() {
       const totalCount = dayTasks.length + dayRoutines.length;
       if (totalCount === 0) {
         const reply = `📋 ${dayLabel} kun (${targetDate}) uchun hali rejalashtirilgan vazifa yo'q. Rejalaringiz bo'lsa aytib bering, yozib qo'yaman!`;
-        await client.sendMessage(entity, { message: reply });
-        await sendVoiceNote(client, entity, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hech qanday vazifa belgilanmagan.`);
+        await client.sendMessage(replyPeer, { message: reply });
+        await sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hech qanday vazifa belgilanmagan.`);
         return;
       }
 
@@ -278,8 +281,8 @@ async function main() {
       }
 
       const textReply = `📋 <b>${dayLabel} vazifalaringiz (${totalCount} ta):</b>\n\n${lines.join("\n")}`;
-      await client.sendMessage(entity, { message: textReply, parseMode: "html" });
-      await sendVoiceNote(client, entity, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta vazifa belgilangan. Ro'yxatni chatga yubordim.`);
+      await client.sendMessage(replyPeer, { message: textReply, parseMode: "html" });
+      await sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta vazifa belgilangan. Ro'yxatni chatga yubordim.`);
       return;
     }
 
@@ -299,14 +302,14 @@ async function main() {
       });
       reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda o'zim telefon qilib eslatib turaman! 🚀`;
 
-      await client.sendMessage(entity, { message: reportMsg, parseMode: "html" });
-      await sendVoiceNote(client, entity, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
+      await client.sendMessage(replyPeer, { message: reportMsg, parseMode: "html" });
+      await sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
       return;
     }
 
     // Noma'lum xabar bo'lsa
     const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), bazaga saqlayman. Qo'ng'iroq qilishimni xohlasangiz <i>"Manga tel qil"</i> deb yozing! 🚀`;
-    await client.sendMessage(entity, { message: fallback, parseMode: "html" });
+    await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });
   }, new NewMessage({ incoming: true }));
 
   // 2. BACKGROUND ALARM & REMINDER LOOP (Har 30 soniyada tekshirish)
