@@ -1,14 +1,12 @@
 /**
- * FlowDesk Ovozli Shaxsiy Yordamchi (Voice Assistant Worker)
+ * FlowDesk Shaxsiy Profil Yordamchisi (Personal Userbot AI Assistant)
  *
- * 1. Sizga Telegram orqali telefon qiladi.
- * 2. O'zbek tilida gapirib, ertangi vazifalarni so'raydi.
- * 3. Siz yuborgan javobni (ovozli xabar yoki matn) tinglab/o'qib,
- *    vaqtlari va deadlinelari bilan ajratib FlowDesk bazasiga kiritadi.
- * 4. Natijani o'zbekcha ovoz bilan hisobot beradi.
- *
- * Ishlatish:
- *   npx tsx voice-assistant.ts
+ * Ushbu dastur ikkinchi shaxsiy profilingiz (sovo_adm) nomidan ishlaydi:
+ * 1. Siz bu profilga xoh ovozli, xoh matnli xabar yozsangiz — darhol javob beradi.
+ * 2. Ertangi rejalaringizni aytsangiz — bazaga vaqtlari bilan saqlaydi va ovoz bilan tasdiqlaydi.
+ * 3. "Kartada qancha pul bor?" yoki "Ertaga nima vazifalar bor?" deb so'rasangiz — bazadan tekshirib aytib beradi.
+ * 4. Belgilangan vaqtda (uyg'onish, rejalar) sizga avtomatik telefon qiladi (ringing).
+ * 5. Agar telefonni ko'tarib uzsangiz va xabar yozmasangiz — javob berguningizcha har 5 daqiqada qayta telefon qilib uyg'otadi.
  */
 
 import { config } from "dotenv";
@@ -17,32 +15,106 @@ import { StringSession } from "telegram/sessions";
 import { NewMessage } from "telegram/events";
 import { generateUzbekSpeechAudio, triggerTelegramCall } from "./src/lib/callService";
 import { parseSpokenPlans, saveParsedPlansToDb } from "./src/lib/planAiParser";
+import { db } from "./src/db";
+import { cards, tasks, routines, sleepLogs, settings } from "./src/db/schema";
+import { eq, desc, asc, sql } from "drizzle-orm";
+import { getCardAvailableBalance } from "./src/lib/cardActions";
 import * as fs from "fs";
 
 config({ path: ".env.local" });
 config();
 
-function getTomorrowDateTashkent(): string {
+function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
   const now = new Date();
-  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Tashkent",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
   });
-  const parts = formatter.formatToParts(tomorrow);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
+  const parts = formatter.formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || "00";
+  const h = parseInt(get("hour"), 10);
+  const m = parseInt(get("minute"), 10);
+  const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const todayISO = `${get("year")}-${get("month")}-${get("day")}`;
+
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const tParts = formatter.formatToParts(tomorrow);
+  const tGet = (t: string) => tParts.find((p) => p.type === t)?.value || "00";
+  const tomorrowISO = `${tGet("year")}-${tGet("month")}-${tGet("day")}`;
+
+  return { timeStr, todayISO, tomorrowISO, minutes: h * 60 + m };
+}
+
+function fmt(n: number): string {
+  return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+}
+
+async function sendVoiceNote(client: TelegramClient, entity: any, text: string) {
+  try {
+    const audioBuffer = await generateUzbekSpeechAudio(text);
+    if (!audioBuffer) return;
+    const tempFile = `temp_voice_${Date.now()}.mp3`;
+    fs.writeFileSync(tempFile, audioBuffer);
+    await client.sendFile(entity, {
+      file: tempFile,
+      voiceNote: true,
+      caption: text.length > 200 ? text.slice(0, 197) + "..." : text,
+    });
+    try {
+      fs.unlinkSync(tempFile);
+    } catch {}
+  } catch (err) {
+    console.error("sendVoiceNote error:", err);
+  }
+}
+
+async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null> {
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  if (!geminiApiKey) return null;
+  try {
+    const base64Audio = audioBuffer.toString("base64");
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: "Sen o'zbek tilidagi audio xabarlarni aniq matnga aylantiruvchi yordamchisan. Ushbu ovozli xabarda nima deyilgan bo'lsa, aynan o'sha gaplarni o'zbek tilida yozib ber. Boshqa hech qanday ortiqcha so'z, izoh yoki belgi qo'shma.",
+              },
+              {
+                inline_data: {
+                  mime_type: "audio/ogg",
+                  data: base64Audio,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const data = await response.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+  } catch (e) {
+    console.error("Gemini transcribe error:", e);
+    return null;
+  }
 }
 
 async function main() {
   const target = process.env.TELEGRAM_TARGET_USER || "@sulaymonovss";
 
-  console.log("=================================================");
-  console.log("🤖 FLOWDESK OVOZLI YORDAMCHI (VOICE ASSISTANT)");
-  console.log(`🎯 Maqsadli profil: ${target}`);
-  console.log("=================================================\n");
+  console.log("==========================================================");
+  console.log("🤖 FLOWDESK PROFIL YORDAMCHISI (USERBOT AI ASSISTANT)");
+  console.log(`🎯 Aloqa profilingiz: ${target}`);
+  console.log("==========================================================\n");
 
   const apiIdStr = process.env.TELEGRAM_CALLER_API_ID;
   const apiHash = process.env.TELEGRAM_CALLER_API_HASH;
@@ -61,120 +133,217 @@ async function main() {
   console.log("📲 Telegramga ulanilmoqda...");
   await client.connect();
 
-  const entity = await client.getInputEntity(target);
   const me = await client.getMe();
   console.log(`✅ Ulandi: ${me.firstName} (@${me.username || "profil"})`);
+  console.log("👂 Sizdan xabar va ovozlar kutilmoqda...\n");
 
-  // 1. Ertangi rejalarni so'rovchi o'zbekcha audio hosil qilish
-  console.log("🎙️ Suhbat audiosi tayyorlanmoqda...");
-  const promptText =
-    "Assalomu alaykum Sohibjon! Ertangi kuningizni rejalashtiramiz. Ertaga qanday reja va ishlaringiz bor? Menga aytib bering, platformaga vaqtlari bilan yozib qo'yaman.";
-  const promptAudio = await generateUzbekSpeechAudio(promptText);
+  const entity = await client.getInputEntity(target);
 
-  // 2. Chatga savol xabari va ovozli xabar yuborish
-  console.log("✉️ Chatga so'rov yuborilmoqda...");
-  await client.sendMessage(entity, {
-    message:
-      "📋 <b>Ertangi kun rejalari</b>\n\nAssalomu alaykum Sohibjon! Ertaga qanday ish va rejalaringiz bor? Menga ovozli xabar (audio) yoki matn qilib aytib bering, platformaga o'zim vaqtlari bilan saqlab qo'yaman.\n\n<i>Misol: Ertaga soat 09:00 da bank, 14:00 da hisobot, 17:30 da sport zal</i>",
-    parseMode: "html",
-  });
-
-  if (promptAudio) {
-    const tempFile = "temp_prompt_voice.mp3";
-    fs.writeFileSync(tempFile, promptAudio);
-    await client.sendFile(entity, {
-      file: tempFile,
-      voiceNote: true,
-      caption: "🎙️ Ertangi rejalarni aytib bering",
-    });
-    try {
-      fs.unlinkSync(tempFile);
-    } catch {}
-    console.log("✅ O'zbekcha so'rov audiosi yuborildi!");
-  }
-
-  // 3. Telegram orqali telefon qo'ng'irog'i (Ringing)
-  console.log("📲 Sizga Telegram orqali telefon qilinmoqda...");
-  triggerTelegramCall(target, "Ertangi ishlarni so'rash va suhbat").catch(console.error);
-
-  console.log("\n👂 Sizning javobingiz kutilmoqda (chatga ovozli xabar yoki matn yuboring)...");
-
-  const tomorrowISO = getTomorrowDateTashkent();
-
-  // 4. Foydalanuvchining javobini kutish
+  // 1. INCOMING MESSAGES (Ovozli va matnli xabarlarni eshitish va javob berish)
   client.addEventHandler(async (event) => {
     const msg = event.message;
     if (!msg || msg.out) return;
 
-    let receivedText = msg.text || "";
+    let receivedText = msg.text || msg.message || "";
+    let isVoice = false;
 
-    // Agar audio / voice note bo'lsa
+    // Agar ovozli xabar bo'lsa
     if (msg.voice || msg.audio) {
-      console.log("🎙️ Ovozli xabar qabul qilindi!");
-      // Agar caption bo'lsa
-      if (msg.message) receivedText = msg.message;
+      isVoice = true;
+      console.log("🎙️ Foydalanuvchidan ovozli xabar keldi...");
+      try {
+        const mediaBuffer = await client.downloadMedia(msg);
+        if (mediaBuffer && Buffer.isBuffer(mediaBuffer)) {
+          const transcribed = await transcribeWithGemini(mediaBuffer);
+          if (transcribed) {
+            console.log(`🗣️ Transkripsiya (Gemini): "${transcribed}"`);
+            receivedText = transcribed;
+          }
+        }
+      } catch (err) {
+        console.error("Ovozni yuklab olishda xatolik:", err);
+      }
     }
 
-    if (!receivedText && (msg.voice || msg.audio)) {
-      receivedText = "Ertaga soat 09:00 da asosiy ishlar, 14:00 da hisobot, 18:00 da reja";
+    const clean = receivedText.trim();
+    if (!clean) {
+      if (isVoice) {
+        const reply = "🎙️ Ovozli xabaringiz qabul qilindi, lekin ovozni aniqlab bo'lmadi. Iltimos, ertangi rejalaringizni yoki savolingizni aniqroq ayting yoki matn qilib yozing!";
+        await client.sendMessage(entity, { message: reply });
+        await sendVoiceNote(client, entity, reply);
+      }
+      return;
     }
 
-    if (receivedText) {
-      console.log(`\n📥 Qabul qilingan reja matni:\n"${receivedText}"`);
+    console.log(`📥 Kelgan xabar: "${clean}"`);
 
-      const plans = parseSpokenPlans(receivedText);
-      console.log("🧩 Aniqlangan vazifalar:", plans);
+    // Foydalanuvchi javob yozdi -> bugungi uyg'onish holatini qayd etamiz
+    const { todayISO, tomorrowISO } = getTashkentTimeString();
+    try {
+      const [existingSleep] = await db.select().from(sleepLogs).where(eq(sleepLogs.date, todayISO)).limit(1);
+      if (existingSleep && !existingSleep.actualWake) {
+        await db.update(sleepLogs).set({ actualWake: getTashkentTimeString().timeStr }).where(eq(sleepLogs.id, existingSleep.id));
+      }
+    } catch {}
 
-      if (plans.length === 0) {
-        await client.sendMessage(entity, {
-          message:
-            "Kechirasiz, vazifalar vaqtini aniqlay olmadim. Iltimos, masalan: <i>'Ertaga 09:00 da bank, 14:00 da hisobot'</i> ko'rinishida yozing yoki aytib bering.",
-          parseMode: "html",
-        });
+    const q = clean.toLowerCase();
+
+    // 1-HOLAT: Karta / Pul / Balans savollari
+    if (/(karta|pul|balans|moliya|hisob|hisobimda|qancha pul|qancha bor)/i.test(q)) {
+      console.log("💳 Karta balansi so'raldi...");
+      const allCards = await db.select().from(cards).where(eq(cards.archived, false));
+      if (allCards.length === 0) {
+        const textReply = "💳 Hozircha hech qanday karta kiritilmagan.";
+        await client.sendMessage(entity, { message: textReply });
+        await sendVoiceNote(client, entity, "Sohibjon, platformada hozircha birorta ham karta mavjud emas.");
+        return;
+      }
+      let total = 0;
+      const lines: string[] = [];
+      for (const c of allCards) {
+        const bal = c.type === "primary" ? await getCardAvailableBalance(c.id) : Number(c.balance);
+        total += bal;
+        lines.push(`• <b>${c.name}</b> (${c.type === "primary" ? "Asosiy" : "Qo'shimcha"}): ${fmt(bal)}`);
+      }
+      const textReply = `💳 <b>Sizning kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami balans:</b> <b>${fmt(total)}</b>`;
+      await client.sendMessage(entity, { message: textReply, parseMode: "html" });
+      await sendVoiceNote(client, entity, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`);
+      return;
+    }
+
+    // 2-HOLAT: Vazifalar / Rejalar / Ishlar ro'yxati savoli
+    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar bor)/i.test(q) && !/(ertaga soat|ertaga \d|09:|10:|11:|12:|13:|14:|15:|16:|17:|18:|19:|20:)/i.test(q)) {
+      console.log("📋 Rejalar ro'yxati so'raldi...");
+      const isTomorrow = /(ertag|ertangi)/i.test(q);
+      const targetDate = isTomorrow ? tomorrowISO : todayISO;
+      const dayLabel = isTomorrow ? "Ertangi" : "Bugungi";
+
+      const [dayTasks, dayRoutines] = await Promise.all([
+        db.select().from(tasks).where(eq(tasks.date, targetDate)).orderBy(desc(tasks.id)),
+        db.select().from(routines).where(sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${targetDate}`).orderBy(asc(routines.time)),
+      ]);
+
+      const totalCount = dayTasks.length + dayRoutines.length;
+      if (totalCount === 0) {
+        const reply = `📋 ${dayLabel} kun (${targetDate}) uchun hali rejalashtirilgan vazifa yo'q. Rejalaringiz bo'lsa aytib bering, yozib qo'yaman!`;
+        await client.sendMessage(entity, { message: reply });
+        await sendVoiceNote(client, entity, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hech qanday vazifa belgilanmagan.`);
         return;
       }
 
-      // DB ga saqlash
-      console.log(`💾 Bazaga saqlanmoqda (${tomorrowISO})...`);
-      const { savedTasks, savedRoutines } = await saveParsedPlansToDb(
-        plans,
-        tomorrowISO
-      );
+      const lines: string[] = [];
+      if (dayRoutines.length > 0) {
+        lines.push("⏰ <b>Vaqtli rejalar (Intizom):</b>");
+        dayRoutines.forEach((r) => {
+          lines.push(`• <b>${r.time}</b> — ${r.title} ${r.lastDoneDate === targetDate ? "✅" : "⬜"}`);
+        });
+      }
+      if (dayTasks.length > 0) {
+        if (lines.length > 0) lines.push("");
+        lines.push("📋 <b>Kunlik vazifalar:</b>");
+        dayTasks.forEach((t) => {
+          lines.push(`• ${t.completed ? "✅" : "⬜"} ${t.title}`);
+        });
+      }
 
-      // Chiroyli hisobot tayyorlash
-      let reportMsg = `✅ <b>Qabul qilindi Sohibjon!</b>\n\nErtangi kun (<b>${tomorrowISO}</b>) uchun platformaga saqlandi:\n\n`;
+      const textReply = `📋 <b>${dayLabel} vazifalaringiz (${totalCount} ta):</b>\n\n${lines.join("\n")}`;
+      await client.sendMessage(entity, { message: textReply, parseMode: "html" });
+      await sendVoiceNote(client, entity, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta vazifa belgilangan. Ro'yxatni chatga yubordim.`);
+      return;
+    }
+
+    // 3-HOLAT: Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
+    const plans = parseSpokenPlans(clean);
+    if (plans.length > 0) {
+      console.log(`💾 Aniqlangan vazifalar: ${plans.length} ta. Bazaga saqlanmoqda...`);
+      const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, tomorrowISO);
+
+      let reportMsg = `✅ <b>Qabul qilindi Sohibjon!</b>\n\nErtangi kun (<b>${tomorrowISO}</b>) uchun saqlandi:\n\n`;
       plans.forEach((p, i) => {
         reportMsg += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
       });
-      reportMsg += `\n📊 Jami: ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi.\nErtaga har birining vaqti kelganda o'zim telefon qilib, eslatib turaman! 🚀`;
+      reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Ertaga o'zim telefon qilib eslatib turaman! 🚀`;
 
-      await client.sendMessage(entity, {
-        message: reportMsg,
-        parseMode: "html",
-      });
+      await client.sendMessage(entity, { message: reportMsg, parseMode: "html" });
+      await sendVoiceNote(client, entity, `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga yozib qo'ydim.`);
+      return;
+    }
 
-      // Ovozli javob yuborish
-      const voiceReplyText = `Tushundim Sohibjon! ${savedTasks} ta vazifani platformaga muvaffaqiyatli saqladim. Ertaga vaqti kelganda o'zim telefon qilib, ishlarni boshlataman!`;
-      const replyAudio = await generateUzbekSpeechAudio(voiceReplyText);
-      if (replyAudio) {
-        const replyFile = "temp_reply_voice.mp3";
-        fs.writeFileSync(replyFile, replyAudio);
-        await client.sendFile(entity, {
-          file: replyFile,
-          voiceNote: true,
-          caption: "🎙️ Rejalar saqlandi",
-        });
-        try {
-          fs.unlinkSync(replyFile);
-        } catch {}
+    // 4-HOLAT: Salomlashish yoki umumiy murojaat
+    if (/(salom|assalom|qalaysan|qandaysan|tuzikmisan)/i.test(q)) {
+      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Ertangi rejalaringizni ayting;\n• "Kartada qancha pul bor?" deb so'rang;\n• "Ertaga qanday vazifalar bor?" deb tekshiring!\n\nVaqti kelganda esa o'zim sizga telefon qilib ogohlantiraman!`;
+      await client.sendMessage(entity, { message: greeting, parseMode: "html" });
+      await sendVoiceNote(client, entity, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
+      return;
+    }
+
+    // Noma'lum xabar bo'lsa
+    const fallback = `Tushundim Sohibjon. Agar bu reja bo'lsa, vaqtini aytib yuborsangiz (masalan: <i>"Ertaga 09:00 da bank, 14:00 da hisobot"</i>), bazaga saqlayman. Pulni bilish uchun <i>"Kartada qancha pul bor?"</i> deb so'rashingiz mumkin! 🚀`;
+    await client.sendMessage(entity, { message: fallback, parseMode: "html" });
+  }, new NewMessage({ incoming: true }));
+
+  // 2. BACKGROUND ALARM & REMINDER LOOP (Har 30 soniyada tekshirish)
+  console.log("⏰ Ogohlantirish va uyg'otish vaqtlari tekshiruvi ishga tushdi...");
+
+  let lastWakeCallMinute = -1;
+  let lastSleepCallMinute = -1;
+
+  setInterval(async () => {
+    try {
+      const { timeStr, todayISO, tomorrowISO, minutes } = getTashkentTimeString();
+
+      // Baza sozlamalarini o'qish
+      const settingsRows = await db.select().from(settings);
+      const settingsMap: Record<string, string> = {};
+      for (const r of settingsRows) settingsMap[r.key] = r.value ?? "";
+
+      const wakeTime = settingsMap.wake_time || "04:30";
+      const sleepTime = settingsMap.sleep_time || "21:40";
+
+      const [wh, wm] = wakeTime.split(":").map(Number);
+      const wakeMinutes = (wh || 4) * 60 + (wm || 30);
+
+      const [sh, sm] = sleepTime.split(":").map(Number);
+      const sleepMinutes = (sh || 21) * 60 + (sm || 40);
+
+      // A) UYG'OTISH TEKSHIRUVI (wake_time dan boshlab 60 daqiqa davomida, foydalanuvchi javob bermaguncha har 5 daqiqada tel qilish)
+      if (minutes >= wakeMinutes && minutes <= wakeMinutes + 60) {
+        const [sleepRow] = await db.select().from(sleepLogs).where(eq(sleepLogs.date, todayISO)).limit(1);
+        const isAwake = Boolean(sleepRow?.actualWake);
+
+        if (!isAwake) {
+          // Har 5 daqiqada bir marta qo'ng'iroq qilish
+          if (minutes !== lastWakeCallMinute && (minutes - wakeMinutes) % 5 === 0) {
+            lastWakeCallMinute = minutes;
+            console.log(`🔔 Uyg'otish qo'ng'irog'i amalga oshirilmoqda (${timeStr})...`);
+            await triggerTelegramCall(target, `Uyg'onish vaqti: ${wakeTime}`);
+            const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, UYG'ONISH VAQTI!</b>\n\nYengillik bilan o'rningizdan turing va suv iching 💧. Menga xabar yozing!`;
+            await client.sendMessage(entity, { message: wakeMsg, parseMode: "html" });
+            await sendVoiceNote(client, entity, `Assalomu alaykum Sohibjon! Soat ${wakeTime} bo'ldi, o'rningizdan turing!`);
+          }
+        }
       }
 
-      console.log("\n🎉 Rejalar muvaffaqiyatli saqlandi va foydalanuvchiga xabar berildi!");
+      // B) KECHQURUN ERTANGI REJALARNI SO'RASH (sleepTime da yoki 20 daqiqa oldin)
+      if (minutes >= sleepMinutes - 20 && minutes <= sleepMinutes + 30) {
+        const tomorrowTasks = await db.select().from(tasks).where(eq(tasks.date, tomorrowISO)).limit(1);
+        if (tomorrowTasks.length === 0) {
+          if (minutes !== lastSleepCallMinute && (minutes - sleepMinutes) % 10 === 0) {
+            lastSleepCallMinute = minutes;
+            console.log(`🌙 Ertangi rejalar bo'sh! Qo'ng'iroq qilinmoqda (${timeStr})...`);
+            await triggerTelegramCall(target, "Ertangi rejalar kiritilmagan");
+            const sleepMsg = `🌙 <b>Ertangi rejalaringizni ayting!</b>\n\nSohibjon, ertangi kun (${tomorrowISO}) uchun hali birorta vazifa kiritilmadi. Iltimos, nimalar qilmoqchi ekanligingizni ovozli xabar orqali menga aytib bering!`;
+            await client.sendMessage(entity, { message: sleepMsg, parseMode: "html" });
+            await sendVoiceNote(client, entity, "Sohibjon, ertangi kun uchun rejalaringizni ovozli xabar qilib aytib bering!");
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Interval loop error:", err);
     }
-  }, new NewMessage({ incoming: true }));
+  }, 30000); // Har 30 soniyada tekshirish
 }
 
 main().catch((err) => {
-  console.error("Xatolik:", err);
+  console.error("Asosiy xatolik:", err);
 });
-
