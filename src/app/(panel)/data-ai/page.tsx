@@ -14,7 +14,7 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { SecurityGate } from "@/components/SecurityGate";
+
 
 type StoredProfile = {
   username?: string;
@@ -276,13 +276,8 @@ export default function DataAiPage() {
   const readiness = analysis?.readiness || 0;
 
   return (
-    <SecurityGate
-      scope="data-ai"
-      title="Data AI himoyalangan"
-      description="Bu bo'lim AI miyasi va ML xotirasi bo'lgani uchun Sozlanmalarda yoqilgan PIN, Face ID yoki Fingerprint bilan tasdiqlang."
-      requireSecurity
-    >
-      <div className="p-8 max-w-7xl mx-auto fade-in">
+    <div className="p-8 max-w-7xl mx-auto fade-in">
+
       <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
           <div className="text-sm font-semibold text-accent mb-1.5 flex items-center gap-2">
@@ -410,8 +405,7 @@ export default function DataAiPage() {
           </div>
         )}
       </section>
-      </div>
-    </SecurityGate>
+    </div>
   );
 }
 

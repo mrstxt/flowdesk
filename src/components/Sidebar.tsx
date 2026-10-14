@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Kanban,
@@ -17,7 +16,6 @@ import {
   Calendar,
   BriefcaseBusiness,
   Settings,
-  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -49,12 +47,6 @@ const groups = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.replace("/login");
-  }
 
   return (
     <aside className="w-64 shrink-0 border-r border-black/[0.06] dark:border-white/[0.08] glass h-screen sticky top-0 flex flex-col">
@@ -113,16 +105,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      <div className="p-3 space-y-1 border-t border-black/[0.06] dark:border-white/[0.08]">
-        <button
-          onClick={logout}
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-accent-soft hover:text-accent-ink transition-colors"
-        >
-          <LogOut className="w-[18px] h-[18px]" />
-          Chiqish
-        </button>
-      </div>
     </aside>
   );
 }
