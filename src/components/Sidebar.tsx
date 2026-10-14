@@ -11,11 +11,7 @@ import {
   BookOpen,
   Clapperboard,
   BarChart3,
-  Brain,
-  Sparkles,
   Calendar,
-  BriefcaseBusiness,
-  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,8 +24,6 @@ const groups = [
       { href: "/finance", label: "Hisob-kitob", icon: Wallet },
       { href: "/goals", label: "Maqsadlar", icon: Target },
       { href: "/subscriptions", label: "Obunalar", icon: Calendar },
-      { href: "/work-roles", label: "Ish bo'limi", icon: BriefcaseBusiness },
-      { href: "/settings", label: "Sozlanmalar", icon: Settings },
     ],
   },
   {
@@ -38,9 +32,7 @@ const groups = [
       { href: "/intizom", label: "Intizom", icon: AlarmClock },
       { href: "/kitoblar", label: "Kitoblar", icon: BookOpen },
       { href: "/rivojlanish", label: "Videolar", icon: Clapperboard },
-      { href: "/content-ai", label: "Content AI", icon: Sparkles },
       { href: "/analitika", label: "Analitika", icon: BarChart3 },
-      { href: "/data-ai", label: "Data AI", icon: Brain },
     ],
   },
 ];
