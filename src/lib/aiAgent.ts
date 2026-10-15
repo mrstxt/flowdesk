@@ -929,15 +929,17 @@ Muloqot qoidalari:
         }
 
         // 2-bosqich: Yakuniy chiroyli javob
+        const modelParts = chatResponse.candidates?.[0]?.content?.parts || functionCalls.map((fc) => ({
+          functionCall: { name: fc.name, args: fc.args },
+        }));
+
         const finalResponse = await ai.models.generateContent({
           model: TARGET_MODEL,
           contents: [
             { role: "user", parts: [{ text: clean }] },
             {
               role: "model",
-              parts: functionCalls.map((fc) => ({
-                functionCall: { name: fc.name, args: fc.args },
-              })),
+              parts: modelParts,
             },
             {
               role: "user",
