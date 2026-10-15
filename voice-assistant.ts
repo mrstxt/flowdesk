@@ -1800,7 +1800,7 @@ async function runWorker() {
         await client.sendMessage(entity, { message: "⚠️ Kechirasiz Sohibjon, kichik xatolik bo'ldi. Iltimos, qaytadan yozib yuboring." });
       } catch {}
     }
-  }, new NewMessage({ incoming: true, chats: [entity] }));
+  }, new NewMessage({ incoming: true }));
 
   // 2. BACKGROUND ALARM & REMINDER LOOP (Har 30 soniyada tekshirish)
   console.log("⏰ Ogohlantirish va uyg'otish vaqtlari tekshiruvi ishga tushdi...");
