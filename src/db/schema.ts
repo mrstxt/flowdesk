@@ -275,3 +275,38 @@ export const workReports = pgTable("work_reports", {
   summary: text("summary"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/* ── Media: Ijtimoiy tarmoq profillari ── */
+
+export const socialProfiles = pgTable("social_profiles", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  platform: varchar("platform", { length: 50 }).notNull().default("instagram"), // instagram, telegram, youtube, tiktok, behance, facebook, other
+  handle: varchar("handle", { length: 255 }), // @sovo_branding
+  url: text("url"),
+  avatarUrl: text("avatar_url"),
+  followersCount: integer("followers_count").default(0),
+  category: varchar("category", { length: 100 }).default("Dizayn"),
+  description: text("description"),
+  status: varchar("status", { length: 50 }).default("active"), // active, growing, paused
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/* ── Media: Kontent rejasi va postlar ── */
+
+export const contentItems = pgTable("content_items", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id"),
+  title: varchar("title", { length: 255 }).notNull(),
+  type: varchar("type", { length: 50 }).notNull().default("post"), // post, reels, carousel, story, article, portfolio
+  stage: varchar("stage", { length: 50 }).notNull().default("idea"), // idea, draft, in_progress, ready, published
+  caption: text("caption"),
+  mediaUrls: text("media_urls"),
+  scheduledDate: date("scheduled_date"),
+  scheduledTime: varchar("scheduled_time", { length: 5 }),
+  publishedAt: timestamp("published_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+

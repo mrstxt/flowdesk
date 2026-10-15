@@ -35,6 +35,8 @@ import {
   expenses,
   cardTransactions,
   goals,
+  contentItems,
+  socialProfiles,
 } from "./src/db/schema";
 import { eq, desc, asc, sql, and, ilike, or, isNull } from "drizzle-orm";
 import { getCardAvailableBalance, getPrimaryCard } from "./src/lib/cardActions";
@@ -1178,6 +1180,33 @@ async function runWorker() {
             await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
             return;
           }
+        }
+      }
+
+      // A.03) Kontent g'oyasi yoki rejasi ("Kontent: ...", "Kontent g'oya: ...")
+      if (/^(kontent|post|reels)\s*(g'oya|reja|mavzu|yoz)?[:\s]/i.test(clean)) {
+        const contentTitle = clean.replace(/^(kontent|post|reels)\s*(g'oya|reja|mavzu|yoz)?[:\s]+/i, "").trim();
+        if (contentTitle) {
+          let contentType = "post";
+          if (/reels|video/i.test(clean)) contentType = "reels";
+          else if (/karusel/i.test(clean)) contentType = "carousel";
+          else if (/story/i.test(clean)) contentType = "story";
+
+          await db.insert(contentItems).values({
+            title: contentTitle,
+            type: contentType,
+            stage: "idea",
+            notes: `Telegram orqali saqlangan (${todayISO})`,
+          });
+
+          const rep =
+            `💡 <b>Yangi kontent g'oyasi saqlandi!</b>\n\n` +
+            `📌 <b>Mavzu:</b> ${contentTitle}\n` +
+            `📱 <b>Format:</b> ${contentType.toUpperCase()}\n` +
+            `📂 <b>Bo'lim:</b> Media -> <b>«Kontent»</b> taxtasiga kiritildi! 🚀`;
+
+          await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+          return;
         }
       }
 

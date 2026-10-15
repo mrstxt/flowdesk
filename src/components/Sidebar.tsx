@@ -13,6 +13,8 @@ import {
   BarChart3,
   Calendar,
   Receipt,
+  Sparkles,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,11 +31,18 @@ const groups = [
     ],
   },
   {
+    label: "Media",
+    items: [
+      { href: "/kontent", label: "Kontent", icon: Sparkles },
+      { href: "/profillar", label: "Profillar", icon: Globe },
+    ],
+  },
+  {
     label: "Rivojlanish",
     items: [
       { href: "/intizom", label: "Intizom", icon: AlarmClock },
-      { href: "/kitoblar", label: "Kitoblar", icon: BookOpen },
       { href: "/rivojlanish", label: "Videolar", icon: Clapperboard },
+      { href: "/kitoblar", label: "Kitoblar", icon: BookOpen },
       { href: "/analitika", label: "Analitika", icon: BarChart3 },
     ],
   },

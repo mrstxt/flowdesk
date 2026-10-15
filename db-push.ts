@@ -279,6 +279,38 @@ CREATE TABLE IF NOT EXISTS work_reports (
 );
 
 ALTER TABLE work_reports ADD COLUMN IF NOT EXISTS summary TEXT;
+
+-- 16. social_profiles (media: profillar)
+CREATE TABLE IF NOT EXISTS social_profiles (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  platform VARCHAR(50) NOT NULL DEFAULT 'instagram',
+  handle VARCHAR(255),
+  url TEXT,
+  avatar_url TEXT,
+  followers_count INTEGER DEFAULT 0,
+  category VARCHAR(100) DEFAULT 'Dizayn',
+  description TEXT,
+  status VARCHAR(50) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+-- 17. content_items (media: kontent)
+CREATE TABLE IF NOT EXISTS content_items (
+  id SERIAL PRIMARY KEY,
+  profile_id INTEGER,
+  title VARCHAR(255) NOT NULL,
+  type VARCHAR(50) NOT NULL DEFAULT 'post',
+  stage VARCHAR(50) NOT NULL DEFAULT 'idea',
+  caption TEXT,
+  media_urls TEXT,
+  scheduled_date DATE,
+  scheduled_time VARCHAR(5),
+  published_at TIMESTAMP,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
 `;
 
 async function main() {
