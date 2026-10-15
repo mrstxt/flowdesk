@@ -1383,527 +1383,58 @@ async function runWorker() {
         return;
       }
 
-      // A) Qo'ng'iroq qilish buyrug'i ("tel qil", "telefon qil", "qo'ng'iroq qil", "manga tel qil")
-      if (/(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil|chaqir|manga\s*tel|menga\s*tel)/i.test(q)) {
+      // A) Qo'ng'iroq qilish buyrug'i ("tel qil", "telefon qil", "qo'ng'iroq qil")
+      if (/(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil|manga\s*tel|menga\s*tel)/i.test(q)) {
         console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
-        await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
+        await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman..." });
         await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
-        sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!").catch(() => {});
         return;
       }
 
-      // A.1) Minnatdorchilik ("raxmat", "rahmat", "katta rahmat", "spasibo", "tashakkur")
-      if (/(rahmat|raxmat|tashakkur|barakalla|katta rahmat|spasibo|gap yo'?q|zo'?r)/i.test(q)) {
-        console.log("🙏 Minnatdorchilik qabul qilindi...");
-        const reply = "Arzimaydi, Sohibjon! 😊 Sizga yordam berishdan doim mamnunman. Biror reja yoki savolingiz bo'lsa bemalol aytavering!";
-        await client.sendMessage(replyPeer, { message: reply });
-        sendVoiceNote(client, replyPeer, "Arzimaydi Sohibjon! Sizga yordam berishdan doim xursandman.").catch(() => {});
-        return;
-      }
-
-      // A.2) Aloqa tekshiruvi, nuqta yoki qisqa tasdiq (".", "..", "alo", "ha", "ok", "shu yerdamisan")
-      if (
-        /^(\.|\.\.|\.\.\.|alo|qani|ok|hop|xo'?p|ha|ha bo'?ldi|yaxshi|tushundim)$/i.test(q) ||
-        /(shu yerdamisan|ishlayapsanmi|eshtyapsanmi|eshityapsanmi|nima gap)/i.test(q)
-      ) {
-        console.log("💬 Muloqot / tekshiruv qabul qilindi...");
-        const reply = "Eshitaman Sohibjon! Men 24/7 siz bilanmanki, buyrug'ingizga tayyorman. Biror vazifa belgilaymizmi yoki telefon qilaymi? 😊";
-        await client.sendMessage(replyPeer, { message: reply });
-        sendVoiceNote(client, replyPeer, "Eshitaman Sohibjon, men tayyorman! Qanday yordam bera olaman?").catch(() => {});
-        return;
-      }
-
-      // A.25) Reja yoki vazifani o'chirish / tozalash ("rejalardi ochirib tur yangi tuzamiz", "ob tashla", "ochir", "bularni ob tashla")
-      if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla|tozalab\s*tur|o'?chirib\s*tur)/i.test(q)) {
-        console.log("🗑️ Rejani o'chirish / tozalash so'raldi...");
-
-        const isTomorrow = /(ertag|ertangi)/i.test(q);
-        const isToday = /(bugun|bugungi)/i.test(q);
-
-        const isAll =
-          /(barcha|hamma|barchasini|hammasini|bularni|bular|hammasi|tozala|tozalab|kerakmas|kerak\s*emas)/i.test(q) ||
-          /(?:rejalarni|rejalardi|vazifalarni|vazifalardi)\s*(?:hammasini|barchasini|tozala|o'?chir|ob\s*tashla)/i.test(q) ||
-          /(?:o'?chirib\s*tur|tozalab\s*tur|yangi\s*tuzamiz)/i.test(q) ||
-          /(?:rejalarni|rejalardi|vazifalarni|vazifalardi)/i.test(q) ||
-          /^(\s*o'?chir\s*|\s*ob\s*tashla\s*|\s*olib\s*tashla\s*|\s*o'?chirib\s*tashla\s*|\s*rejalardi\s*o'?chir\s*|\s*rejalarni\s*o'?chir\s*)$/i.test(clean);
-
-        const wantsCall = /(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil)/i.test(q);
-
-        // Qaysi aniq vazifani o'chirish kerakligini aniqlash
-        let targetWord = clean
-          .replace(/(?:o'?chirib\s*tashla|ob\s*tashla|olib\s*tashla|o'?chirib\s*tur|tozalab\s*tur|o'?chir|bekor\s*qil|tozala|tashla)/gi, "")
-          .replace(/(?:vazifasini|rejasini|vazifani|rejani|ishni|rejalarni|rejalardi|vazifalarni|vazifalardi)/gi, "")
-          .replace(/(?:bugungi|ertangi|iltimos|menga|manga|shuni|yangi\s*tuzamiz|reja\s*tuzish\s*uchun|uchun|tel\s*qil|telefon\s*qil)/gi, "")
-          .replace(/(?:ni|di)$/gi, "")
-          .trim();
-
-        // Agar umumiy tozalash bo'lsa yoki qolgan so'z qisqa bo'lsa -> butun rejalarni tozalash
-        if (isAll || targetWord.length < 3) {
-          let delCount = 0;
-          let label = "";
-
-          if (isTomorrow) {
-            const delT = await db.delete(tasks).where(eq(tasks.date, tomorrowISO)).returning({ id: tasks.id });
-            const delR = await db.delete(routines).where(eq(routines.targetDate, tomorrowISO)).returning({ id: routines.id });
-            delCount = delT.length + delR.length;
-            label = `Ertangi (${tomorrowISO})`;
-          } else if (isToday) {
-            const delT = await db.delete(tasks).where(eq(tasks.date, todayISO)).returning({ id: tasks.id });
-            const delR = await db.delete(routines).where(eq(routines.targetDate, todayISO)).returning({ id: routines.id });
-            delCount = delT.length + delR.length;
-            label = `Bugungi (${todayISO})`;
-          } else {
-            // Kun aniq aytilmagan bo'lsa ("Rejalardi ochirib tur yangi tuzamiz") -> HAM bugungi, HAM ertangi kun rejalari
-            const delT = await db.delete(tasks).where(or(eq(tasks.date, todayISO), eq(tasks.date, tomorrowISO))).returning({ id: tasks.id });
-            const delR = await db.delete(routines).where(or(eq(routines.targetDate, todayISO), eq(routines.targetDate, tomorrowISO))).returning({ id: routines.id });
-            delCount = delT.length + delR.length;
-            label = "Barcha joriy va ertangi";
-          }
-
-          let rep = `🗑️ Tushundim Sohibjon! ${label} rejalarni tozalab tashladim (${delCount} ta reja o'chirildi).`;
-          if (wantsCall) {
-            rep += "\n\nYangi reja tuzishingiz uchun hozir telefon qilmoqdaman... 📲";
-          } else {
-            rep += " Ro'yxatingiz top-toza bo'ldi. Yangi reja tuzamizmi? 😊";
-          }
-
-          await client.sendMessage(replyPeer, { message: rep });
-          sendVoiceNote(client, replyPeer, "Tushundim Sohibjon! Rejalarni tozalab tashladim.").catch(() => {});
-
-          if (wantsCall) {
-            await makeCallWithClient(client, entity, "Yangi reja tuzish uchun qo'ng'iroq");
-          }
-          return;
-        }
-
-        // Muayyan bitta vazifani o'chirish (masalan: "kitob o'qishni ob tashla")
-        const pattern = `%${targetWord.replace(/['`]/g, "")}%`;
-        const delT = await db.delete(tasks).where(ilike(tasks.title, pattern)).returning({ id: tasks.id });
-        const delR = await db.delete(routines).where(ilike(routines.title, pattern)).returning({ id: routines.id });
-
-        if (delT.length || delR.length) {
-          const rep = `🗑️ Tushundim Sohibjon! <b>"${targetWord}"</b> rejangizni ro'yxatdan o'chirib tashladim.`;
-          await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
-          sendVoiceNote(client, replyPeer, `${targetWord} rejasini o'chirib tashladim.`).catch(() => {});
-          if (wantsCall) {
-            await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
-          }
-          return;
-        } else {
-          const rep = `🤔 Sohibjon, ro'yxatdan "${targetWord}" degan reja topilmadi. "Rejalar qanday" deb yozsangiz hozirgi rejalarni ko'rib olasiz!`;
-          await client.sendMessage(replyPeer, { message: rep });
-          sendVoiceNote(client, replyPeer, `Ro'yxatdan ${targetWord} degan reja topilmadi Sohibjon.`).catch(() => {});
-          return;
-        }
-      }
-
-    // A.3) YouTube Video havolasi
-    const ytMatch = clean.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
-    if (ytMatch) {
-      console.log("🎬 YouTube video aniqlandi...");
-      const videoId = ytMatch[1];
-      const fullUrl = ytMatch[0].startsWith("http") ? ytMatch[0] : `https://${ytMatch[0]}`;
-      const videoTitle = await fetchYouTubeTitle(fullUrl);
-
-      const tashkentMinutes = getTashkentTimeString().minutes;
-      const tashkentH = Math.floor(tashkentMinutes / 60);
-      const isTomorrowPreferred = /(ertag|ertangi)/i.test(q) || tashkentH >= 20;
-      const targetDate = isTomorrowPreferred ? tomorrowISO : todayISO;
-      const dateLabel = isTomorrowPreferred ? "Ertangi kun" : "Bugungi kun";
-
+      // Barcha xabarlar (matn va ovoz) TO'G'RIDAN-TO'G'RI GEMINI AI AGENTIGA uzatiladi:
       try {
-        await db.insert(videos).values({
-          title: videoTitle,
-          url: fullUrl,
-          videoId,
-          category: "other",
-          watched: false,
+        console.log("🤖 Xabar to'g'ridan-to'g'ri Gemini AI Agentiga uzatilmoqda:", clean);
+        const agentRes = await processAgentMessage(clean, {
+          senderId,
+          username: targetEntity?.username,
         });
 
-        await db.insert(tasks).values({
-          title: `🎬 Video ko'rish: ${videoTitle}`,
-          date: targetDate,
-          category: "development",
-        });
+        if (agentRes && agentRes.text) {
+          let fullReply = agentRes.text;
+          if (agentRes.pdfUrl && !fullReply.includes(agentRes.pdfUrl)) {
+            const domain = process.env.PUBLIC_APP_URL || "https://flowdesk-production-f4a3.up.railway.app";
+            const fullPdfLink = agentRes.pdfUrl.startsWith("http")
+              ? agentRes.pdfUrl
+              : `${domain}${agentRes.pdfUrl}`;
+            fullReply += `\n\n📄 <b>PDF Xulosa Kitobchasi:</b>\n<a href="${fullPdfLink}">${fullPdfLink}</a>`;
+          }
 
-        const reply = `🎬 <b>YouTube video Rivojlanishga saqlandi!</b>\n\n📌 <b>${videoTitle}</b>\n🔗 <a href="${fullUrl}">Videoni ochish</a>\n\n⏰ <b>Rejaga qo'shildi:</b> ${dateLabel} (<b>${targetDate}</b>) bo'sh vaqtingizga kiritildi! 🚀`;
-        await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-        void sendVoiceNote(client, replyPeer, `Sohibjon, YouTube videoni saqlab qo'ydim. Uni ${dateLabel.toLowerCase()} bo'sh vaqtingizda ko'rish uchun rejalarga qo'shdim.`);
-      } catch (e) {
-        console.error("Video saqlash xatoligi:", e);
-      }
-      return;
-    }
-
-    // A.4) Buyurtma / Mijoz ishlari
-    if (/(buyurtma|zakaz|mijoz|ish qiberish|proyekt|klient|uchun logo|uchun sayt|uchun dizayn)/i.test(q) && /(narx|so'?m|\$|dollar|ming|sum|mln|gacha|deadline|\d)/i.test(q)) {
-      console.log("💼 Yangi buyurtma aniqlandi...");
-      const order = parseOrderDetails(clean, todayISO, tomorrowISO);
-      if (order && (order.amount > 0 || order.clientName)) {
-        try {
-          await db.insert(orders).values({
-            title: order.title,
-            clientName: order.clientName,
-            amount: String(order.amount),
-            deadline: order.deadline,
-            stage: "new",
-            paymentType: "cash",
-            description: clean,
-          });
-
-          const reply = `💼 <b>Yangi buyurtma qabul qilindi va saqlandi!</b>\n\n👤 <b>Mijoz:</b> ${order.clientName || "Ko'rsatilmagan"}\n📌 <b>Buyurtma:</b> ${order.title}\n💰 <b>Narxi:</b> ${fmt(order.amount)}${order.deadline ? `\n📅 <b>Muddati (Deadline):</b> ${order.deadline}` : ""}\n\nDashboard Buyurtmalar bo'limida ko'rishingiz mumkin! 🚀`;
-          await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-          void sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Yangi buyurtmani tizimga saqlab qo'ydim.`);
-          return;
-        } catch (e) {
-          console.error("Buyurtma saqlash xatoligi:", e);
-        }
-      }
-    }
-
-    // A.5) Chiqim qo'shish ("50 minga narsa oldim", "Chiqim 50000", "Tushlikka 40000 ketdi")
-    const expenseData = parseExpenseInput(clean);
-    if (expenseData) {
-      const { amount: amt, title: desc } = expenseData;
-      console.log(`💸 Chiqim aniqlandi: ${amt} so'm, izoh: "${desc}"`);
-      try {
-        const allActiveCards = await db.select().from(cards).where(eq(cards.archived, false));
-        let targetCard =
-          allActiveCards.find((c) => c.type === "primary") ||
-          allActiveCards.find((c) => /asosiy/i.test(c.name)) ||
-          allActiveCards[0];
-
-        if (!targetCard) {
-          const [newCard] = await db
-            .insert(cards)
-            .values({
-              name: "Asosiy",
-              type: "primary",
-              balance: "0",
-            })
-            .returning();
-          targetCard = newCard;
-        }
-
-        // 1. Chiqimlar (expenses) ga saqlaymiz
-        await db.insert(expenses).values({
-          title: desc,
-          amount: String(amt),
-          date: todayISO,
-          category: "other",
-          cardId: targetCard.id,
-        });
-
-        // 2. Karta harakatlari (card_transactions) ga yozamiz
-        await db.insert(cardTransactions).values({
-          cardId: targetCard.id,
-          date: todayISO,
-          type: "out",
-          amount: String(amt),
-          description: desc,
-        });
-
-        // 3. Kartaning balance ustunini yangilaymiz
-        const oldBal = Number(targetCard.balance) || 0;
-        const newBal = Math.max(0, oldBal - amt);
-        await db
-          .update(cards)
-          .set({ balance: String(newBal) })
-          .where(eq(cards.id, targetCard.id));
-
-        // 4. Haqiqiy qoldiqni hisoblaymiz
-        const remBalance =
-          targetCard.type === "primary"
-            ? await getCardAvailableBalance(targetCard.id)
-            : newBal;
-
-        const reply =
-          `💸 <b>Chiqim muvaffaqiyatli qayd etildi!</b>\n\n` +
-          `🛒 <b>Xarajat:</b> ${desc}\n` +
-          `➖ <b>Chiqim summasi:</b> -${fmt(amt)}\n` +
-          `💳 <b>Karta:</b> ${targetCard.name} (${targetCard.type === "primary" ? "Asosiy" : "Karta"})\n` +
-          `💰 <b>Kartadagi yangi qoldiq:</b> <b>${fmt(remBalance)}</b>\n\n` +
-          `<i>Xarajat asosiy kartangiz hisobiga kiritildi, Sohibjon!</i>`;
-
-        await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-        void sendVoiceNote(
-          client,
-          replyPeer,
-          `Tushundim Sohibjon! ${desc} uchun ${fmt(amt)} chiqim asosiy kartangizdan yechildi. Hozirgi qoldiq ${fmt(remBalance)}.`
-        );
-        return;
-      } catch (e) {
-        console.error("Chiqim saqlash xatoligi:", e);
-      }
-    }
-
-    // A.6) Kirim qo'shish ("Kirim 1000000 oylik", "Oylik tushdi 2000000", "Kartaga 200 ming tushdi")
-    const incomeData = parseIncomeInput(clean);
-    if (incomeData) {
-      const { amount: amt, title: desc } = incomeData;
-      console.log(`💰 Kirim aniqlandi: ${amt} so'm, izoh: "${desc}"`);
-      try {
-        const allActiveCards = await db.select().from(cards).where(eq(cards.archived, false));
-        let targetCard =
-          allActiveCards.find((c) => c.type === "primary") ||
-          allActiveCards.find((c) => /asosiy/i.test(c.name)) ||
-          allActiveCards[0];
-
-        if (!targetCard) {
-          const [newCard] = await db
-            .insert(cards)
-            .values({
-              name: "Asosiy",
-              type: "primary",
-              balance: "0",
-            })
-            .returning();
-          targetCard = newCard;
-        }
-
-        // 1. Daromadlar (incomes) jadvaliga saqlaymiz
-        await db.insert(incomes).values({
-          title: desc,
-          amount: String(amt),
-          date: todayISO,
-          source: "other",
-          cardId: targetCard.id,
-        });
-
-        // 2. Karta harakatlari (card_transactions) ga yozamiz
-        await db.insert(cardTransactions).values({
-          cardId: targetCard.id,
-          date: todayISO,
-          type: "in",
-          amount: String(amt),
-          description: desc,
-        });
-
-        // 3. Kartaning balance ustunini yangilaymiz
-        const oldBal = Number(targetCard.balance) || 0;
-        const newBal = oldBal + amt;
-        await db
-          .update(cards)
-          .set({ balance: String(newBal) })
-          .where(eq(cards.id, targetCard.id));
-
-        // 4. Haqiqiy qoldiqni hisoblaymiz
-        const remBalance =
-          targetCard.type === "primary"
-            ? await getCardAvailableBalance(targetCard.id)
-            : newBal;
-
-        const reply =
-          `💰 <b>Kirim muvaffaqiyatli qayd etildi!</b>\n\n` +
-          `📌 <b>Manba / Izoh:</b> ${desc}\n` +
-          `➕ <b>Kirim summasi:</b> +${fmt(amt)}\n` +
-          `💳 <b>Karta:</b> ${targetCard.name} (${targetCard.type === "primary" ? "Asosiy" : "Karta"})\n` +
-          `💰 <b>Kartadagi yangi qoldiq:</b> <b>${fmt(remBalance)}</b>\n\n` +
-          `<i>Mablag' kartangizga muvaffaqiyatli qabul qilindi, Sohibjon! 🚀</i>`;
-
-        await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-        void sendVoiceNote(
-          client,
-          replyPeer,
-          `Ajoyib Sohibjon! ${desc} uchun ${fmt(amt)} kirim asosiy kartangizga qo'shildi. Hozirgi qoldiq ${fmt(remBalance)}.`
-        );
-        return;
-      } catch (e) {
-        console.error("Kirim saqlash xatoligi:", e);
-      }
-    }
-
-    // B) Uyg'onish vaqtini o'zgartirish ("5:30 da turishim kerak", "soat 6 da uyg'ot")
-    const wakeMatch =
-      clean.match(/(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)\s*(?:da|gacha)?\s*(?:turish|uygon|uyg'on)/i) ||
-      clean.match(/(?:turish|uygon|uyg'on)\S*\s*(?:vaqti\s*)?(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)/i) ||
-      clean.match(/(?:soat\s*)?(\b[0-2]?[0-9][:.]?[0-5][0-9]\b)\s*(?:da|gacha)?\s*(?:uyg'ot|uygot)/i);
-
-    if (wakeMatch) {
-      let wt = wakeMatch[1].replace(".", ":");
-      if (!wt.includes(":")) wt = `${wt.padStart(2, "0")}:00`;
-      else {
-        const [h, m] = wt.split(":");
-        wt = `${h.padStart(2, "0")}:${(m || "00").padStart(2, "0")}`;
-      }
-      console.log(`⏰ Uyg'onish vaqti yangilandi: ${wt}`);
-      await db.insert(settings).values({ key: "wake_time", value: wt }).onConflictDoUpdate({ target: settings.key, set: { value: wt } });
-      const wakeReply = `⏰ Tushundim Sohibjon! Uyg'onish vaqti soat <b>${wt}</b> ga belgilandi. Shu vaqtda o'zim sizga telefon qilaman va uyg'otaman! 🚀`;
-      await client.sendMessage(replyPeer, { message: wakeReply, parseMode: "html" });
-      void sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Uyg'onish vaqtini soat ${wt} ga belgilab qo'ydim.`);
-      return;
-    }
-
-    // C) Bugungi kunga o'zgartirish yoki tuzatish
-    if (/(ozgartir|o'zgartir|bugunga otkaz|bugunga o'tkaz|bugungi kunga)/i.test(q)) {
-      console.log("🔄 Oxirgi vazifalarni bugungi kunga o'tkazish...");
-      const recentTasks = await db.select().from(tasks).orderBy(desc(tasks.id)).limit(5);
-      for (const t of recentTasks) {
-        await db.update(tasks).set({ date: todayISO }).where(eq(tasks.id, t.id));
-      }
-      const reply = `✅ Oxirgi kiritilgan vazifalar bugungi kun (<b>${todayISO}</b>) ga o'zgartirildi!`;
-      await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-      void sendVoiceNote(client, replyPeer, "Barcha kiritilgan vazifalar bugungi kunga o'tkazildi Sohibjon!");
-      return;
-    }
-
-    // D) Salomlashish yoki umumiy murojaat
-    if (/(salom|assalom|alo|qalaysan|qandaysan|tuzikmisan|qalesiz)/i.test(q)) {
-      console.log("👋 Salomlashish qabul qilindi...");
-      const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Nimalar bor?" deb vazifalaringizni so'rang;\n• "5:30 da turishim kerak" deb uyg'onish vaqtini ayting!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
-      await client.sendMessage(replyPeer, { message: greeting, parseMode: "html" });
-      void sendVoiceNote(client, replyPeer, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
-      return;
-    }
-
-    // E) Karta / Pul / Balans savollari
-    if (/(karta|pul|balans|moliya|hisob|hisobimda|qancha pul|qancha bor)/i.test(q)) {
-      console.log("💳 Karta balansi so'raldi...");
-      const allCards = await db.select().from(cards).where(eq(cards.archived, false));
-      if (allCards.length === 0) {
-        const textReply = "💳 Hozircha hech qanday karta kiritilmagan.";
-        await client.sendMessage(replyPeer, { message: textReply });
-        void sendVoiceNote(client, replyPeer, "Sohibjon, platformada hozircha birorta ham karta mavjud emas.");
-        return;
-      }
-      let total = 0;
-      const lines: string[] = [];
-      for (const c of allCards) {
-        const bal = c.type === "primary" ? await getCardAvailableBalance(c.id) : Number(c.balance);
-        total += bal;
-        lines.push(`• <b>${c.name}</b> (${c.type === "primary" ? "Asosiy" : "Qo'shimcha"}): ${fmt(bal)}`);
-      }
-      const textReply = `💳 <b>Sizning kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami balans:</b> <b>${fmt(total)}</b>`;
-      await client.sendMessage(replyPeer, { message: textReply, parseMode: "html" });
-      void sendVoiceNote(client, replyPeer, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`);
-      return;
-    }
-
-    // F) Vazifalar / Rejalar / Ishlar ro'yxati savoli ("rejalar qanday", "bugun nimalar bor", "ertangi rejalar")
-    const wordCount = q.split(/\s+/).filter(Boolean).length;
-    const hasPlanTopic = /(reja|vazifa|ishlar|ishim|eslat|nima\s*(bor|ish|qilish)|nimalar|ro'?yxat|jadval|kun\s*tartib)/i.test(q);
-    const hasAskWord = /(qanday|qanaqa|qaysi|nima|bor\b|bormi|ko'?rsat|korsat|ayt|jo'?nat|jonat|yubor|tashla|\?|qani|kerak)/i.test(q);
-    if (hasPlanTopic && (hasAskWord || wordCount <= 3) && !/\d/.test(q)) {
-      console.log("📋 Rejalar ro'yxati so'raldi...");
-      const isTomorrow = /(ertag|ertangi)/i.test(q);
-      const targetDate = isTomorrow ? tomorrowISO : todayISO;
-      const dayLabel = isTomorrow ? "Ertangi" : "Bugungi";
-
-      const [dayTasks, dayRoutines] = await Promise.all([
-        db.select().from(tasks).where(eq(tasks.date, targetDate)).orderBy(asc(tasks.id)),
-        db.select().from(routines).where(sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${targetDate}`).orderBy(asc(routines.time)),
-      ]);
-
-      // Vaqtli rejalar tasks jadvalida ham bor — takrorlanmasligi uchun ajratamiz
-      const routineTitles = new Set(dayRoutines.map((r) => r.title.trim().toLowerCase()));
-      const otherTasks = dayTasks.filter((t) => !routineTitles.has(t.title.trim().toLowerCase()));
-
-      const totalCount = dayRoutines.length + otherTasks.length;
-      if (totalCount === 0) {
-        const reply = `📋 ${dayLabel} kun (${targetDate}) uchun hali hech qanday reja yo'q. Rejalaringizni aytib bering, yozib qo'yaman! 😊`;
-        await client.sendMessage(replyPeer, { message: reply });
-        void sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hali reja yo'q.`);
-        return;
-      }
-
-      const lines: string[] = [];
-      if (dayRoutines.length > 0) {
-        lines.push("⏰ <b>Vaqtli rejalar:</b>");
-        dayRoutines.forEach((r) => {
-          const done = r.lastDoneDate && String(r.lastDoneDate).slice(0, 10) === targetDate;
-          const timeRange = r.startTime && r.endTime
-            ? `${r.startTime} - ${r.endTime}`
-            : r.time;
-          lines.push(`${done ? "✅" : "⬜"} <b>${timeRange}</b> — ${r.title}${r.targetDate ? "" : " <i>(har kuni)</i>"}`);
-        });
-      }
-      if (otherTasks.length > 0) {
-        if (lines.length > 0) lines.push("");
-        lines.push("📋 <b>Vazifalar:</b>");
-        otherTasks.forEach((t) => {
-          lines.push(`${t.completed ? "✅" : "⬜"} ${t.title}`);
-        });
-      }
-
-      const textReply = `📅 <b>${dayLabel} rejalaringiz — ${targetDate} (${totalCount} ta):</b>\n\n${lines.join("\n")}`;
-      await client.sendMessage(replyPeer, { message: textReply, parseMode: "html" });
-      void sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta reja bor. Hammasini chatga yubordim.`);
-      return;
-    }
-
-    // G) Rejalarni saqlash (Erkin aytilgan yoki yozilgan rejalar)
-    const tashkentHour = Math.floor(getTashkentTimeString().minutes / 60);
-    const { dateType } = detectPlanDate(clean, tashkentHour);
-    const isToday = dateType === "today";
-    const targetDate = isToday ? todayISO : tomorrowISO;
-    const dateLabel = isToday ? "Bugungi kun" : "Ertangi kun";
-
-    const plans = parseSpokenPlans(clean);
-    if (plans.length > 0) {
-      console.log(`💾 Aniqlangan vazifalar: ${plans.length} ta (${dateLabel}: ${targetDate}). Bazaga saqlanmoqda...`);
-      const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, targetDate);
-
-      let reportMsg = `✅ <b>Qabul qilindi!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n\n`;
-      plans.forEach((p, i) => {
-        const timeDisplay = p.startTime && p.endTime
-          ? `⏰ <b>${p.startTime} - ${p.endTime}</b>`
-          : p.time ? `⏰ <b>${p.time}</b>` : "";
-        reportMsg += `${i + 1}. ${timeDisplay ? `${timeDisplay} — ` : ""}${p.title}\n`;
-      });
-      reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda eslatib turaman! 🚀`;
-
-      await client.sendMessage(replyPeer, { message: reportMsg, parseMode: "html" });
-      const wantsVoiceEarly = /(?:golos|ovozli|audio|ovoz bilan|gapir)/i.test(clean);
-      if (wantsVoiceEarly) {
-        void sendVoiceNote(client, replyPeer, `Tushundim! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
-      }
-      return;
-    }
-
-    // Noma'lum yoki erkin so'rovlar -> Gemini Function Calling AI Agentiga uzatamiz
-    try {
-      console.log("🤖 Erkin xabar AI Agentga uzatilmoqda:", clean);
-      const agentRes = await processAgentMessage(clean, {
-        senderId,
-        username: targetEntity?.username,
-      });
-
-      if (agentRes && agentRes.text) {
-        let fullReply = agentRes.text;
-        if (agentRes.pdfUrl && !fullReply.includes(agentRes.pdfUrl)) {
-          const domain = process.env.PUBLIC_APP_URL || "https://flowdesk-production-f4a3.up.railway.app";
-          const fullPdfLink = agentRes.pdfUrl.startsWith("http")
-            ? agentRes.pdfUrl
-            : `${domain}${agentRes.pdfUrl}`;
-          fullReply += `\n\n📄 <b>PDF Xulosa Kitobchasi:</b>\n<a href="${fullPdfLink}">${fullPdfLink}</a>`;
-        }
-
-        if (agentRes.pdfUrl) {
-          const localPdfPath = path.join(process.cwd(), "public", agentRes.pdfUrl.replace(/^\//, ""));
-          if (fs.existsSync(localPdfPath)) {
-            try {
-              await client.sendFile(replyPeer, {
-                file: localPdfPath,
-                caption: `📚 PDF Xulosa Kitobchasi (FlowDesk)`,
-              });
-            } catch (sendErr) {
-              console.warn("PDF yuborishda ogohlantirish:", sendErr);
+          if (agentRes.pdfUrl) {
+            const localPdfPath = path.join(process.cwd(), "public", agentRes.pdfUrl.replace(/^\//, ""));
+            if (fs.existsSync(localPdfPath)) {
+              try {
+                await client.sendFile(replyPeer, {
+                  file: localPdfPath,
+                  caption: `📚 PDF Xulosa Kitobchasi (FlowDesk)`,
+                });
+              } catch (sendErr) {
+                console.warn("PDF yuborishda ogohlantirish:", sendErr);
+              }
             }
           }
-        }
 
-        await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
+          await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
 
-        // Faqat foydalanuvchi "golos", "ovozli", "audio" yoki "gapir" desa ovozli xabar yuboriladi
-        const wantsVoice = /(?:golos|ovozli|audio|ovoz bilan|gapir|aytib ber)/i.test(clean);
-        if (wantsVoice) {
-          void sendVoiceNote(client, replyPeer, agentRes.text);
+          // Ovozli xabar kelganda yoki foydalanuvchi audio/golos so'raganda ovozli xabar (uz-UZ-MadinaNeural) yuboriladi
+          const wantsVoice = isVoice || /(?:golos|ovozli|audio|ovoz bilan|gapir|aytib ber)/i.test(clean);
+          if (wantsVoice) {
+            void sendVoiceNote(client, replyPeer, agentRes.text);
+          }
+          return;
         }
-        return;
+      } catch (agentErr) {
+        console.error("AI Agent xatosi:", agentErr);
       }
-    } catch (agentErr) {
-      console.error("AI Agent fallback xatosi:", agentErr);
-    }
 
     const fallback = `Eshitdim! 😊 Agar bu yangi rejangiz bo'lsa (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), aytib yuborsangiz saqlab qo'yaman. Qo'ng'iroq qilishimni xohlasangiz <i>"Tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });

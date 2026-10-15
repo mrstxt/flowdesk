@@ -624,6 +624,66 @@ export async function createContentPlan(params: {
   }
 }
 
+/**
+ * l) Internetdan yoki Google-dan real vaqtda ma'lumotlar, yangiliklar, ob-havo qidirish
+ */
+export async function searchWeb(params: { query: string }) {
+  try {
+    const q = params.query.trim();
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    const html = await res.text();
+    const matches = [...html.matchAll(/<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/g)].slice(0, 4);
+    const snippets = matches.map((m) =>
+      m[1]
+        .replace(/<[^>]+>/g, "")
+        .replace(/&#x27;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&")
+        .trim()
+    );
+
+    return {
+      success: true,
+      query: q,
+      results: snippets.length > 0 ? snippets : ["Qidiruv bo'yicha to'g'ridan-to'g'ri qisqa ma'lumot topilmadi."],
+    };
+  } catch (error: any) {
+    console.error("searchWeb error:", error);
+    return { success: false, query: params.query, error: error.message };
+  }
+}
+
+/**
+ * m) Kutilayotgan hisob-kitoblar va mijozlardan olinishi kerak bo'lgan mablag'larni ko'rish
+ */
+export async function getPendingOrders() {
+  try {
+    const pending = await db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.stage, "hisob_kitob"), eq(orders.archived, false)));
+
+    const total = pending.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+    return {
+      count: pending.length,
+      totalPendingAmount: total,
+      orders: pending.map((o) => ({
+        id: o.id,
+        clientName: o.clientName,
+        title: o.title,
+        amount: Number(o.amount) || 0,
+        stage: o.stage,
+      })),
+    };
+  } catch (error: any) {
+    return { error: error.message, count: 0, orders: [] };
+  }
+}
+
 // ─── 2. Gemini Function Declarations ───
 
 const getCalendarScheduleDeclaration: FunctionDeclaration = {
@@ -801,6 +861,29 @@ const createContentPlanDeclaration: FunctionDeclaration = {
   },
 };
 
+const searchWebDeclaration: FunctionDeclaration = {
+  name: "searchWeb",
+  description:
+    "Google yoki internetdan real vaqtda ma'lumotlar, eng so'nggi yangiliklar, ob-havo, valyuta kurslari va faktlarni qidirish.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: { type: Type.STRING, description: "Qidiruv so'rovi (masalan: 'Farg'onada bugun ob-havo', 'dollar kursi', 'marketing tendensiyalari')" },
+    },
+    required: ["query"],
+  },
+};
+
+const getPendingOrdersDeclaration: FunctionDeclaration = {
+  name: "getPendingOrders",
+  description:
+    "Kutilayotgan barcha hisob-kitoblar, mijozlar buyurtmalari va olinishi kerak bo'lgan jami mablag'ni ko'rsatish.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+  },
+};
+
 // ─── 3. Main Agent Processor ───
 
 const ALL_TOOLS: FunctionDeclaration[] = [
@@ -815,6 +898,8 @@ const ALL_TOOLS: FunctionDeclaration[] = [
   addClientOrderDeclaration,
   addGoalDeclaration,
   createContentPlanDeclaration,
+  searchWebDeclaration,
+  getPendingOrdersDeclaration,
 ];
 
 export async function processAgentMessage(
@@ -823,7 +908,7 @@ export async function processAgentMessage(
 ): Promise<AgentResponse> {
   const clean = userText.trim();
   if (!clean) {
-    return { text: "Assalomu alaykum Sohibjon! Sizga qanday yordam bera olaman?" };
+    return { text: "Assalomu alaykum! Sizga qanday yordam bera olaman?" };
   }
 
   let apiKey = process.env.GEMINI_API_KEY || "";
@@ -844,21 +929,31 @@ export async function processAgentMessage(
     try {
       const ai = new GoogleGenAI({ apiKey });
 
-      const systemInstruction = `Siz FlowDesk (Sovodesk) tizimining shaxsiy aqlli boshqaruv yordamchisi va yetuk AI Agentisiz.
+      const systemInstruction = `Sen quruq robot emassan, Sulaymonov S. ning jonli, samimiy, quvnoq va aqlli shaxsiy yordamchisisan.
+Quruq rasmiyatchiliksiz, xuddi haqiqiy doʻst va shaxsiy kotibdek sof va ravon oʻzbek tilida gaplash.
+Foydalanuvchi bilan samimiy fikr almash, hazillashib tur va har bir topshiriqni mehr bilan bajar.
+Har gapda foydalanuvchining ismini ("Sohibjon") takrorlash shart EMAS, tabiiy insondek samimiy muloqot qil.
 Bugungi sana: ${todayISO}.
-Sizga FlowDesk platformasiga TO'LIQ RUXSAT (FULL ACCESS) berilgan.
 
-MUHIM MULOQOT QOIDALARI:
-1. Foydalanuvchining ismini (Sohibjon) har gapda qaytaravermang! Umuman ismni ishlatish shart emas.
-2. Xuddi tirik, aqlli, samimiy insondek to'liq va tabiiy suhbat qiling. Robotik qoliplar va sun'iy takrorlardan qoching.
-3. Foydalanuvchi "golos bilan gapir" yoki "ovozli yoz" demasa, faqat toza, chiroyli va qulay matn orqali gaplashing.
-4. Agar foydalanuvchi biror mavzuda (biznes, marketing, kitoblar, strategiya, loyihalar) fikr almashmoqchi bo'lsa, to'laqonli yetuk ekspert va do'stona suhbatdosh sifatida chuqur, amaliy va mazmunli suhbat quring.
-5. Agar biror narsani saqlash, rejalashtirish, xarajat/daromad yozish yoki kitob tahlilini qilish buyurilsa, darhol mos vositalarni chaqirib bazaga kiriting.
+Senga FlowDesk platformasiga TOʻLIQ RUXSAT (FULL ACCESS) berilgan:
+- getCalendarSchedule: kunlik reja va intizom vazifalarini ko'rish
+- createTask: yangi reja yoki vazifa qo'shish (agar dizayn bo'yicha shaxsiy ish bo'lsa ham)
+- completeTask: vazifani bajarildi deb belgilash
+- rescheduleTask: vazifa muddatini surish
+- addExpense: xarajat kiritish va kartadan ayirish
+- addIncome: daromad kiritish va kartaga qo'shish
+- getFinanceSummary: kartalar, qoldiq va jami balansni ko'rish
+- addClientOrder: yangi mijoz buyurtmasi yoki dizayn hisob-kitobini saqlash (masalan: "Akmalga 50 ming dizayn yoz")
+- getPendingOrders: mijozlardan olinishi kerak bo'lgan hisob-kitoblarni ko'rish
+- addGoal: jamg'arma maqsadini qo'shish
+- createContentPlan: media kontent rejasini kiritish
+- saveYouTubeAndBook: YouTube havolasidan tahliliy konspekt chiqarib, kitoblar bo'limiga PDF yaratish
+- searchWeb: Google va internetdan real vaqtda ob-havo, yangiliklar, valyuta kursi va ma'lumot qidirish
 
-Sizdagi vositalar:
-- getCalendarSchedule, createTask, completeTask, rescheduleTask
-- addExpense, addIncome, getFinanceSummary
-- addClientOrder, addGoal, createContentPlan, saveYouTubeAndBook`;
+Agar foydalanuvchi "dizayndi yozib qo'y" yoki biror narsa haqida aytsa:
+O'zing mustaqil fikrla: agar mijozga hisob bo'lsa addClientOrder, agar reja bo'lsa createTask vositasini chaqir.
+Agar internetdan ma'lumot yoki ob-havo so'ralsa: searchWeb vositasi orqali qidirib aniq ma'lumot ber.
+Agar shunchaki suhbat, fikr almashish, marketing yoki maslahat bo'lsa, to'laqonli dono insondek erkin, samimiy va jonli javob ber.`;
 
       const TARGET_MODEL = "gemini-flash-lite-latest";
 
@@ -910,11 +1005,17 @@ Sizdagi vositalar:
             case "addClientOrder":
               result = await addClientOrder(args);
               break;
+            case "getPendingOrders":
+              result = await getPendingOrders();
+              break;
             case "addGoal":
               result = await addGoal(args);
               break;
             case "createContentPlan":
               result = await createContentPlan(args);
+              break;
+            case "searchWeb":
+              result = await searchWeb(args);
               break;
             default:
               result = { status: "unknown_function" };
@@ -952,7 +1053,7 @@ Sizdagi vositalar:
           config: { systemInstruction },
         });
 
-        const replyText = finalResponse.text || "Barcha buyruqlar muvaffaqiyatli bajarildi va FlowDesk-ga saqlandi, Sohibjon!";
+        const replyText = finalResponse.text || "Barcha buyruqlar muvaffaqiyatli bajarildi va FlowDesk-ga saqlandi!";
         return {
           text: replyText,
           pdfUrl: lastPdfUrl,
@@ -963,8 +1064,12 @@ Sizdagi vositalar:
       if (chatResponse.text) {
         return { text: chatResponse.text };
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Gemini Agent runtime error:", err);
+      return {
+        text: `⚠️ Gemini API xatoligi: ${err?.message || String(err)}`,
+        actionTaken: "api_error",
+      };
     }
   }
 
