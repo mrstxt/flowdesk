@@ -485,7 +485,7 @@ function modPow(b: bigint, e: bigint, m: bigint): bigint {
 /**
  * Mavjud GramJS mijozi orqali uzilishsiz qo'ng'iroq chaqirish
  */
-async function makeCallWithClient(client: TelegramClient, targetEntity: any, reason?: string) {
+async function makeCallWithClient(client: TelegramClient, targetInputPeer: any, reason?: string) {
   try {
     const dh = (await client.invoke(
       new Api.messages.GetDhConfig({ version: 0, randomLength: 256 })
@@ -504,7 +504,7 @@ async function makeCallWithClient(client: TelegramClient, targetEntity: any, rea
 
     await client.invoke(
       new Api.phone.RequestCall({
-        userId: targetEntity,
+        userId: targetInputPeer,
         randomId: Math.floor(Math.random() * 10000000),
         gAHash: gAHash,
         protocol: new Api.PhoneCallProtocol({
@@ -557,6 +557,8 @@ async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null>
   try {
     const base64Audio = audioBuffer.toString("base64");
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${geminiApiKey}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     const response = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -577,7 +579,9 @@ async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null>
           },
         ],
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     const data = await response.json();
     return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (e) {
@@ -1062,13 +1066,24 @@ async function runWorker() {
         return;
       }
 
+      // Helper: timeout wrapper
+      function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+        return Promise.race([
+          p,
+          new Promise<T>((_, reject) => setTimeout(() => reject(new Error("AI Agent timeout")), ms)),
+        ]);
+      }
+
       // Barcha xabarlar (matn va ovoz) TO'G'RIDAN-TO'G'RI GEMINI AI AGENTIGA uzatiladi:
       try {
         console.log("🤖 Xabar to'g'ridan-to'g'ri Gemini AI Agentiga uzatilmoqda:", clean);
-        const agentRes = await processAgentMessage(clean, {
-          senderId,
-          username: targetEntity?.username,
-        });
+        const agentRes = await withTimeout(
+          processAgentMessage(clean, {
+            senderId,
+            username: targetEntity?.username,
+          }),
+          45000
+        );
 
         if (agentRes && agentRes.text) {
           let fullReply = agentRes.text;

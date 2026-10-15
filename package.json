@@ -5,7 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "start:all": "tsx voice-assistant.ts & next start -p ${PORT:-3000} -H 0.0.0.0",
+    "start:all": "node start-all.js",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "db:push": "drizzle-kit push",

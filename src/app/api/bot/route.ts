@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-
+import {
   orders,
   tasks,
   incomes,
@@ -15,7 +15,7 @@ import { db } from "@/db";
   settings,
   cards,
   botStates,
-from "@/db/schema";
+} from "@/db/schema";
 import { desc, eq, gte, and, or, asc, sql, desc as descOrd, inArray } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
@@ -1359,7 +1359,6 @@ async function handleWizardStep(chatId: number, text: string) {
     }
     return;
   }
-}
 
 /* ── Callback handlers (inline buttons) ── */
 
