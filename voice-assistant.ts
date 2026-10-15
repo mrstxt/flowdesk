@@ -34,8 +34,15 @@ import {
   incomes,
   expenses,
 } from "./src/db/schema";
-import { eq, desc, asc, sql } from "drizzle-orm";
+import { eq, desc, asc, sql, and, ilike, or, isNull } from "drizzle-orm";
 import { getCardAvailableBalance } from "./src/lib/cardActions";
+import {
+  askBrain,
+  isBrainEnabled,
+  transcribeAudio,
+  type BrainAction,
+  type BrainResult,
+} from "./src/lib/assistantBrain";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import * as http from "http";
@@ -119,7 +126,7 @@ function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowI
   });
   const parts = formatter.formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value || "00";
-  const h = parseInt(get("hour"), 10);
+  const h = parseInt(get("hour"), 10) % 24;
   const m = parseInt(get("minute"), 10);
   const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   const todayISO = `${get("year")}-${get("month")}-${get("day")}`;
@@ -242,6 +249,242 @@ async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null>
     console.error("Gemini transcribe error:", e);
     return null;
   }
+}
+
+/* ───────────────────────── AI (Gemini) yordamchi funksiyalari ───────────────────────── */
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function normTime(t?: string | null): string | undefined {
+  if (!t) return undefined;
+  const m = t.trim().match(/^(\d{1,2})[:.](\d{2})$/);
+  if (!m) return undefined;
+  const v = `${m[1].padStart(2, "0")}:${m[2]}`;
+  return TIME_RE.test(v) ? v : undefined;
+}
+
+function pickDate(d: string | null | undefined, todayISO: string, tomorrowISO: string): string {
+  if (d && ISO_RE.test(d)) return d;
+  const { minutes } = getTashkentTimeString();
+  return minutes >= 20 * 60 ? tomorrowISO : todayISO;
+}
+
+function dayName(date: string, todayISO: string, tomorrowISO: string): string {
+  if (date === todayISO) return "Bugungi";
+  if (date === tomorrowISO) return "Ertangi";
+  return date;
+}
+
+async function buildPlansMessage(date: string, todayISO: string, tomorrowISO: string): Promise<string> {
+  const [dayTasks, dayRoutines] = await Promise.all([
+    db.select().from(tasks).where(eq(tasks.date, date)).orderBy(asc(tasks.id)),
+    db
+      .select()
+      .from(routines)
+      .where(or(isNull(routines.targetDate), eq(routines.targetDate, date)))
+      .orderBy(asc(routines.time)),
+  ]);
+  const routineTitles = new Set(dayRoutines.map((r) => r.title.trim().toLowerCase()));
+  const otherTasks = dayTasks.filter((t) => !routineTitles.has(t.title.trim().toLowerCase()));
+  const label = dayName(date, todayISO, tomorrowISO);
+  const total = dayRoutines.length + otherTasks.length;
+  if (total === 0) return `📋 ${label} kun (${date}) uchun hali reja yo'q.`;
+
+  const lines: string[] = [];
+  if (dayRoutines.length) {
+    lines.push("⏰ <b>Vaqtli rejalar:</b>");
+    for (const r of dayRoutines) {
+      const done = r.lastDoneDate && String(r.lastDoneDate).slice(0, 10) === date;
+      lines.push(`${done ? "✅" : "⬜"} <b>${r.time}</b> — ${escapeHtml(r.title)}${r.targetDate ? "" : " <i>(har kuni)</i>"}`);
+    }
+  }
+  if (otherTasks.length) {
+    if (lines.length) lines.push("");
+    lines.push("📋 <b>Vazifalar:</b>");
+    for (const t of otherTasks) lines.push(`${t.completed ? "✅" : "⬜"} ${escapeHtml(t.title)}`);
+  }
+  return `📅 <b>${label} rejalar — ${date} (${total} ta):</b>\n\n${lines.join("\n")}`;
+}
+
+async function buildTodayPlansContext(todayISO: string): Promise<string> {
+  try {
+    const [dayTasks, dayRoutines] = await Promise.all([
+      db.select().from(tasks).where(eq(tasks.date, todayISO)),
+      db.select().from(routines).where(or(isNull(routines.targetDate), eq(routines.targetDate, todayISO))),
+    ]);
+    const lines = [
+      ...dayRoutines.map((r) => `- ${r.time} ${r.title}`),
+      ...dayTasks
+        .filter((t) => !dayRoutines.some((r) => r.title === t.title))
+        .map((t) => `- ${t.title}${t.completed ? " (bajarilgan)" : ""}`),
+    ];
+    return lines.slice(0, 30).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+async function buildBalanceMessage(): Promise<string> {
+  const allCards = await db.select().from(cards).where(eq(cards.archived, false));
+  if (!allCards.length) return "💳 Hozircha hech qanday karta kiritilmagan.";
+  let total = 0;
+  const lines: string[] = [];
+  for (const c of allCards) {
+    const bal = c.type === "primary" ? await getCardAvailableBalance(c.id) : Number(c.balance);
+    total += bal;
+    lines.push(`• <b>${escapeHtml(c.name)}</b> (${c.type === "primary" ? "Asosiy" : "Qo'shimcha"}): ${fmt(bal)}`);
+  }
+  return `💳 <b>Kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami:</b> <b>${fmt(total)}</b>`;
+}
+
+/**
+ * Gemini qaytargan actionlarni bajaradi va natijani bitta tartibli xabar qilib yuboradi.
+ */
+async function handleBrainResult(
+  client: TelegramClient,
+  peer: any,
+  callTarget: any,
+  result: BrainResult,
+  todayISO: string,
+  tomorrowISO: string
+) {
+  const sections: string[] = [];
+  let wantsCall = false;
+
+  // 1) Rejalarni sana bo'yicha guruhlab saqlaymiz
+  const planActions = result.actions.filter((a) => a.type === "add_plan" && a.title?.trim());
+  const byDate = new Map<string, { time?: string; title: string; isRoutine: boolean }[]>();
+  for (const a of planActions) {
+    const date = pickDate(a.date, todayISO, tomorrowISO);
+    const time = normTime(a.time);
+    const title = a.title!.trim().slice(0, 250);
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date)!.push({ time, title, isRoutine: Boolean(time) });
+  }
+  for (const [date, plans] of byDate) {
+    plans.sort((x, y) => (x.time || "99:99").localeCompare(y.time || "99:99"));
+    await saveParsedPlansToDb(plans, date);
+    const lines = plans.map((p, i) => `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${escapeHtml(p.title)}`);
+    sections.push(`📝 <b>${dayName(date, todayISO, tomorrowISO)} kunga qo'shildi (${date}):</b>\n${lines.join("\n")}`);
+  }
+
+  // 2) Qolgan actionlar
+  for (const a of result.actions) {
+    try {
+      switch (a.type) {
+        case "list_plans": {
+          sections.push(await buildPlansMessage(pickDate(a.date, todayISO, tomorrowISO), todayISO, tomorrowISO));
+          break;
+        }
+        case "complete_plan": {
+          if (!a.title?.trim()) break;
+          const date = pickDate(a.date, todayISO, tomorrowISO);
+          const pattern = `%${a.title.trim().split(/\s+/).slice(0, 2).join("%")}%`;
+          const doneTasks = await db
+            .update(tasks)
+            .set({ completed: true })
+            .where(and(eq(tasks.date, date), ilike(tasks.title, pattern)))
+            .returning({ id: tasks.id });
+          const doneRoutines = await db
+            .update(routines)
+            .set({ lastDoneDate: date })
+            .where(and(or(isNull(routines.targetDate), eq(routines.targetDate, date)), ilike(routines.title, pattern)))
+            .returning({ id: routines.id });
+          sections.push(
+            doneTasks.length || doneRoutines.length
+              ? `✅ <b>Bajarildi deb belgilandi:</b> ${escapeHtml(a.title)}`
+              : `🤔 "${escapeHtml(a.title)}" degan reja topilmadi.`
+          );
+          break;
+        }
+        case "clear_plans": {
+          const date = pickDate(a.date, todayISO, tomorrowISO);
+          const delT = await db.delete(tasks).where(eq(tasks.date, date)).returning({ id: tasks.id });
+          const delR = await db.delete(routines).where(eq(routines.targetDate, date)).returning({ id: routines.id });
+          sections.push(`🗑 ${dayName(date, todayISO, tomorrowISO)} kun (${date}) rejalari o'chirildi: ${Math.max(delT.length, delR.length)} ta.`);
+          break;
+        }
+        case "call":
+          wantsCall = true;
+          break;
+        case "add_order": {
+          const amount = Number(a.amount) || 0;
+          const deadline = a.deadline && ISO_RE.test(a.deadline) ? a.deadline : null;
+          const title = a.title?.trim() || "Mijoz buyurtmasi";
+          await db.insert(orders).values({
+            title: title.slice(0, 250),
+            clientName: a.client_name?.trim() || null,
+            amount: String(amount),
+            deadline,
+            stage: "new",
+            paymentType: "cash",
+          });
+          sections.push(
+            `💼 <b>Buyurtma saqlandi:</b>\n👤 Mijoz: ${escapeHtml(a.client_name || "ko'rsatilmagan")}\n📌 Ish: ${escapeHtml(title)}\n💰 Narxi: ${fmt(amount)}${deadline ? `\n📅 Muddat: ${deadline}` : ""}`
+          );
+          break;
+        }
+        case "add_expense":
+        case "add_income": {
+          const amount = Number(a.amount) || 0;
+          if (amount <= 0) break;
+          const title = (a.title?.trim() || (a.type === "add_expense" ? "Xarajat" : "Daromad")).slice(0, 250);
+          const date = a.date && ISO_RE.test(a.date) ? a.date : todayISO;
+          if (a.type === "add_expense") {
+            await db.insert(expenses).values({ title, amount: String(amount), date, category: "other" });
+            sections.push(`💸 <b>Chiqim:</b> ${fmt(amount)} — ${escapeHtml(title)}`);
+          } else {
+            await db.insert(incomes).values({ title, amount: String(amount), date, source: "other" });
+            sections.push(`💰 <b>Kirim:</b> ${fmt(amount)} — ${escapeHtml(title)}`);
+          }
+          break;
+        }
+        case "balance":
+          sections.push(await buildBalanceMessage());
+          break;
+        case "set_wake": {
+          const wt = normTime(a.time);
+          if (!wt) break;
+          await db
+            .insert(settings)
+            .values({ key: "wake_time", value: wt })
+            .onConflictDoUpdate({ target: settings.key, set: { value: wt } });
+          sections.push(`⏰ Uyg'onish vaqti: <b>${wt}</b>. Shu vaqtda telefon qilaman.`);
+          break;
+        }
+        case "save_video": {
+          if (!a.url) break;
+          const url = a.url.startsWith("http") ? a.url : `https://${a.url}`;
+          const idMatch = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{6,})/);
+          const videoTitle = await fetchYouTubeTitle(url);
+          const date = pickDate(a.date, todayISO, tomorrowISO);
+          await db.insert(videos).values({
+            title: videoTitle.slice(0, 250),
+            url,
+            videoId: idMatch?.[1] || "",
+            category: "other",
+            watched: false,
+          });
+          await db.insert(tasks).values({ title: `🎬 Video ko'rish: ${videoTitle}`.slice(0, 250), date, category: "development" });
+          sections.push(`🎬 <b>Video saqlandi:</b> ${escapeHtml(videoTitle)}\n⏰ ${dayName(date, todayISO, tomorrowISO)} kun (${date}) bo'sh vaqtga qo'shildi.`);
+          break;
+        }
+      }
+    } catch (err) {
+      console.error(`Action xatolik (${a.type}):`, err);
+      sections.push(`⚠️ "${a.type}" amalini bajarishda xatolik bo'ldi.`);
+    }
+  }
+
+  const text = [escapeHtml(result.reply.trim()), ...sections].filter(Boolean).join("\n\n");
+  if (text) await client.sendMessage(peer, { message: text, parseMode: "html" });
+  if (result.reply.trim()) void sendVoiceNote(client, peer, result.reply.trim());
+  if (wantsCall) await makeCallWithClient(client, callTarget, "Foydalanuvchi so'ragan qo'ng'iroq");
 }
 
 async function runWorker() {

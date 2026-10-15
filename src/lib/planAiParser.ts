@@ -101,9 +101,14 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       }
     }
 
-    const hasExplicitPrefix = /^[-•*0-9.)\s]+/.test(line) || /^(reja|vazifa|ishim):/i.test(line);
+    // Agar butun xabar reklama / tijoriy e'lon bo'lsa (masalan mahsulotlar ro'yxati)
+    if (/(sotiladi|ulgurji|zavoddan|kafolat|skidka|aksiya|narxlar|dona|metr|optom)/i.test(line)) {
+      continue;
+    }
 
-    // Agar aniq vaqti bo'lmasa VA punktlangan ro'yxat bo'lmasa -> bu reja emas, oddiy suhbat!
+    const hasExplicitPrefix = /^(?:reja|vazifa|ishim):\s*/i.test(line) || /^[0-9]+[.)]\s+/.test(line);
+
+    // Agar aniq vaqti bo'lmasa VA aniq raqamlangan reja bo'lmasa -> o'tkazib yuborish
     if (!parsedTime && !hasExplicitPrefix) {
       continue;
     }
@@ -122,7 +127,8 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       .replace(/\b(man|men|menga|manga|biz|bizga)\b/gi, "")
       .replace(/\b(kerakda|kerak|lozim|shart|kerak edi)\b/gi, "")
       .replace(/\b(eslatib\s*(?:qo'?y|qoy|ber|yubor)|yozib\s*(?:qo'?y|qoy|ber|yubor)|eslatvor|eslat)\b/gi, "")
-      .replace(/^[-•*0-9.)\s]+/, "")
+      .replace(/^[-•*0-9.)\s~🔹✔️🌱💧📞%]+/, "")
+      .replace(/[*_~`]+/g, "")
       .replace(/^(reja|vazifa|ishim):\s*/i, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -133,7 +139,12 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       .replace(/\bborishim\b/gi, "borish")
       .replace(/\bqilishim\b/gi, "qilish");
 
-    if (cleanTitle.length >= 3) {
+    // Vaqtsiz bo'lsa — kamida 2 ta so'zdan iborat va 6 belgidan uzun bo'lishi shart (oddiy "Paxta", "Ko'rpa" kabi so'zlarni kiritmaslik uchun)
+    if (!parsedTime && cleanTitle.split(/\s+/).length < 2) {
+      continue;
+    }
+
+    if (cleanTitle.length >= 4) {
       results.push({
         time: parsedTime,
         title: cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1),
