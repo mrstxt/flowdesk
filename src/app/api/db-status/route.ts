@@ -14,8 +14,8 @@ import {
   subscriptions,
   tasks,
   videos,
-  workReports,
-  workRoles,
+  
+  
 } from "@/db/schema";
 import { count } from "drizzle-orm";
 
@@ -35,8 +35,8 @@ const tables = {
   sleepLogs,
   dailyResults,
   subscriptions,
-  workRoles,
-  workReports,
+  
+  
 };
 
 async function tableCount(table: (typeof tables)[keyof typeof tables]) {

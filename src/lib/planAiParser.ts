@@ -86,7 +86,7 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       /^(alo|salom|assalom|ha|yoq|yo'q|rahmat|xop|xo'p|nima|nimalar|qanaqa|qalay|qalesiz)/i.test(lower) ||
       /(kartada|balans|pulim|hisobim|savol|bormi|qancha)/i.test(lower) ||
       /(o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla|yangi\s*tuzamiz)/i.test(lower) ||
-      /(tel\s*qil|telefon\s*qil|manga\s*tel|menga\s*tel|qo'?ng'?iroq\s*qil|chaqir)/i.test(lower) ||
+      /(tel\s*qil|telefon\s*qil| \s*tel|menga\s*tel|qo'?ng'?iroq\s*qil|chaqir)/i.test(lower) ||
       /(ozgartir|o'zgartir|almashtir|yozishing\s*kerak\s*edi|eslab\s*qolyapti|nimaga|qob\s*ketgan|ochmagan|o'chmagan)/i.test(lower)
     ) {
       continue;
@@ -150,7 +150,7 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       .replace(/\b(soat\s*[0-2]?[0-9](?::[0-5][0-9])?)\b/gi, "")
       .replace(/\b([0-2]?[0-9]\s*(?:yarim|yarimda|gacha|da|dan))\b/gi, "")
       .replace(/\b(dan|gacha|da|vaqtida|soat|ertalab|kechqurun|tushlikda)\b/gi, "")
-      .replace(/\b(man|men|menga|manga|biz|bizga)\b/gi, "")
+      .replace(/\b(man|men| | |biz|bizga)\b/gi, "")
       .replace(/\b(kerakda|kerak|lozim|shart|kerak edi|bo'?lsin|bosin)\b/gi, "")
       .replace(
         /\b(yozib\s*(?:qo'?y|qoy|ber|yubor)|yozvor|yozib|yoz|kiritib\s*qo'?y|kirit|qo'?shib\s*qo'?y|qo'?sh|eslatib\s*(?:qo'?y|qoy|ber|yubor)|eslatvor|eslat)\b/gi,

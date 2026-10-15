@@ -513,7 +513,7 @@ export default function IntizomPage() {
                         ⚡ Shoshilinch
                       </span>
                     )}
-                    {t.category === "work" && (
+                    {(
                       <span className="text-[9px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-full">
                         Ish
                       </span>

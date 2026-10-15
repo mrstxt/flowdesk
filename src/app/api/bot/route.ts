@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import {
+
   orders,
   tasks,
   incomes,
@@ -15,9 +15,7 @@ import {
   settings,
   cards,
   botStates,
-  workRoles,
-  workReports,
-} from "@/db/schema";
+from "@/db/schema";
 import { desc, eq, gte, and, or, asc, sql, desc as descOrd, inArray } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
@@ -1009,47 +1007,8 @@ async function handleWizardStep(chatId: number, text: string) {
     }
   }
 
-  // ── Ish rollari bo'yicha kunlik hisobot ──
-  if (state.mode === "work_report") {
-    const roleIds = (state.data.roleIds || "")
-      .split(",")
-      .map((id) => Number(id))
-      .filter(Boolean);
-    const roleIndex = Number(state.data.roleIndex || "0");
-    const questionIndex = Number(state.data.questionIndex || "0");
-    const currentRoleId = roleIds[roleIndex];
-
-    if (!currentRoleId) {
-      await finishWizard(chatId);
-      await sendMessage(chatId, "✅ Ish hisobotlari yakunlandi.", {
-        reply_markup: MAIN_KEYBOARD,
-      });
-      return;
-    }
-
-    const [role] = await db
-      .select()
-      .from(workRoles)
-      .where(eq(workRoles.id, currentRoleId))
-      .limit(1);
-    if (!role || role.active === false) {
-      const nextRoleIndex = roleIndex + 1;
-      const nextRoleId = roleIds[nextRoleIndex];
-      if (!nextRoleId) {
-        await finishWizard(chatId);
-        await sendMessage(chatId, "✅ Ish hisobotlari yakunlandi.", {
-          reply_markup: MAIN_KEYBOARD,
-        });
-        return;
-      }
-      const [nextRole] = await db
-        .select()
-        .from(workRoles)
-        .where(eq(workRoles.id, nextRoleId))
-        .limit(1);
-      const nextQuestions = parseReportQuestions(nextRole?.reportQuestions);
-      state.data.roleIndex = String(nextRoleIndex);
-      state.data.questionIndex = "0";
+  // ── Kunlik hisobot ──
+  if (state.mode === "result_done") {
       state.data.answers = "[]";
       userState.set(chatId, state);
       await sendMessage(
@@ -1091,7 +1050,7 @@ async function handleWizardStep(chatId: number, text: string) {
     const summary = answers
       .map((item) => `${item.question}: ${item.answer}`)
       .join(" • ");
-    await db.insert(workReports).values({
+    await db.insert(botReminders).values({
       roleId: role.id,
       date: today,
       answers: JSON.stringify(answers),
@@ -1112,8 +1071,8 @@ async function handleWizardStep(chatId: number, text: string) {
 
     const [nextRole] = await db
       .select()
-      .from(workRoles)
-      .where(eq(workRoles.id, nextRoleId))
+      .from(tasks)
+      .where(eq(tasks.id, nextRoleId))
       .limit(1);
     const nextQuestions = parseReportQuestions(nextRole?.reportQuestions);
     state.data.roleIndex = String(nextRoleIndex);
@@ -2066,9 +2025,9 @@ async function handleCommand(
     if (cmd === "/ish_hisobot") {
       const activeRoles = await db
         .select()
-        .from(workRoles)
-        .where(eq(workRoles.active, true))
-        .orderBy(asc(workRoles.id));
+        .from(tasks)
+        .where(eq(tasks.active, true))
+        .orderBy(asc(tasks.id));
       if (activeRoles.length === 0) {
         await sendMessage(
           chatId,
@@ -2081,7 +2040,7 @@ async function handleCommand(
       const questions = parseReportQuestions(firstRole.reportQuestions);
       setWizardState(
         chatId,
-        "work_report",
+        "result_done",
         1,
         {
           roleIds: activeRoles.map((role) => role.id).join(","),
