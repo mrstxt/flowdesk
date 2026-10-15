@@ -10,6 +10,8 @@ import { tasks, routines } from "@/db/schema";
 
 export type ParsedPlan = {
   time?: string;
+  startTime?: string;
+  endTime?: string;
   title: string;
   isRoutine?: boolean;
 };
@@ -50,6 +52,20 @@ export function detectPlanDate(
   return { dateType: defaultTomorrow ? "tomorrow" : "today", isExplicit: false };
 }
 
+function normalizeTimeString(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  let clean = raw.replace(".", ":").replace("-", ":").trim();
+  if (!clean.includes(":")) {
+    const h = parseInt(clean, 10);
+    if (!isNaN(h) && h >= 0 && h <= 24) {
+      return `${String(h).padStart(2, "0")}:00`;
+    }
+    return undefined;
+  }
+  const [h, m] = clean.split(":");
+  return `${h.padStart(2, "0")}:${(m || "00").padStart(2, "0")}`;
+}
+
 /**
  * Matndan yoki transkripsiyadan o'zbekcha vaqt va vazifalarni ajratish.
  * MUHIM: Faqat haqiqiy rejalarni (vaqti bor yoki aniq reja strukturasi) oladi.
@@ -75,63 +91,83 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       continue;
     }
 
-    // 09:00, 9:00, 09.00, 9-00, "soat 9 da", "soat 14 da", "14:30 da" formatlarini qidirish
-    const timeMatch =
-      line.match(/(\b[0-2]?[0-9][:.-][0-5][0-9]\b)/) ||
-      line.match(/soat\s*([0-2]?[0-9])(?::([0-5][0-9]))?/i) ||
-      line.match(/\b([0-2]?[0-9])\s*(?:da|gacha|yarimda)\b/i);
-
-    let parsedTime: string | undefined;
-
-    if (timeMatch) {
-      let rawTime = timeMatch[1].replace(".", ":").replace("-", ":");
-      if (!rawTime.includes(":")) {
-        const hourNum = parseInt(rawTime, 10);
-        if (!isNaN(hourNum) && hourNum >= 0 && hourNum <= 24) {
-          const isHalf = line.toLowerCase().includes("yarim");
-          const min = isHalf ? "30" : "00";
-          rawTime = `${String(hourNum).padStart(2, "0")}:${min}`;
-          parsedTime = rawTime;
-        }
-      } else {
-        const parts = rawTime.split(":");
-        const h = parts[0].padStart(2, "0");
-        const m = (parts[1] || "00").padStart(2, "0");
-        parsedTime = `${h}:${m}`;
-      }
-    }
-
-    // Agar butun xabar reklama / tijoriy e'lon bo'lsa (masalan mahsulotlar ro'yxati)
+    // Reklama / tijoriy e'lon bo'lsa o'tkazib yuborish
     if (/(sotiladi|ulgurji|zavoddan|kafolat|skidka|aksiya|narxlar|dona|metr|optom)/i.test(line)) {
       continue;
     }
 
+    let parsedTime: string | undefined;
+    let startTime: string | undefined;
+    let endTime: string | undefined;
+    let textWithoutTime = line;
+
+    // 1. Vaqt oralig'i (Time range): masalan "12:00 dan 12:30 gacha", "soat 12 dan 13:00 gacha", "14:00 - 15:30"
+    const rangeMatch = line.match(
+      /(?:soat\s*)?([0-2]?[0-9](?::[0-5][0-9])?)\s*(?:dan|-|—)\s*(?:soat\s*)?([0-2]?[0-9](?::[0-5][0-9])?)\s*(?:gacha)?/i
+    );
+
+    if (rangeMatch) {
+      startTime = normalizeTimeString(rangeMatch[1]);
+      endTime = normalizeTimeString(rangeMatch[2]);
+      parsedTime = startTime;
+      textWithoutTime = textWithoutTime.replace(rangeMatch[0], "");
+    } else {
+      // 2. Yagona vaqt: 09:00, 9:00, 09.00, "soat 9 da", "soat 14 da", "14:30 da"
+      const singleMatch =
+        line.match(/(\b[0-2]?[0-9][:.-][0-5][0-9]\b)/) ||
+        line.match(/soat\s*([0-2]?[0-9])(?::([0-5][0-9]))?/i) ||
+        line.match(/\b([0-2]?[0-9])\s*(?:da|gacha|yarimda)\b/i);
+
+      if (singleMatch) {
+        let rawTime = singleMatch[1].replace(".", ":").replace("-", ":");
+        if (!rawTime.includes(":")) {
+          const hourNum = parseInt(rawTime, 10);
+          if (!isNaN(hourNum) && hourNum >= 0 && hourNum <= 24) {
+            const isHalf = line.toLowerCase().includes("yarim");
+            const min = isHalf ? "30" : "00";
+            rawTime = `${String(hourNum).padStart(2, "0")}:${min}`;
+            parsedTime = rawTime;
+          }
+        } else {
+          parsedTime = normalizeTimeString(rawTime);
+        }
+        startTime = parsedTime;
+        textWithoutTime = textWithoutTime.replace(singleMatch[0], "");
+      }
+    }
+
     const hasExplicitPrefix = /^(?:reja|vazifa|ishim):\s*/i.test(line) || /^[0-9]+[.)]\s+/.test(line);
 
-    // Agar aniq vaqti bo'lmasa VA aniq raqamlangan reja bo'lmasa -> o'tkazib yuborish
+    // Agar aniq vaqti bo'lmasa VA aniq prefiks bo'lmasa -> o'tkazib yuborish
     if (!parsedTime && !hasExplicitPrefix) {
       continue;
     }
 
-    // Title ni tozalash: ortiqcha to'ldiruvchi so'zlarni olib tashlaymiz
-    let cleanTitle = line;
-    if (timeMatch) {
-      cleanTitle = cleanTitle.replace(timeMatch[0], "");
-    }
-
-    cleanTitle = cleanTitle
+    // Title ni tozalash: ortiqcha to'ldiruvchi so'zlar va buyruq fe'llarini olib tashlaymiz
+    let cleanTitle = textWithoutTime
       .replace(/\b(bugun|bugungi|bugunga|ertaga|ertangi)\b/gi, "")
       .replace(/\b(soat\s*[0-2]?[0-9](?::[0-5][0-9])?)\b/gi, "")
-      .replace(/\b([0-2]?[0-9]\s*(?:yarim|yarimda|gacha|da))\b/gi, "")
-      .replace(/\b(da|gacha|vaqtida|soat|ertalab|kechqurun|tushlikda)\b/gi, "")
+      .replace(/\b([0-2]?[0-9]\s*(?:yarim|yarimda|gacha|da|dan))\b/gi, "")
+      .replace(/\b(dan|gacha|da|vaqtida|soat|ertalab|kechqurun|tushlikda)\b/gi, "")
       .replace(/\b(man|men|menga|manga|biz|bizga)\b/gi, "")
-      .replace(/\b(kerakda|kerak|lozim|shart|kerak edi)\b/gi, "")
-      .replace(/\b(eslatib\s*(?:qo'?y|qoy|ber|yubor)|yozib\s*(?:qo'?y|qoy|ber|yubor)|eslatvor|eslat)\b/gi, "")
+      .replace(/\b(kerakda|kerak|lozim|shart|kerak edi|bo'?lsin|bosin)\b/gi, "")
+      .replace(
+        /\b(yozib\s*(?:qo'?y|qoy|ber|yubor)|yozvor|yozib|yoz|kiritib\s*qo'?y|kirit|qo'?shib\s*qo'?y|qo'?sh|eslatib\s*(?:qo'?y|qoy|ber|yubor)|eslatvor|eslat)\b/gi,
+        ""
+      )
+      .replace(/\b(di\b|ni\b)/gi, "")
+      .replace(/(?:qilishdi|qilishni)\b/gi, "qilish")
+      .replace(/(?:borishdi|borishni)\b/gi, "borish")
+      .replace(/(?:o'?qishdi|o'?qishni)\b/gi, "o'qish")
+      .replace(/(?:ko'?rishdi|ko'?rishni)\b/gi, "ko'rish")
       .replace(/^[-•*0-9.)\s~🔹✔️🌱💧📞%]+/, "")
       .replace(/[*_~`]+/g, "")
       .replace(/^(reja|vazifa|ishim):\s*/i, "")
       .replace(/\s+/g, " ")
       .trim();
+
+    // "qilishdi" yoki boshqa fe'l qo'shimchasi oxirida qolib ketgan bo'lsa
+    cleanTitle = cleanTitle.replace(/(ish|sh)(?:di|ni)$/i, "$1");
 
     // Agar fe'l shakli bo'lsa (oqishim -> o'qish, borishim -> borish)
     cleanTitle = cleanTitle
@@ -139,14 +175,16 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       .replace(/\bborishim\b/gi, "borish")
       .replace(/\bqilishim\b/gi, "qilish");
 
-    // Vaqtsiz bo'lsa — kamida 2 ta so'zdan iborat va 6 belgidan uzun bo'lishi shart (oddiy "Paxta", "Ko'rpa" kabi so'zlarni kiritmaslik uchun)
+    // Vaqtsiz bo'lsa — kamida 2 ta so'zdan iborat va 4 belgidan uzun bo'lishi shart
     if (!parsedTime && cleanTitle.split(/\s+/).length < 2) {
       continue;
     }
 
-    if (cleanTitle.length >= 4) {
+    if (cleanTitle.length >= 3) {
       results.push({
         time: parsedTime,
+        startTime,
+        endTime,
         title: cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1),
         isRoutine: Boolean(parsedTime),
       });
@@ -182,7 +220,8 @@ export async function saveParsedPlansToDb(
         time: item.time,
         title: item.title,
         targetDate: targetDateISO,
-        startTime: item.time,
+        startTime: item.startTime || item.time,
+        endTime: item.endTime || null,
         streak: 0,
       });
       savedRoutines++;

@@ -33,6 +33,7 @@ import {
   videos,
   incomes,
   expenses,
+  cardTransactions,
 } from "./src/db/schema";
 import { eq, desc, asc, sql, and, ilike, or, isNull } from "drizzle-orm";
 import { getCardAvailableBalance } from "./src/lib/cardActions";
@@ -111,6 +112,126 @@ function parseOrderDetails(input: string, todayISO: string, tomorrowISO: string)
   if (!title || title.length < 3) title = "Mijoz buyurtmasi";
 
   return { title, clientName, amount, deadline };
+}
+
+function parseExpenseInput(text: string): { amount: number; title: string } | null {
+  const q = text.toLowerCase().trim();
+
+  // Exclude inquiries and orders
+  if (/(karta.*qancha|balans.*qancha|qancha pul|qancha bor|bormi\?)/i.test(q)) return null;
+  if (/(buyurtma|zakaz|mijoz|klient)/i.test(q) && /(narx|so'?m|\$|deadline)/i.test(q)) return null;
+
+  // Expense indicators
+  const hasExpenseWord = /\b(chiqim|harajat|xarajat|sarf|sarfladim|sarflab|ishlatdim|berdim|to'?ladim|to‘ladim|toladim|ketdi|oldim|oldi|yechildi|harid|xarid)\b/i.test(q);
+  const hasItemWord = /\b(tushlik|ovqat|taksi|bozor|yo'?lkira|kafe|choyxona|benzin|zapravka|dorixona|aptek|dori|narsa|kiyim|mahsulot)\b/i.test(q);
+
+  if (!hasExpenseWord && !hasItemWord) return null;
+
+  // Match amount: e.g. "50 ming", "50 minga", "50k", "50000", "1.5 mln"
+  const amtRegex = /\b(\d+(?:[\s.,]\d{3})*(?:[.,]\d+)?|\b\d+)\s*(ming(?:ga|a)?|mln(?:ga)?|million(?:ga)?|\bk\b)?\s*(?:so'?m|sum)?/i;
+  const match = text.match(amtRegex);
+  if (!match) return null;
+
+  let rawNum = match[1].replace(/[\s_]/g, "");
+  if (/\d+[.,]\d{3}$/.test(rawNum)) {
+    rawNum = rawNum.replace(/[.,]/g, "");
+  } else {
+    rawNum = rawNum.replace(",", ".");
+  }
+  let num = parseFloat(rawNum);
+  if (isNaN(num) || num <= 0) return null;
+
+  if (/:/.test(match[0])) return null;
+
+  const unit = (match[2] || "").toLowerCase();
+  if (unit.startsWith("ming") || unit === "k") {
+    num *= 1000;
+  } else if (unit.startsWith("mln") || unit.startsWith("million")) {
+    num *= 1000000;
+  }
+
+  if (num < 500 && !unit && !/so'?m/i.test(match[0])) return null;
+
+  let desc = text
+    .replace(match[0], "")
+    .replace(/\b(chiqim|harajat|xarajat|sarfladim|sarflab|sarf|ishlatdim|berdim|to'?ladim|to‘ladim|toladim|ketdi|oldim|oldi|yechildi|qildim|harid|xarid)\b/gi, "")
+    .replace(/\b(man|men|biz|menga|manga|bugun|hozir|ertalab|kechqurun|uchun|bir|bitta)\b/gi, "")
+    .replace(/[:;!?"'()[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  desc = desc.replace(/(?:ga|ka|dan|da)\b/gi, "").trim();
+
+  if (!desc || desc.length < 2) {
+    if (/tushlik|ovqat|choyxona|kafe/i.test(text)) desc = "Tushlik / Ovqat";
+    else if (/benzin|zapravka/i.test(text)) desc = "Benzin";
+    else if (/taksi|yo'?lkira/i.test(text)) desc = "Taksi / Yo'lkira";
+    else if (/bozor/i.test(text)) desc = "Bozorlik";
+    else if (/dorixona|aptek|dori/i.test(text)) desc = "Dorixona";
+    else if (/narsa/i.test(text)) desc = "Xarid";
+    else desc = "Umumiy xarajat";
+  } else {
+    desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+  }
+
+  return { amount: num, title: desc };
+}
+
+function parseIncomeInput(text: string): { amount: number; title: string } | null {
+  const q = text.toLowerCase().trim();
+
+  // Exclude inquiries and expenses
+  if (/(karta.*qancha|balans.*qancha|qancha pul|qancha bor|bormi\?)/i.test(q)) return null;
+  if (/(chiqim|harajat|xarajat|sarf|ketdi|oldim)/i.test(q)) return null;
+
+  // Income indicators
+  const hasIncomeWord = /\b(kirim|daromad|foyda|tushum|tushdi|oylik|avans|gonorar|tushirildi)\b/i.test(q);
+  if (!hasIncomeWord) return null;
+
+  const amtRegex = /\b(\d+(?:[\s.,]\d{3})*(?:[.,]\d+)?|\b\d+)\s*(ming(?:ga|a)?|mln(?:ga)?|million(?:ga)?|\bk\b)?\s*(?:so'?m|sum)?/i;
+  const match = text.match(amtRegex);
+  if (!match) return null;
+
+  let rawNum = match[1].replace(/[\s_]/g, "");
+  if (/\d+[.,]\d{3}$/.test(rawNum)) {
+    rawNum = rawNum.replace(/[.,]/g, "");
+  } else {
+    rawNum = rawNum.replace(",", ".");
+  }
+  let num = parseFloat(rawNum);
+  if (isNaN(num) || num <= 0) return null;
+
+  if (/:/.test(match[0])) return null;
+
+  const unit = (match[2] || "").toLowerCase();
+  if (unit.startsWith("ming") || unit === "k") {
+    num *= 1000;
+  } else if (unit.startsWith("mln") || unit.startsWith("million")) {
+    num *= 1000000;
+  }
+
+  if (num < 500 && !unit && !/so'?m/i.test(match[0])) return null;
+
+  let desc = text
+    .replace(match[0], "")
+    .replace(/\b(kirim|daromad|foyda|tushum|tushdi|tushirildi|bo'?ldi|qabul)\b/gi, "")
+    .replace(/\b(man|men|biz|menga|manga|kartaga|kartamga|bugun|hozir|ertalab|kechqurun|uchun|bir|bitta)\b/gi, "")
+    .replace(/[:;!?"'()[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  desc = desc.replace(/(?:ga|ka|dan|da)\b/gi, "").trim();
+
+  if (!desc || desc.length < 2) {
+    if (/oylik/i.test(text)) desc = "Oylik maosh";
+    else if (/avans/i.test(text)) desc = "Avans";
+    else if (/mijoz|zakaz|buyurtma/i.test(text)) desc = "Mijozdan to'lov";
+    else desc = "Daromad";
+  } else {
+    desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+  }
+
+  return { amount: num, title: desc };
 }
 
 function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
@@ -726,54 +847,155 @@ async function runWorker() {
       }
     }
 
-    // A.5) Chiqim qo'shish ("Chiqim 50000 tushlik", "Tushlikka 30000 ketdi")
-    const expenseMatch = clean.match(/(?:chiqim|harajat|xarajat)\s*(\d[\d\s.,]*)\s*(?:so'?m|sum)?\s*(.*)/i) ||
-                         clean.match(/(\d[\d\s.,]*)\s*(?:so'?m|sum)?\s*(?:tushlik|taksi|bozor|yo'?lkira|ovqat|choyxona|kafe|benzin|dorixona|aptek)/i);
-    if (expenseMatch) {
-      const amtStr = expenseMatch[1].replace(/[\s,]/g, "");
-      let amt = parseFloat(amtStr);
-      if (/ming/i.test(clean)) amt *= 1000;
-      if (amt > 0) {
-        const desc = expenseMatch[2]?.trim() || clean.replace(/\d+/g, "").trim() || "Xarajat";
-        try {
-          await db.insert(expenses).values({
-            title: desc,
-            amount: String(amt),
-            date: todayISO,
-            category: "other",
-          });
-          const reply = `💸 <b>Chiqim saqlandi:</b> ${fmt(amt)}\n📝 <b>Izoh:</b> ${desc}`;
-          await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-          void sendVoiceNote(client, replyPeer, `${fmt(amt)} chiqim bazaga kiritildi.`);
-          return;
-        } catch (e) {
-          console.error("Chiqim saqlash xatoligi:", e);
+    // A.5) Chiqim qo'shish ("50 minga narsa oldim", "Chiqim 50000", "Tushlikka 40000 ketdi")
+    const expenseData = parseExpenseInput(clean);
+    if (expenseData) {
+      const { amount: amt, title: desc } = expenseData;
+      console.log(`💸 Chiqim aniqlandi: ${amt} so'm, izoh: "${desc}"`);
+      try {
+        const allActiveCards = await db.select().from(cards).where(eq(cards.archived, false));
+        let targetCard =
+          allActiveCards.find((c) => c.type === "primary") ||
+          allActiveCards.find((c) => /asosiy/i.test(c.name)) ||
+          allActiveCards[0];
+
+        if (!targetCard) {
+          const [newCard] = await db
+            .insert(cards)
+            .values({
+              name: "Asosiy",
+              type: "primary",
+              balance: "0",
+            })
+            .returning();
+          targetCard = newCard;
         }
+
+        // 1. Chiqimlar (expenses) ga saqlaymiz
+        await db.insert(expenses).values({
+          title: desc,
+          amount: String(amt),
+          date: todayISO,
+          category: "other",
+          cardId: targetCard.id,
+        });
+
+        // 2. Karta harakatlari (card_transactions) ga yozamiz
+        await db.insert(cardTransactions).values({
+          cardId: targetCard.id,
+          date: todayISO,
+          type: "out",
+          amount: String(amt),
+          description: desc,
+        });
+
+        // 3. Kartaning balance ustunini yangilaymiz
+        const oldBal = Number(targetCard.balance) || 0;
+        const newBal = Math.max(0, oldBal - amt);
+        await db
+          .update(cards)
+          .set({ balance: String(newBal) })
+          .where(eq(cards.id, targetCard.id));
+
+        // 4. Haqiqiy qoldiqni hisoblaymiz
+        const remBalance =
+          targetCard.type === "primary"
+            ? await getCardAvailableBalance(targetCard.id)
+            : newBal;
+
+        const reply =
+          `💸 <b>Chiqim muvaffaqiyatli qayd etildi!</b>\n\n` +
+          `🛒 <b>Xarajat:</b> ${desc}\n` +
+          `➖ <b>Chiqim summasi:</b> -${fmt(amt)}\n` +
+          `💳 <b>Karta:</b> ${targetCard.name} (${targetCard.type === "primary" ? "Asosiy" : "Karta"})\n` +
+          `💰 <b>Kartadagi yangi qoldiq:</b> <b>${fmt(remBalance)}</b>\n\n` +
+          `<i>Xarajat asosiy kartangiz hisobiga kiritildi, Sohibjon!</i>`;
+
+        await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+        void sendVoiceNote(
+          client,
+          replyPeer,
+          `Tushundim Sohibjon! ${desc} uchun ${fmt(amt)} chiqim asosiy kartangizdan yechildi. Hozirgi qoldiq ${fmt(remBalance)}.`
+        );
+        return;
+      } catch (e) {
+        console.error("Chiqim saqlash xatoligi:", e);
       }
     }
 
-    // A.6) Kirim qo'shish ("Kirim 1000000 oylik", "Oylik tushdi 2000000")
-    const incomeMatch = clean.match(/(?:kirim|daromad|foyda|tushum)\s*(\d[\d\s.,]*)\s*(?:so'?m|sum)?\s*(.*)/i);
-    if (incomeMatch) {
-      const amtStr = incomeMatch[1].replace(/[\s,]/g, "");
-      let amt = parseFloat(amtStr);
-      if (/ming/i.test(clean)) amt *= 1000;
-      if (amt > 0) {
-        const desc = incomeMatch[2]?.trim() || "Daromad";
-        try {
-          await db.insert(incomes).values({
-            title: desc,
-            amount: String(amt),
-            date: todayISO,
-            source: "other",
-          });
-          const reply = `💰 <b>Kirim saqlandi:</b> ${fmt(amt)}\n📝 <b>Izoh:</b> ${desc}`;
-          await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-          void sendVoiceNote(client, replyPeer, `${fmt(amt)} daromad qabul qilindi.`);
-          return;
-        } catch (e) {
-          console.error("Kirim saqlash xatoligi:", e);
+    // A.6) Kirim qo'shish ("Kirim 1000000 oylik", "Oylik tushdi 2000000", "Kartaga 200 ming tushdi")
+    const incomeData = parseIncomeInput(clean);
+    if (incomeData) {
+      const { amount: amt, title: desc } = incomeData;
+      console.log(`💰 Kirim aniqlandi: ${amt} so'm, izoh: "${desc}"`);
+      try {
+        const allActiveCards = await db.select().from(cards).where(eq(cards.archived, false));
+        let targetCard =
+          allActiveCards.find((c) => c.type === "primary") ||
+          allActiveCards.find((c) => /asosiy/i.test(c.name)) ||
+          allActiveCards[0];
+
+        if (!targetCard) {
+          const [newCard] = await db
+            .insert(cards)
+            .values({
+              name: "Asosiy",
+              type: "primary",
+              balance: "0",
+            })
+            .returning();
+          targetCard = newCard;
         }
+
+        // 1. Daromadlar (incomes) jadvaliga saqlaymiz
+        await db.insert(incomes).values({
+          title: desc,
+          amount: String(amt),
+          date: todayISO,
+          source: "other",
+          cardId: targetCard.id,
+        });
+
+        // 2. Karta harakatlari (card_transactions) ga yozamiz
+        await db.insert(cardTransactions).values({
+          cardId: targetCard.id,
+          date: todayISO,
+          type: "in",
+          amount: String(amt),
+          description: desc,
+        });
+
+        // 3. Kartaning balance ustunini yangilaymiz
+        const oldBal = Number(targetCard.balance) || 0;
+        const newBal = oldBal + amt;
+        await db
+          .update(cards)
+          .set({ balance: String(newBal) })
+          .where(eq(cards.id, targetCard.id));
+
+        // 4. Haqiqiy qoldiqni hisoblaymiz
+        const remBalance =
+          targetCard.type === "primary"
+            ? await getCardAvailableBalance(targetCard.id)
+            : newBal;
+
+        const reply =
+          `💰 <b>Kirim muvaffaqiyatli qayd etildi!</b>\n\n` +
+          `📌 <b>Manba / Izoh:</b> ${desc}\n` +
+          `➕ <b>Kirim summasi:</b> +${fmt(amt)}\n` +
+          `💳 <b>Karta:</b> ${targetCard.name} (${targetCard.type === "primary" ? "Asosiy" : "Karta"})\n` +
+          `💰 <b>Kartadagi yangi qoldiq:</b> <b>${fmt(remBalance)}</b>\n\n` +
+          `<i>Mablag' kartangizga muvaffaqiyatli qabul qilindi, Sohibjon! 🚀</i>`;
+
+        await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
+        void sendVoiceNote(
+          client,
+          replyPeer,
+          `Ajoyib Sohibjon! ${desc} uchun ${fmt(amt)} kirim asosiy kartangizga qo'shildi. Hozirgi qoldiq ${fmt(remBalance)}.`
+        );
+        return;
+      } catch (e) {
+        console.error("Kirim saqlash xatoligi:", e);
       }
     }
 
@@ -875,7 +1097,10 @@ async function runWorker() {
         lines.push("⏰ <b>Vaqtli rejalar:</b>");
         dayRoutines.forEach((r) => {
           const done = r.lastDoneDate && String(r.lastDoneDate).slice(0, 10) === targetDate;
-          lines.push(`${done ? "✅" : "⬜"} <b>${r.time}</b> — ${r.title}${r.targetDate ? "" : " <i>(har kuni)</i>"}`);
+          const timeRange = r.startTime && r.endTime
+            ? `${r.startTime} - ${r.endTime}`
+            : r.time;
+          lines.push(`${done ? "✅" : "⬜"} <b>${timeRange}</b> — ${r.title}${r.targetDate ? "" : " <i>(har kuni)</i>"}`);
         });
       }
       if (otherTasks.length > 0) {
@@ -906,7 +1131,10 @@ async function runWorker() {
 
       let reportMsg = `✅ <b>Qabul qilindi Sohibjon!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n\n`;
       plans.forEach((p, i) => {
-        reportMsg += `${i + 1}. ${p.time ? `⏰ <b>${p.time}</b> — ` : ""}${p.title}\n`;
+        const timeDisplay = p.startTime && p.endTime
+          ? `⏰ <b>${p.startTime} - ${p.endTime}</b>`
+          : p.time ? `⏰ <b>${p.time}</b>` : "";
+        reportMsg += `${i + 1}. ${timeDisplay ? `${timeDisplay} — ` : ""}${p.title}\n`;
       });
       reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda o'zim telefon qilib eslatib turaman! 🚀`;
 
