@@ -1,7 +1,20 @@
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { db } from "@/db";
-import { tasks, routines, videos, books, settings } from "@/db/schema";
-import { eq, or, isNull, and, ilike } from "drizzle-orm";
+import {
+  tasks,
+  routines,
+  videos,
+  books,
+  settings,
+  cards,
+  cardTransactions,
+  incomes,
+  expenses,
+  orders,
+  goals,
+  contentItems,
+} from "@/db/schema";
+import { eq, or, isNull, and, ilike, desc } from "drizzle-orm";
 import { createSummaryPdf } from "@/lib/pdfService";
 
 export interface AgentResponse {
@@ -21,13 +34,11 @@ export async function getCalendarSchedule(params: { date?: string }) {
   const targetDate = params.date || todayISO;
 
   try {
-    // 1. Tasks
     const dayTasks = await db
       .select()
       .from(tasks)
       .where(eq(tasks.date, targetDate));
 
-    // 2. Routines (shu sana uchun yoki har kuni takrorlanuvchi targetDate IS NULL)
     const dayRoutines = await db
       .select()
       .from(routines)
@@ -175,8 +186,6 @@ export async function rescheduleTask(params: {
   newTimeOrDate?: string;
 }) {
   const d = new Date();
-  const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
   let targetDate: string | undefined = undefined;
   let targetTime: string | undefined = undefined;
 
@@ -257,7 +266,6 @@ export async function saveYouTubeAndBook(params: {
   summaryBookText: string;
 }) {
   try {
-    // 1. YouTube videoId ni aniqlash
     let videoId = "";
     try {
       const u = new URL(params.youtubeUrl);
@@ -268,7 +276,6 @@ export async function saveYouTubeAndBook(params: {
       }
     } catch {}
 
-    // 2. videos jadvaliga kiritish
     const [savedVideo] = await db
       .insert(videos)
       .values({
@@ -281,13 +288,11 @@ export async function saveYouTubeAndBook(params: {
       })
       .returning();
 
-    // 3. PDF kitob hosil qilish (src/lib/pdfService.ts)
     const pdfUrl = await createSummaryPdf(
       params.title.trim(),
       params.summaryBookText
     );
 
-    // 4. books jadvaliga kiritish
     const [savedBook] = await db
       .insert(books)
       .values({
@@ -311,6 +316,310 @@ export async function saveYouTubeAndBook(params: {
     };
   } catch (error: any) {
     console.error("saveYouTubeAndBook error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * f) Yangi xarajat kiritish va karta balansidan yechish
+ */
+export async function addExpense(params: {
+  amount: number;
+  title: string;
+  category?: string;
+  cardId?: number;
+}) {
+  const d = new Date();
+  const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const category = params.category || "boshqa";
+
+  try {
+    // Asosiy yoki berilgan kartani topish
+    let targetCard: any = null;
+    if (params.cardId) {
+      const [c] = await db.select().from(cards).where(eq(cards.id, params.cardId));
+      targetCard = c;
+    }
+    if (!targetCard) {
+      const [primary] = await db.select().from(cards).where(eq(cards.type, "primary"));
+      targetCard = primary;
+    }
+    if (!targetCard) {
+      const [first] = await db.select().from(cards).limit(1);
+      targetCard = first;
+    }
+
+    let txId: number | undefined = undefined;
+    if (targetCard) {
+      // 1. Transaction audit log
+      const [tx] = await db
+        .insert(cardTransactions)
+        .values({
+          cardId: targetCard.id,
+          date: todayISO,
+          type: "out",
+          amount: String(params.amount),
+          description: params.title.trim(),
+        })
+        .returning();
+      txId = tx?.id;
+
+      // 2. Karta balansidan ayirish
+      const newBalance = Math.max(0, Number(targetCard.balance || 0) - Number(params.amount));
+      await db
+        .update(cards)
+        .set({ balance: String(newBalance) })
+        .where(eq(cards.id, targetCard.id));
+    }
+
+    // 3. Expenses jadvaliga kiritish
+    const [saved] = await db
+      .insert(expenses)
+      .values({
+        title: params.title.trim(),
+        amount: String(params.amount),
+        category,
+        date: todayISO,
+        cardId: targetCard ? targetCard.id : null,
+        transactionId: txId || null,
+      })
+      .returning();
+
+    return {
+      success: true,
+      message: `${Number(params.amount).toLocaleString("uz-UZ")} so'm xarajat kiritildi (${params.title})!`,
+      expense: saved,
+      cardName: targetCard?.name || "Naqd",
+    };
+  } catch (error: any) {
+    console.error("addExpense error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * g) Yangi daromad kiritish va karta balansiga qo'shish
+ */
+export async function addIncome(params: {
+  amount: number;
+  title: string;
+  source?: string;
+  cardId?: number;
+}) {
+  const d = new Date();
+  const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const source = params.source || "loyihalar";
+
+  try {
+    let targetCard: any = null;
+    if (params.cardId) {
+      const [c] = await db.select().from(cards).where(eq(cards.id, params.cardId));
+      targetCard = c;
+    }
+    if (!targetCard) {
+      const [primary] = await db.select().from(cards).where(eq(cards.type, "primary"));
+      targetCard = primary;
+    }
+    if (!targetCard) {
+      const [first] = await db.select().from(cards).limit(1);
+      targetCard = first;
+    }
+
+    let txId: number | undefined = undefined;
+    if (targetCard) {
+      const [tx] = await db
+        .insert(cardTransactions)
+        .values({
+          cardId: targetCard.id,
+          date: todayISO,
+          type: "in",
+          amount: String(params.amount),
+          description: params.title.trim(),
+        })
+        .returning();
+      txId = tx?.id;
+
+      const newBalance = Number(targetCard.balance || 0) + Number(params.amount);
+      await db
+        .update(cards)
+        .set({ balance: String(newBalance) })
+        .where(eq(cards.id, targetCard.id));
+    }
+
+    const [saved] = await db
+      .insert(incomes)
+      .values({
+        title: params.title.trim(),
+        amount: String(params.amount),
+        source,
+        date: todayISO,
+        cardId: targetCard ? targetCard.id : null,
+        transactionId: txId || null,
+      })
+      .returning();
+
+    return {
+      success: true,
+      message: `${Number(params.amount).toLocaleString("uz-UZ")} so'm daromad hisobga olindi (${params.title})! 💰`,
+      income: saved,
+      cardName: targetCard?.name || "Naqd",
+    };
+  } catch (error: any) {
+    console.error("addIncome error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * h) Moliyaviy umumiy holat (balanslar va kartalar)
+ */
+export async function getFinanceSummary() {
+  try {
+    const cardList = await db.select().from(cards).where(eq(cards.archived, false));
+    const totalBalance = cardList.reduce((sum, c) => sum + Number(c.balance || 0), 0);
+
+    const recentExpenses = await db
+      .select()
+      .from(expenses)
+      .orderBy(desc(expenses.createdAt))
+      .limit(5);
+
+    const recentIncomes = await db
+      .select()
+      .from(incomes)
+      .orderBy(desc(incomes.createdAt))
+      .limit(5);
+
+    return {
+      totalBalance,
+      cards: cardList.map((c) => ({
+        id: c.id,
+        name: c.name,
+        bank: c.bank,
+        last4: c.last4,
+        type: c.type,
+        balance: Number(c.balance || 0),
+      })),
+      recentExpenses: recentExpenses.map((e) => ({
+        id: e.id,
+        title: e.title,
+        amount: Number(e.amount),
+        date: e.date,
+      })),
+      recentIncomes: recentIncomes.map((i) => ({
+        id: i.id,
+        title: i.title,
+        amount: Number(i.amount),
+        date: i.date,
+      })),
+    };
+  } catch (error: any) {
+    console.error("getFinanceSummary error:", error);
+    return { error: error.message, totalBalance: 0, cards: [] };
+  }
+}
+
+/**
+ * i) Yangi mijoz buyurtmasini (orders) kiritish
+ */
+export async function addClientOrder(params: {
+  clientName: string;
+  title: string;
+  amount: number;
+  deadline?: string;
+  description?: string;
+}) {
+  try {
+    const [saved] = await db
+      .insert(orders)
+      .values({
+        clientName: params.clientName.trim(),
+        title: params.title.trim(),
+        amount: String(params.amount || 0),
+        deadline: params.deadline || null,
+        description: params.description || null,
+        stage: "new",
+      })
+      .returning();
+
+    return {
+      success: true,
+      message: `"${params.clientName}" mijozi uchun yangi buyurtma (${params.title}) saqlandi!`,
+      order: saved,
+    };
+  } catch (error: any) {
+    console.error("addClientOrder error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * j) Yangi moliyaviy maqsad (goal) qo'shish
+ */
+export async function addGoal(params: {
+  title: string;
+  targetAmount: number;
+  deadline?: string;
+}) {
+  try {
+    const [saved] = await db
+      .insert(goals)
+      .values({
+        title: params.title.trim(),
+        targetAmount: String(params.targetAmount),
+        deadline: params.deadline || null,
+        savedAmount: "0",
+        usedAmount: "0",
+      })
+      .returning();
+
+    return {
+      success: true,
+      message: `Yangi maqsad: "${params.title}" (${Number(params.targetAmount).toLocaleString("uz-UZ")} so'm) saqlandi! 🎯`,
+      goal: saved,
+    };
+  } catch (error: any) {
+    console.error("addGoal error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * k) Yangi kontent rejasi (post/reels/video) qo'shish
+ */
+export async function createContentPlan(params: {
+  title: string;
+  type?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  caption?: string;
+  hook?: string;
+  body?: string;
+  cta?: string;
+}) {
+  try {
+    const [saved] = await db
+      .insert(contentItems)
+      .values({
+        title: params.title.trim(),
+        type: params.type || "post",
+        stage: "idea",
+        scheduledDate: params.scheduledDate || null,
+        scheduledTime: params.scheduledTime || null,
+        caption: params.caption || null,
+        hook: params.hook || null,
+        body: params.body || null,
+        cta: params.cta || null,
+      })
+      .returning();
+
+    return {
+      success: true,
+      message: `Kontent g'oyasi "${params.title}" media rejasiga qo'shildi! 🎬`,
+      contentItem: saved,
+    };
+  } catch (error: any) {
+    console.error("createContentPlan error:", error);
     return { success: false, error: error.message };
   }
 }
@@ -406,18 +715,117 @@ const saveYouTubeAndBookDeclaration: FunctionDeclaration = {
   },
 };
 
+const addExpenseDeclaration: FunctionDeclaration = {
+  name: "addExpense",
+  description: "Karta yoki hamyondan xarajat yozish va balansni yangilash.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      amount: { type: Type.NUMBER, description: "Xarajat summasi so'mda (masalan: 50000)" },
+      title: { type: Type.STRING, description: "Xarajat nima uchun qilingani (masalan: 'Tushlik', 'Taksi')" },
+      category: { type: Type.STRING, description: "Xarajat kategoriyasi (masalan: 'ovqat', 'transport', 'uy', 'boshqa')" },
+    },
+    required: ["amount", "title"],
+  },
+};
+
+const addIncomeDeclaration: FunctionDeclaration = {
+  name: "addIncome",
+  description: "Karta yoki hamyonga pul tushganda daromad yozish va balansni oshirish.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      amount: { type: Type.NUMBER, description: "Daromad summasi so'mda (masalan: 1200000)" },
+      title: { type: Type.STRING, description: "Daromad nomi yoki nima uchun tushgani" },
+      source: { type: Type.STRING, description: "Daromad manbasi (masalan: 'maosh', 'loyihalar', 'mijoz')" },
+    },
+    required: ["amount", "title"],
+  },
+};
+
+const getFinanceSummaryDeclaration: FunctionDeclaration = {
+  name: "getFinanceSummary",
+  description: "Kartalar va ularning qoldiqlari, jami pul va so'nggi xarajatlar/daromadlar holatini ko'rish.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+  },
+};
+
+const addClientOrderDeclaration: FunctionDeclaration = {
+  name: "addClientOrder",
+  description: "Mijozdan yangi buyurtma yoki loyiha tushganda 'orders' bo'limiga kiritish.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      clientName: { type: Type.STRING, description: "Mijoz yoki kompaniya nomi" },
+      title: { type: Type.STRING, description: "Buyurtma nomi yoki qilinadigan ish (masalan: 'Logotip dizayni')" },
+      amount: { type: Type.NUMBER, description: "Buyurtma narxi so'mda" },
+      deadline: { type: Type.STRING, description: "Topshirish muddati (YYYY-MM-DD)" },
+      description: { type: Type.STRING, description: "Qo'shimcha izoh yoki talablar" },
+    },
+    required: ["clientName", "title", "amount"],
+  },
+};
+
+const addGoalDeclaration: FunctionDeclaration = {
+  name: "addGoal",
+  description: "Yangi moliyaviy maqsad yoki jamg'arma rejasini 'goals' jadvaliga qo'shish.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: "Maqsad nomi (masalan: 'Yangi MacBook', 'Umra safari')" },
+      targetAmount: { type: Type.NUMBER, description: "Yig'ilishi kerak bo'lgan maqsad summasi" },
+      deadline: { type: Type.STRING, description: "Oxirgi muddat (YYYY-MM-DD)" },
+    },
+    required: ["title", "targetAmount"],
+  },
+};
+
+const createContentPlanDeclaration: FunctionDeclaration = {
+  name: "createContentPlan",
+  description: "Ijtimoiy tarmoqlar (Instagram, Telegram, YouTube) uchun yangi kontent g'oyasi yoki post rejasini saqlash.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: "Post yoki video mavzusi" },
+      type: { type: Type.STRING, description: "Format: post, reels, carousel, story, article" },
+      scheduledDate: { type: Type.STRING, description: "Chiqarish sanasi (YYYY-MM-DD)" },
+      scheduledTime: { type: Type.STRING, description: "Chiqarish soati (HH:MM)" },
+      caption: { type: Type.STRING, description: "Post tavsifi yoki matni" },
+      hook: { type: Type.STRING, description: "Diqqatni tortuvchi boshlang'ich jumla (Hook)" },
+      body: { type: Type.STRING, description: "Asosiy mazmun" },
+      cta: { type: Type.STRING, description: "Harakatga chaqiruv (CTA)" },
+    },
+    required: ["title"],
+  },
+};
+
 // ─── 3. Main Agent Processor ───
+
+const ALL_TOOLS: FunctionDeclaration[] = [
+  getCalendarScheduleDeclaration,
+  createTaskDeclaration,
+  completeTaskDeclaration,
+  rescheduleTaskDeclaration,
+  saveYouTubeAndBookDeclaration,
+  addExpenseDeclaration,
+  addIncomeDeclaration,
+  getFinanceSummaryDeclaration,
+  addClientOrderDeclaration,
+  addGoalDeclaration,
+  createContentPlanDeclaration,
+];
 
 export async function processAgentMessage(
   userText: string,
-  context?: { senderId?: string; username?: string }
+  context?: { senderId?: string; username?: string; source?: string }
 ): Promise<AgentResponse> {
   const clean = userText.trim();
   if (!clean) {
     return { text: "Assalomu alaykum Sohibjon! Sizga qanday yordam bera olaman?" };
   }
 
-  // 1. API kalitini aniqlash (DB yoki env)
   let apiKey = process.env.GEMINI_API_KEY || "";
   if (!apiKey) {
     try {
@@ -432,50 +840,41 @@ export async function processAgentMessage(
   const d = new Date();
   const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-  // Agar Gemini API kaliti mavjud bo'lsa — to'liq Function Calling agentini ishlatamiz
   if (apiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey });
 
-      const systemInstruction = `Siz FlowDesk loyihasining shaxsiy aqlli boshqaruv kotibi va intizom kuratorisiz (Madina).
-Foydalanuvchingiz: Sulaymonov Sohibjon (@sulaymonovss, ID: 6724823030).
+      const systemInstruction = `Siz FlowDesk (Sovodesk) boshqaruv tizimining oliy darajadagi boshqaruv kotibi va shaxsiy AI Agentisiz (Madina).
+Foydalanuvchi: Sulaymonov Sohibjon (@sulaymonovss, ID: 6724823030).
 Bugungi sana: ${todayISO}.
+Sizga FlowDesk platformasiga TO'LIQ RUXSAT (FULL ACCESS) berilgan.
 
-Muloqot qoidalari va xarakteringiz:
-1. Siz shunchaki bot emassiz — tirik insondek, do'stona, g'amxo'r, tirishqoq va intizomli shaxsiy yordamchisiz.
-2. Sohibjonga doimo samimiy, hurmatli o'zbek tilida murojaat qiling ("Sohibjon", "Bajarildi Sohibjon!", "Tushundim").
-3. Sizda quyidagi amaliy vositalar (tools) mavjud:
-   - getCalendarSchedule: Sohibjonning taqvimidagi kunlik rejalari yoki vazifalarini ko'rish.
-   - createTask: yangi reja yoki vazifa kiritish.
-   - completeTask: Sohibjon "bitirdim", "bajarildi", "tugatdim" deganda vazifani yopish.
-   - rescheduleTask: Sohibjon "ulgurmadim", "yana vaqt kerak", "surib qo'y" deganda muddatni yangi soatga yoki ertaga surish.
-   - saveYouTubeAndBook: YouTube havolasini qabul qilib, chuqur tahliliy xulosa hosil qilib, uni 'videos' va 'books' (PDF kitob) ga saqlash.
-4. Agar Sohibjon YouTube video yoki havola bersa, videoning mazmunli konspektini o'zingiz chiroyli tuzib berib, uni 'saveYouTubeAndBook' vositasi orqali bazaga va PDF kitobga saqlang!
-5. Agar taqvim yoki rejalar so'ralsa, 'getCalendarSchedule' orqali olib, tartibli ro'yxat ko'rinishida taqdim eting.
-6. Javoblaringiz aniq, qisqa va qat'iy intizomni ushlashga undovchi bo'lsin.`;
+Siz quyidagi barcha amallarni to'g'ridan-to'g'ri bajara olasiz:
+1. Taqvim va rejalar: getCalendarSchedule, createTask, completeTask, rescheduleTask.
+2. Moliya va balans: addExpense (xarajat yozish), addIncome (daromad kiritish), getFinanceSummary (kartalar va jami balans).
+3. Buyurtmalar va mijozlar: addClientOrder (yangi mijoz buyurtmasini saqlash).
+4. Maqsadlar: addGoal (yangi jamg'arma maqsadi qo'shish).
+5. Media & Kontent: createContentPlan (Instagram/Telegram/YouTube post yoki reels g'oyasi).
+6. YouTube & Kitoblar: saveYouTubeAndBook (video havolasidan tahliliy konspekt chiqarib, kitoblar bo'limiga PDF yaratib berish).
+
+Muloqot qoidalari:
+- Siz tirik insondek, samimiy, tirishqoq va intizomli o'zbek tilida gaplashasiz ("Sohibjon", "Bajarildi Sohibjon!", "Hammasini FlowDesk-ga kiritdim!").
+- Agar Sohibjon "Google/Gemini-dan yozdim, buni sovodeskga saqlab qo'y" yoki "buni saqla", "reja tuzib qo'y", "xarajat yozib qo'y" desa, mos vositadan foydalanib darhol bazaga yozing.
+- Javoblaringiz chiroyli formatlangan, professional va qat'iy intizomni aks ettirsin.`;
+
+      const TARGET_MODEL = "gemini-flash-lite-latest";
 
       const chatResponse = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: TARGET_MODEL,
         contents: clean,
         config: {
           systemInstruction,
-          tools: [
-            {
-              functionDeclarations: [
-                getCalendarScheduleDeclaration,
-                createTaskDeclaration,
-                completeTaskDeclaration,
-                rescheduleTaskDeclaration,
-                saveYouTubeAndBookDeclaration,
-              ],
-            },
-          ],
+          tools: [{ functionDeclarations: ALL_TOOLS }],
         },
       });
 
       const functionCalls = chatResponse.functionCalls;
 
-      // Agar model tool chaqirgan bo'lsa
       if (functionCalls && functionCalls.length > 0) {
         let lastPdfUrl: string | undefined = undefined;
         const toolResponses: any[] = [];
@@ -484,17 +883,43 @@ Muloqot qoidalari va xarakteringiz:
           const args = (call.args as any) || {};
           let result: any = null;
 
-          if (call.name === "getCalendarSchedule") {
-            result = await getCalendarSchedule(args);
-          } else if (call.name === "createTask") {
-            result = await createTask(args);
-          } else if (call.name === "completeTask") {
-            result = await completeTask(args);
-          } else if (call.name === "rescheduleTask") {
-            result = await rescheduleTask(args);
-          } else if (call.name === "saveYouTubeAndBook") {
-            result = await saveYouTubeAndBook(args);
-            if (result.pdfUrl) lastPdfUrl = result.pdfUrl;
+          switch (call.name) {
+            case "getCalendarSchedule":
+              result = await getCalendarSchedule(args);
+              break;
+            case "createTask":
+              result = await createTask(args);
+              break;
+            case "completeTask":
+              result = await completeTask(args);
+              break;
+            case "rescheduleTask":
+              result = await rescheduleTask(args);
+              break;
+            case "saveYouTubeAndBook":
+              result = await saveYouTubeAndBook(args);
+              if (result.pdfUrl) lastPdfUrl = result.pdfUrl;
+              break;
+            case "addExpense":
+              result = await addExpense(args);
+              break;
+            case "addIncome":
+              result = await addIncome(args);
+              break;
+            case "getFinanceSummary":
+              result = await getFinanceSummary();
+              break;
+            case "addClientOrder":
+              result = await addClientOrder(args);
+              break;
+            case "addGoal":
+              result = await addGoal(args);
+              break;
+            case "createContentPlan":
+              result = await createContentPlan(args);
+              break;
+            default:
+              result = { status: "unknown_function" };
           }
 
           toolResponses.push({
@@ -503,9 +928,9 @@ Muloqot qoidalari va xarakteringiz:
           });
         }
 
-        // 2-bosqich: Natijalarni modelga qaytarib, yakuniy o'zbekcha chiroyli javob olamiz
+        // 2-bosqich: Yakuniy chiroyli javob
         const finalResponse = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
+          model: TARGET_MODEL,
           contents: [
             { role: "user", parts: [{ text: clean }] },
             {
@@ -524,12 +949,10 @@ Muloqot qoidalari va xarakteringiz:
               })),
             },
           ],
-          config: {
-            systemInstruction,
-          },
+          config: { systemInstruction },
         });
 
-        const replyText = finalResponse.text || "Barcha buyruqlar muvaffaqiyatli bajarildi, Sohibjon!";
+        const replyText = finalResponse.text || "Barcha buyruqlar muvaffaqiyatli bajarildi va FlowDesk-ga saqlandi, Sohibjon!";
         return {
           text: replyText,
           pdfUrl: lastPdfUrl,
@@ -537,7 +960,6 @@ Muloqot qoidalari va xarakteringiz:
         };
       }
 
-      // Agar oddiy suhbat bo'lsa
       if (chatResponse.text) {
         return { text: chatResponse.text };
       }
@@ -546,7 +968,7 @@ Muloqot qoidalari va xarakteringiz:
     }
   }
 
-  // ─── 4. Fallback (Agar API kalit bo'lmasa yoki vaqtincha xatolik bo'lsa) ───
+  // ─── 4. Fallback (Qoidalar asosida) ───
 
   // A. YouTube link aniqlansa
   const ytMatch = clean.match(/https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/i);
@@ -581,7 +1003,42 @@ Muloqot qoidalari va xarakteringiz:
     };
   }
 
-  // B. Vazifani tugatish / bitirdim
+  // B. Xarajat qo'shish
+  const expMatch = clean.match(/(?:xarajat|chiqim|sarfladim|to'?ladim)\s*[:\-]?\s*(\d+(?:[\s.,]\d+)*)\s*(?:so'?m)?\s*(.*)/i);
+  if (expMatch) {
+    const amount = Number(expMatch[1].replace(/[\s.,]/g, ""));
+    const title = expMatch[2]?.trim() || "Xarajat";
+    const res = await addExpense({ amount, title });
+    return {
+      text: `💸 <b>${Number(amount).toLocaleString("uz-UZ")} so'm</b> xarajat qayd etildi (${title})!`,
+      actionTaken: "addExpense",
+    };
+  }
+
+  // C. Daromad qo'shish
+  const incMatch = clean.match(/(?:daromad|kirim|tushdi|oldim)\s*[:\-]?\s*(\d+(?:[\s.,]\d+)*)\s*(?:so'?m)?\s*(.*)/i);
+  if (incMatch) {
+    const amount = Number(incMatch[1].replace(/[\s.,]/g, ""));
+    const title = incMatch[2]?.trim() || "Daromad";
+    const res = await addIncome({ amount, title });
+    return {
+      text: `💰 <b>${Number(amount).toLocaleString("uz-UZ")} so'm</b> daromad hisobga olindi (${title})! 🎉`,
+      actionTaken: "addIncome",
+    };
+  }
+
+  // D. Balans so'ralsa
+  if (/balans|hisobim|qancha pul|moliya/i.test(clean)) {
+    const fin = await getFinanceSummary();
+    let text = `💳 <b>Moliyaviy hisobot:</b>\n\n`;
+    text += `💰 <b>Jami mablag':</b> ${fin.totalBalance.toLocaleString("uz-UZ")} so'm\n\n`;
+    fin.cards.forEach((c) => {
+      text += `🔹 ${c.name} (${c.bank || "Karta"}): ${c.balance.toLocaleString("uz-UZ")} so'm\n`;
+    });
+    return { text, actionTaken: "getFinanceSummary" };
+  }
+
+  // E. Vazifani tugatish
   if (/bitirdim|bajarildi|tugatdim|yopib qo'?y|bajardim/i.test(clean)) {
     const taskName = clean.replace(/bitirdim|bajarildi|tugatdim|yopib qo'?y|bajardim|vazifani/gi, "").trim();
     const res = await completeTask({ title: taskName || undefined });
@@ -591,7 +1048,7 @@ Muloqot qoidalari va xarakteringiz:
     };
   }
 
-  // C. Vaqtni surish / yana vaqt kerak
+  // F. Vaqtni surish
   if (/yana.*vaqt kerak|surib qo'?y|kechroq|keyinga sur/i.test(clean)) {
     const res = await rescheduleTask({ title: clean, newTimeOrDate: "ertaga" });
     return {
@@ -600,7 +1057,7 @@ Muloqot qoidalari va xarakteringiz:
     };
   }
 
-  // D. Taqvim / Rejalar so'ralsa
+  // G. Taqvim / Rejalar
   if (/reja|taqvim|jadval|bugun nima|ertaga nima/i.test(clean)) {
     const isTomorrow = /ertaga/i.test(clean);
     const tmDate = new Date(d);
@@ -630,7 +1087,7 @@ Muloqot qoidalari va xarakteringiz:
     return { text, actionTaken: "getCalendarSchedule" };
   }
 
-  // E. Yangi vazifa qo'shish so'ralsa
+  // H. Yangi vazifa qo'shish
   if (/vazifa|qo'?sh|yozib qo'?y|kirit/i.test(clean) && !/rasm|hisob|mijoz/i.test(clean)) {
     const title = clean.replace(/vazifa|qo'?sh|yozib qo'?y|kirit|bugun|ertaga/gi, "").trim() || "Yangi vazifa";
     const res = await createTask({ title, date: todayISO });
@@ -641,6 +1098,6 @@ Muloqot qoidalari va xarakteringiz:
   }
 
   return {
-    text: `Tushundim Sohibjon! 😊 Sizga taqvimingizni ko'rsatishim, yangi vazifa kiritishim, bitirilgan ishlarni belgilashim yoki YouTube videolarni xulosa qilib PDF kitob yaratib berishim mumkin. Qanday buyruq bajaramiz? 🚀`,
+    text: `Tushundim Sohibjon! 😊 Men FlowDesk-ga to'liq ulanganman. Rejalar tuzish, vazifalarni belgilash, xarajat yoki daromad kiritish, balansni tekshirish, yangi buyurtma yoki kontent rejalarini saqlash, YouTube videolarni PDF kitob qilish — barchasini bajarishim mumkin! 🚀`,
   };
 }

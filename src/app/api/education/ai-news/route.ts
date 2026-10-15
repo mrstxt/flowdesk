@@ -83,7 +83,7 @@ Har bir yangilik bo'yicha quyidagi formatda sof JSON massiv qaytaring:
 Muhim talab: Faqat va faqat to'g'ridan-to'g'ri JSON massiv qaytaring. Hech qanday Markdown (masalan \`\`\`json) yoki boshqa so'z qo'shmang.`;
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

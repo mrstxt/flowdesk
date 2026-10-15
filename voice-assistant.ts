@@ -555,7 +555,7 @@ async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null>
   if (!geminiApiKey) return null;
   try {
     const base64Audio = audioBuffer.toString("base64");
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${geminiApiKey}`;
     const response = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -64,3 +64,4 @@ export async function GET(
     return new Response("Server xatosi", { status: 500 });
   }
 }
+

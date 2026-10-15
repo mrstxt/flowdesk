@@ -251,7 +251,7 @@ export async function transcribeTelegramVoice(fileId: string, botToken: string):
     const base64Audio = Buffer.from(arrayBuffer).toString("base64");
 
     // 3. Gemini 2.5 Flash / 1.5 Flash ga yuborish
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${geminiApiKey}`;
     const response = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
