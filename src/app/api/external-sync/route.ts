@@ -3,6 +3,7 @@ import { processAgentMessage } from "@/lib/aiAgent";
 import { db } from "@/db";
 import { tasks, books, videos, expenses, orders } from "@/db/schema";
 import { createSummaryPdf } from "@/lib/pdfService";
+import { clientIp, rateLimit, tooManyRequests } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +14,13 @@ export const dynamic = "force-dynamic";
  * (tasks, books, videos, expenses, orders) xavfsiz yozadi.
  */
 export async function POST(req: NextRequest) {
+  const limit = rateLimit(`sync:${clientIp(req)}`, 20, 60_000);
+  if (!limit.ok) return tooManyRequests(limit.retryAfterSec);
+
   try {
     const body = await req.json().catch(() => ({}));
-    const authHeader = req.headers.get("authorization");
-    const secret = body.secret || body.apiKey;
+    // Eslatma: autentifikatsiya (sessiya cookie yoki x-api-key) proxy
+    // darajasida (src/proxy.ts) tekshiriladi — bu yerda qayta talab qilinmaydi.
 
     // 1. Agar erkin matnli xabar berilgan bo'lsa (masalan: "Shuni sovodeskga saqla: ...")
     const freeText = body.message || body.text || body.prompt;
@@ -142,7 +146,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("API /api/external-sync error:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Sinxronizatsiya xatosi." },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }
@@ -160,6 +164,9 @@ export async function GET(req: NextRequest) {
       description: "Google Gemini va tashqi webhooks orqali ma'lumotlarni qabul qiluvchi shlyuz.",
     });
   }
+
+  const limit = rateLimit(`sync:${clientIp(req)}`, 20, 60_000);
+  if (!limit.ok) return tooManyRequests(limit.retryAfterSec);
 
   const agentRes = await processAgentMessage(message, {
     source: "external_sync_get",

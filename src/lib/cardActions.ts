@@ -140,16 +140,19 @@ export async function addCardIncome(
   description: string
 ) {
   if (amount <= 0) throw new Error("Summa 0 dan katta bo'lishi kerak");
-  await db
-    .update(cards)
-    .set({ balance: sql`${cards.balance} + ${amount}` })
-    .where(eq(cards.id, cardId));
-  await db.insert(cardTransactions).values({
-    cardId,
-    date: new Date().toISOString().slice(0, 10),
-    type: "in",
-    amount: String(amount),
-    description,
+  // Balans va tarix bir vaqtda yangilanadi (yarim holat oldini oladi)
+  await db.transaction(async (tx) => {
+    await tx
+      .update(cards)
+      .set({ balance: sql`${cards.balance} + ${amount}` })
+      .where(eq(cards.id, cardId));
+    await tx.insert(cardTransactions).values({
+      cardId,
+      date: new Date().toISOString().slice(0, 10),
+      type: "in",
+      amount: String(amount),
+      description,
+    });
   });
 }
 
@@ -174,16 +177,19 @@ export async function addCardExpense(
       error: `Kartada mablag' yetarli emas (${available} so'm)`,
     };
   }
-  await db
-    .update(cards)
-    .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
-    .where(eq(cards.id, cardId));
-  await db.insert(cardTransactions).values({
-    cardId,
-    date: new Date().toISOString().slice(0, 10),
-    type: "out",
-    amount: String(amount),
-    description,
+  // Balans va tarix bir transaksiyada yangilanadi
+  await db.transaction(async (tx) => {
+    await tx
+      .update(cards)
+      .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
+      .where(eq(cards.id, cardId));
+    await tx.insert(cardTransactions).values({
+      cardId,
+      date: new Date().toISOString().slice(0, 10),
+      type: "out",
+      amount: String(amount),
+      description,
+    });
   });
   return { ok: true };
 }
@@ -226,57 +232,60 @@ export async function transferBetweenCards(
   const today = new Date().toISOString().slice(0, 10);
   const desc = description || `Transfer: ${from.name} → ${to.name}`;
 
-  // 1. fromCardId dan ayiramiz (manfiy bo'lmasligi uchun 0 bilan cheklaymiz)
-  await db
-    .update(cards)
-    .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
-    .where(eq(cards.id, fromCardId));
-  await db.insert(cardTransactions).values({
-    cardId: fromCardId,
-    date: today,
-    type: "transfer_out",
-    amount: String(amount),
-    relatedCardId: toCardId,
-    description: desc,
-  });
-
-  // 2. toCardId ga qo'shamiz
-  await db
-    .update(cards)
-    .set({ balance: sql`${cards.balance} + ${amount}` })
-    .where(eq(cards.id, toCardId));
-  await db.insert(cardTransactions).values({
-    cardId: toCardId,
-    date: today,
-    type: "transfer_in",
-    amount: String(amount),
-    relatedCardId: fromCardId,
-    description: desc,
-  });
-
-  // Asosiy karta ishtirok etsa — umumiy foyda (totalProfitAll) ham o'zgarishi
-  // kerak, chunki UI asosiy kartani totalProfitAll orqali ko'rsatadi:
-  // - Asosiy kartadan chiqsa → expense (foyda kamayadi)
-  // - Asosiy kartaga tushsa → income (foyda oshadi)
-  if (from.type === "primary") {
-    await db.insert(expenses).values({
-      title: desc,
-      amount: String(amount),
-      category: "transfer",
-      date: today,
+  // Barcha yozuvlar BIR transaksiyada: yarim holat (pul yo'qolishi) mumkin emas
+  await db.transaction(async (tx) => {
+    // 1. fromCardId dan ayiramiz (manfiy bo'lmasligi uchun 0 bilan cheklaymiz)
+    await tx
+      .update(cards)
+      .set({ balance: sql`GREATEST(${cards.balance} - ${amount}, 0)` })
+      .where(eq(cards.id, fromCardId));
+    await tx.insert(cardTransactions).values({
       cardId: fromCardId,
-    });
-  }
-  if (to.type === "primary") {
-    await db.insert(incomes).values({
-      title: desc,
-      amount: String(amount),
-      source: "transfer",
       date: today,
-      paymentType: "card",
-      cardId: toCardId,
+      type: "transfer_out",
+      amount: String(amount),
+      relatedCardId: toCardId,
+      description: desc,
     });
-  }
+
+    // 2. toCardId ga qo'shamiz
+    await tx
+      .update(cards)
+      .set({ balance: sql`${cards.balance} + ${amount}` })
+      .where(eq(cards.id, toCardId));
+    await tx.insert(cardTransactions).values({
+      cardId: toCardId,
+      date: today,
+      type: "transfer_in",
+      amount: String(amount),
+      relatedCardId: fromCardId,
+      description: desc,
+    });
+
+    // Asosiy karta ishtirok etsa — umumiy foyda (totalProfitAll) ham o'zgarishi
+    // kerak, chunki UI asosiy kartani totalProfitAll orqali ko'rsatadi:
+    // - Asosiy kartadan chiqsa → expense (foyda kamayadi)
+    // - Asosiy kartaga tushsa → income (foyda oshadi)
+    if (from.type === "primary") {
+      await tx.insert(expenses).values({
+        title: desc,
+        amount: String(amount),
+        category: "transfer",
+        date: today,
+        cardId: fromCardId,
+      });
+    }
+    if (to.type === "primary") {
+      await tx.insert(incomes).values({
+        title: desc,
+        amount: String(amount),
+        source: "transfer",
+        date: today,
+        paymentType: "card",
+        cardId: toCardId,
+      });
+    }
+  });
 
   return { ok: true };
 }

@@ -206,7 +206,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     console.error("GET ai-news error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }
@@ -241,7 +241,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("POST ai-news error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }
@@ -265,7 +265,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     console.error("DELETE ai-news error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }

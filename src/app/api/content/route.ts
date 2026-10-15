@@ -40,7 +40,7 @@ export async function GET(req: Request) {
     return NextResponse.json(rows);
   } catch (err: any) {
     console.error("GET /api/content error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
     return NextResponse.json(created);
   } catch (err: any) {
     console.error("POST /api/content error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -137,7 +137,7 @@ export async function PUT(req: Request) {
     return NextResponse.json(updated);
   } catch (err: any) {
     console.error("PUT /api/content error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -153,7 +153,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error("DELETE /api/content error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 

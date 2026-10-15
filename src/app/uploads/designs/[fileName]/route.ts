@@ -14,12 +14,16 @@ export async function GET(
 ) {
   try {
     const { fileName } = await params;
-    if (!fileName) {
+    if (!fileName || fileName.includes("..") || fileName.includes("/") || fileName.includes("\\\\")) {
       return new Response("Not found", { status: 404 });
     }
 
     const uploadsDir = path.join(process.cwd(), "public", "uploads", "designs");
-    const filePath = path.join(uploadsDir, fileName);
+    const filePath = path.resolve(uploadsDir, path.basename(fileName));
+    // Path traversal hisobga olinmasligi uchun qat'iy tekshiruv
+    if (!filePath.startsWith(path.resolve(uploadsDir) + path.sep)) {
+      return new Response("Not found", { status: 404 });
+    }
 
     const ext = path.extname(fileName).toLowerCase();
     const defaultMime =

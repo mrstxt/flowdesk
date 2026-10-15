@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processAgentMessage } from "@/lib/aiAgent";
+import { clientIp, rateLimit, tooManyRequests } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export const dynamic = "force-dynamic";
  */
 
 export async function POST(req: NextRequest) {
+  // Daqiqada 10 ta so'rov — Gemini hisobini himoya qiladi
+  const limit = rateLimit(`agent:${clientIp(req)}`, 10, 60_000);
+  if (!limit.ok) return tooManyRequests(limit.retryAfterSec);
+
   try {
     const body = await req.json().catch(() => ({}));
     const message = body.message || body.text || body.prompt;
@@ -47,7 +52,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || "Agent xatoligi yuz berdi.",
+        error: "Server xatosi (batafsil logda)",
       },
       { status: 500 }
     );
@@ -55,6 +60,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const limit = rateLimit(`agent:${clientIp(req)}`, 10, 60_000);
+  if (!limit.ok) return tooManyRequests(limit.retryAfterSec);
+
   const { searchParams } = new URL(req.url);
   const message = searchParams.get("message") || searchParams.get("text");
 

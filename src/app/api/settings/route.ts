@@ -8,7 +8,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const rows = await db.select().from(settings);
   const map: Record<string, string> = {};
-  for (const r of rows) map[r.key] = r.value ?? "";
+  for (const r of rows) {
+    // Sirli kalitlar (API key, token, password) hech qachon ochiq qaytarilmaydi
+    if (/(secret|token|password|passphrase|api[_-]?key|private)/i.test(r.key)) continue;
+    map[r.key] = r.value ?? "";
+  }
   return NextResponse.json(map);
 }
 

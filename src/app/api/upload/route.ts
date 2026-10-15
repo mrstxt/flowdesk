@@ -4,11 +4,19 @@ import path from "path";
 import { existsSync } from "fs";
 import { db } from "@/db";
 import { uploadedFiles } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { clientIp, rateLimit, tooManyRequests } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
+/** Ruxsat etilgan fayl kengaytmalari */
+const ALLOWED_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"]);
+/** Maksimal fayl hajmi: 10 MB */
+const MAX_SIZE = 10 * 1024 * 1024;
+
 export async function POST(req: Request) {
+  const limit = rateLimit(`upload:${clientIp(req)}`, 20, 60_000);
+  if (!limit.ok) return tooManyRequests(limit.retryAfterSec);
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
@@ -16,20 +24,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Fayl topilmadi" }, { status: 400 });
     }
 
+    if (file.size > MAX_SIZE) {
+      return NextResponse.json(
+        { error: "Fayl hajmi 10 MB dan oshmasligi kerak." },
+        { status: 413 }
+      );
+    }
+
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64Data = buffer.toString("base64");
 
-    const ext = path.extname(file.name).toLowerCase() || ".jpg";
+    // Xavfli kengaytmalar rad etiladi; nom doim random bo'ladi (path traversal cheklanadi)
+    const rawExt = path.extname(file.name).toLowerCase();
+    const ext = ALLOWED_EXT.has(rawExt) ? rawExt : ".jpg";
     const mimeType =
-      file.type ||
-      (ext === ".png"
+      file.type && file.type.startsWith("image/")
+        ? file.type
+        : ext === ".png"
         ? "image/png"
         : ext === ".webp"
         ? "image/webp"
         : ext === ".gif"
         ? "image/gif"
-        : "image/jpeg");
+        : ext === ".svg"
+        ? "image/svg+xml"
+        : "image/jpeg";
 
     const fileName = `design_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${ext}`;
 
@@ -64,7 +84,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Upload error:", err);
     return NextResponse.json(
-      { error: err.message || "Faylni saqlashda xatolik" },
+      { error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }

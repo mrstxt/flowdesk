@@ -17,6 +17,7 @@ import {
   Globe,
   Bot,
   GraduationCap,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -113,6 +114,23 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      <div className="px-3 pb-4">
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await fetch("/api/auth/logout", { method: "POST" });
+            } finally {
+              window.location.href = "/login";
+            }
+          }}
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm font-medium text-slate-500 hover:bg-black/[0.04] hover:text-slate-800 transition-all"
+        >
+          <LogOut className="w-[18px] h-[18px] transition-colors" />
+          Chiqish
+        </button>
+      </div>
     </aside>
   );
 }

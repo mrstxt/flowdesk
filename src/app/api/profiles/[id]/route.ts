@@ -44,7 +44,7 @@ export async function GET(
     });
   } catch (err: any) {
     console.error("GET /api/profiles/[id] error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -81,7 +81,7 @@ export async function PUT(
     return NextResponse.json(updated);
   } catch (err: any) {
     console.error("PUT /api/profiles/[id] error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -103,7 +103,7 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error("DELETE /api/profiles/[id] error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 

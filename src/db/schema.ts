@@ -411,6 +411,18 @@ export const aiDailyNews = pgTable("ai_daily_news", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/* ── AI Kotib (Madina) Chat Tarixi ── */
+
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  role: varchar("role", { length: 20 }).notNull(), // "user" | "assistant"
+  content: text("content").notNull(),
+  actionTaken: varchar("action_taken", { length: 255 }),
+  pdfUrl: text("pdf_url"),
+  source: varchar("source", { length: 50 }).default("web_panel"), // "web_panel" | "telegram"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 
 
 

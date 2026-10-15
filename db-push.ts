@@ -414,6 +414,17 @@ CREATE TABLE IF NOT EXISTS ai_daily_news (
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+-- 24. chat_messages (AI Kotib Madina suhbat tarixi)
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id SERIAL PRIMARY KEY,
+  role VARCHAR(20) NOT NULL,
+  content TEXT NOT NULL,
+  action_taken VARCHAR(255),
+  pdf_url TEXT,
+  source VARCHAR(50) DEFAULT 'web_panel',
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
 `;
 
 async function main() {

@@ -36,7 +36,7 @@ export async function GET(req: Request) {
     return NextResponse.json(rows);
   } catch (err: any) {
     console.error("GET /api/profiles/assets error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     return NextResponse.json(created);
   } catch (err: any) {
     console.error("POST /api/profiles/assets error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -106,7 +106,7 @@ export async function PUT(req: Request) {
     return NextResponse.json(updated);
   } catch (err: any) {
     console.error("PUT /api/profiles/assets error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 
@@ -122,7 +122,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error("DELETE /api/profiles/assets error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server xatosi (batafsil logda)" }, { status: 500 });
   }
 }
 

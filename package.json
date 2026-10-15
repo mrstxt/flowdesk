@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:init": "tsx db-push.ts",
+    "bot:webhook": "tsx set-webhook.ts",
     "worker": "tsx voice-assistant.ts"
   },
   "dependencies": {

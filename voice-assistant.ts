@@ -39,6 +39,7 @@ import {
   contentItems,
   socialProfiles,
   uploadedFiles,
+  chatMessages,
 } from "./src/db/schema";
 import { eq, desc, asc, sql, and, ilike, or, isNull } from "drizzle-orm";
 import { getCardAvailableBalance, getPrimaryCard } from "./src/lib/cardActions";

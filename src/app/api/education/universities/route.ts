@@ -97,7 +97,7 @@ export async function GET() {
   } catch (error: any) {
     console.error("GET universities error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }
@@ -154,7 +154,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("POST university error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }
@@ -185,7 +185,7 @@ export async function PUT(req: Request) {
   } catch (error: any) {
     console.error("PUT university error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }
@@ -209,7 +209,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     console.error("DELETE university error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: "Server xatosi (batafsil logda)" },
       { status: 500 }
     );
   }

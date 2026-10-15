@@ -1,4 +1,4 @@
-import { readFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
 import { db } from "@/db";
@@ -13,12 +13,16 @@ export async function GET(
 ) {
   try {
     const { fileName } = await params;
-    if (!fileName) {
+    if (!fileName || fileName.includes("..") || fileName.includes("/")) {
       return new Response("Not found", { status: 404 });
     }
 
     const uploadsDir = path.join(process.cwd(), "public", "uploads", "books");
-    const filePath = path.join(uploadsDir, fileName);
+    const filePath = path.resolve(uploadsDir, path.basename(fileName));
+    // Path traversal hisobga olinmasligi uchun qat'iy tekshiruv
+    if (!filePath.startsWith(path.resolve(uploadsDir) + path.sep)) {
+      return new Response("Not found", { status: 404 });
+    }
 
     // 1. Agar lokal diskda mavjud bo'lsa
     if (existsSync(filePath)) {
@@ -46,7 +50,7 @@ export async function GET(
         if (!existsSync(uploadsDir)) {
           await mkdir(uploadsDir, { recursive: true });
         }
-        await require("fs/promises").writeFile(filePath, buffer);
+        await writeFile(filePath, buffer);
       } catch {}
 
       return new Response(buffer, {
