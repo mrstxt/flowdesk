@@ -319,22 +319,8 @@ async function makeCallWithClient(client: TelegramClient, targetEntity: any, rea
 }
 
 async function sendVoiceNote(client: TelegramClient, peer: any, text: string) {
-  try {
-    const audioBuffer = await generateUzbekSpeechAudio(text);
-    if (!audioBuffer) return;
-    const tempFile = `temp_voice_${Date.now()}.mp3`;
-    fs.writeFileSync(tempFile, audioBuffer);
-    await client.sendFile(peer, {
-      file: tempFile,
-      voiceNote: true,
-      caption: text.length > 200 ? text.slice(0, 197) + "..." : text,
-    });
-    try {
-      fs.unlinkSync(tempFile);
-    } catch {}
-  } catch (err) {
-    console.error("sendVoiceNote error:", err);
-  }
+  // Foydalanuvchi talabi: Yordamchi ovozli xabar (golos) tashlamaydi, faqat matn yozadi.
+  return;
 }
 
 async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null> {

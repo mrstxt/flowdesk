@@ -68,41 +68,8 @@ export async function generateUzbekSpeechAudio(text: string): Promise<Buffer | n
  * Telegram bot orqali foydalanuvchiga ovozli xabar (Voice note) yuborish
  */
 export async function sendVoiceAlert(chatId: number, text: string): Promise<boolean> {
-  if (!TOKEN) return false;
-
-  try {
-    const audioBuffer = await generateUzbekSpeechAudio(text);
-    if (!audioBuffer) return false;
-
-    const formData = new FormData();
-    formData.append("chat_id", String(chatId));
-    formData.append(
-      "voice",
-      new Blob([new Uint8Array(audioBuffer)], { type: "audio/ogg" }),
-      "voice_alert.ogg"
-    );
-    formData.append(
-      "caption",
-      "🎙️ <b>Ovozli eslatma:</b>\n" + text.slice(0, 150)
-    );
-    formData.append("parse_mode", "HTML");
-
-    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("sendVoiceAlert xatolik:", err);
-      return false;
-    }
-
-    return true;
-  } catch (e) {
-    console.error("sendVoiceAlert error:", e);
-    return false;
-  }
+  // Foydalanuvchi talabi: Ovozli xabar (golos) yuborilmaydi, faqat matn yoziladi.
+  return true;
 }
 
 function modPow(b: bigint, e: bigint, m: bigint): bigint {
