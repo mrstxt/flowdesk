@@ -54,6 +54,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as http from "http";
+import * as os from "os";
 
 const DESIGNS_DIR = path.join(process.cwd(), "public", "uploads", "designs");
 try {
@@ -521,8 +522,32 @@ async function makeCallWithClient(client: TelegramClient, targetEntity: any, rea
 }
 
 async function sendVoiceNote(client: TelegramClient, peer: any, text: string) {
-  // Foydalanuvchi talabi: Yordamchi ovozli xabar (golos) tashlamaydi, faqat matn yozadi.
-  return;
+  try {
+    const cleanSpeech = text
+      .replace(/<[^>]+>/g, "")
+      .replace(/https?:\/\/[^\s]+/g, "")
+      .replace(/[#*`_~]/g, "")
+      .replace(/[\n\r]+/g, ". ")
+      .slice(0, 350)
+      .trim();
+
+    if (!cleanSpeech || cleanSpeech.length < 2) return;
+
+    const audioBuf = await generateUzbekSpeechAudio(cleanSpeech);
+    if (!audioBuf) return;
+
+    const tempFile = path.join(os.tmpdir(), `madina_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp3`);
+    fs.writeFileSync(tempFile, audioBuf);
+
+    await client.sendFile(peer, {
+      file: tempFile,
+      voiceNote: true,
+    });
+
+    try { fs.unlinkSync(tempFile); } catch {}
+  } catch (err) {
+    console.warn("sendVoiceNote xatosi:", err);
+  }
 }
 
 async function transcribeWithGemini(audioBuffer: Buffer): Promise<string | null> {
@@ -1059,6 +1084,7 @@ async function runWorker() {
           }
 
           await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
+          void sendVoiceNote(client, replyPeer, agentRes.text);
           return;
         } catch (ytErr) {
           console.error("YouTube AI xatolik:", ytErr);
@@ -1864,6 +1890,7 @@ async function runWorker() {
         }
 
         await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
+        void sendVoiceNote(client, replyPeer, agentRes.text);
         return;
       }
     } catch (agentErr) {
@@ -2018,6 +2045,30 @@ async function runWorker() {
           .update(contentItems)
           .set({ notified: true })
           .where(eq(contentItems.id, item.id));
+      }
+
+      // E) DEADLINE VAQTI YETGANDA TEKSHIRISH (r.endTime kelganda)
+      for (const r of activeRoutines) {
+        if (r.endTime && r.endTime === timeStr && r.lastDoneDate !== todayISO) {
+          const deadlineKey = `deadline_${todayISO}_${r.id}_${r.endTime}`;
+          if (!calledRoutinesToday.has(deadlineKey)) {
+            calledRoutinesToday.add(deadlineKey);
+            console.log(`⏱️ Deadline yetdi (${r.endTime}): "${r.title}". Foydalanuvchidan so'ralmoqda...`);
+            await makeCallWithClient(client, entity, `Deadline vaqti: ${r.title}`);
+            const deadlineMsg =
+              `⏱️ <b>DEADLINE VAQTI YETDI!</b>\n\n` +
+              `📌 <b>${escapeHtml(r.title)}</b> (Muddat: <b>${r.endTime}</b>)\n\n` +
+              `Sohibjon, ushbu topshiriqni bitirdingizmi? 🎯\n\n` +
+              `• Agar tugatgan bo'lsangiz: <b>«Bitirdim»</b> deb ayting (men vazifani yopaman).\n` +
+              `• Agar yana vaqt kerak bo'lsa: <b>«Yana 30 daqiqa kerak»</b> yoki <b>«Ertaga sur»</b> desangiz, vaqtini surib qo'yaman!`;
+            await client.sendMessage(entity, { message: deadlineMsg, parseMode: "html" });
+            void sendVoiceNote(
+              client,
+              entity,
+              `Sohibjon, '${r.title}' vazifangizning muddati yetdi. Ishni bitirdingizmi yoki yana vaqt kerakmi?`
+            );
+          }
+        }
       }
 
       // Har kuni yarim kechada tozalash

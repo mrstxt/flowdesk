@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { db } from "@/db";
 import { tasks, routines, videos, books, settings } from "@/db/schema";
-import { eq, or, isNull, and } from "drizzle-orm";
+import { eq, or, isNull, and, ilike } from "drizzle-orm";
 import { createSummaryPdf } from "@/lib/pdfService";
 
 export interface AgentResponse {
@@ -98,7 +98,157 @@ export async function createTask(params: {
 }
 
 /**
- * c) Videoni videos jadvaliga kiritadi, createSummaryPdf orqali PDF kitob yaratib,
+ * c) Vazifani bajarildi deb belgilash
+ */
+export async function completeTask(params: { taskId?: number; title?: string }) {
+  const d = new Date();
+  const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  try {
+    if (params.taskId) {
+      const numId = Number(params.taskId);
+      const [updatedTask] = await db
+        .update(tasks)
+        .set({ completed: true })
+        .where(eq(tasks.id, numId))
+        .returning();
+
+      if (updatedTask) {
+        return {
+          success: true,
+          message: `"${updatedTask.title}" vazifasi bajarildi deb belgilandi! 🎉`,
+          task: updatedTask,
+        };
+      }
+
+      const [updatedRoutine] = await db
+        .update(routines)
+        .set({ lastDoneDate: todayISO })
+        .where(eq(routines.id, numId))
+        .returning();
+
+      if (updatedRoutine) {
+        return {
+          success: true,
+          message: `"${updatedRoutine.title}" odati bajarildi deb belgilandi! 🎉`,
+          routine: updatedRoutine,
+        };
+      }
+    }
+
+    if (params.title) {
+      const pattern = `%${params.title.trim().toLowerCase()}%`;
+      const updatedTasks = await db
+        .update(tasks)
+        .set({ completed: true })
+        .where(ilike(tasks.title, pattern))
+        .returning();
+
+      const updatedRoutines = await db
+        .update(routines)
+        .set({ lastDoneDate: todayISO })
+        .where(ilike(routines.title, pattern))
+        .returning();
+
+      if (updatedTasks.length > 0 || updatedRoutines.length > 0) {
+        const name = updatedTasks[0]?.title || updatedRoutines[0]?.title || params.title;
+        return {
+          success: true,
+          message: `"${name}" vazifasi muvaffaqiyatli bajarildi deb belgilandi! 🎉`,
+        };
+      }
+    }
+
+    return { success: false, message: "Mos keluvchi ochiq vazifa topilmadi." };
+  } catch (error: any) {
+    console.error("completeTask error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * d) Deadlineni yoki vaqtni surish
+ */
+export async function rescheduleTask(params: {
+  taskId?: number;
+  title?: string;
+  newTimeOrDate?: string;
+}) {
+  const d = new Date();
+  const todayISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  let targetDate: string | undefined = undefined;
+  let targetTime: string | undefined = undefined;
+
+  if (params.newTimeOrDate) {
+    const val = params.newTimeOrDate.trim();
+    if (/^\d{1,2}:\d{2}$/.test(val)) {
+      targetTime = val.padStart(5, "0");
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      targetDate = val;
+    } else if (/ertaga/i.test(val)) {
+      const tm = new Date(d);
+      tm.setDate(tm.getDate() + 1);
+      targetDate = `${tm.getFullYear()}-${String(tm.getMonth() + 1).padStart(2, "0")}-${String(tm.getDate()).padStart(2, "0")}`;
+    }
+  }
+
+  if (!targetDate && !targetTime) {
+    const tm = new Date(d);
+    tm.setDate(tm.getDate() + 1);
+    targetDate = `${tm.getFullYear()}-${String(tm.getMonth() + 1).padStart(2, "0")}-${String(tm.getDate()).padStart(2, "0")}`;
+  }
+
+  try {
+    if (params.taskId) {
+      const numId = Number(params.taskId);
+      if (targetDate) {
+        await db.update(tasks).set({ date: targetDate }).where(eq(tasks.id, numId));
+      }
+      if (targetTime || targetDate) {
+        await db
+          .update(routines)
+          .set({
+            ...(targetTime ? { startTime: targetTime, time: targetTime } : {}),
+            ...(targetDate ? { targetDate } : {}),
+          })
+          .where(eq(routines.id, numId));
+      }
+      return {
+        success: true,
+        message: `Vazifa yangi vaqtga (${targetDate || ""} ${targetTime || ""}) muvaffaqiyatli surildi! ⏱️`,
+      };
+    }
+
+    if (params.title) {
+      const pattern = `%${params.title.trim().toLowerCase()}%`;
+      if (targetDate) {
+        await db.update(tasks).set({ date: targetDate }).where(ilike(tasks.title, pattern));
+      }
+      if (targetTime || targetDate) {
+        await db
+          .update(routines)
+          .set({
+            ...(targetTime ? { startTime: targetTime, time: targetTime } : {}),
+            ...(targetDate ? { targetDate } : {}),
+          })
+          .where(ilike(routines.title, pattern));
+      }
+      return {
+        success: true,
+        message: `"${params.title}" vazifasi yangi vaqtga (${targetDate || ""} ${targetTime || ""}) surildi! ⏱️`,
+      };
+    }
+
+    return { success: false, message: "Vazifa topilmadi." };
+  } catch (error: any) {
+    console.error("rescheduleTask error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * e) Videoni videos jadvaliga kiritadi, createSummaryPdf orqali PDF kitob yaratib,
  * books jadvaliga saqlaydi
  */
 export async function saveYouTubeAndBook(params: {
@@ -206,6 +356,31 @@ const createTaskDeclaration: FunctionDeclaration = {
   },
 };
 
+const completeTaskDeclaration: FunctionDeclaration = {
+  name: "completeTask",
+  description: "Bajarilgan vazifa yoki odatni tugallandi (bajarildi) deb belgilaydi.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.INTEGER, description: "Vazifaning ID raqami (agar ma'lum bo'lsa)" },
+      title: { type: Type.STRING, description: "Bajarilgan vazifa nomi (masalan: 'kitob o'qish' yoki 'dizayn tayyorlash')" },
+    },
+  },
+};
+
+const rescheduleTaskDeclaration: FunctionDeclaration = {
+  name: "rescheduleTask",
+  description: "Vazifaning muddatini (deadline yoki soatini) yangi vaqtga yoki ertangi kunga suradi.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.INTEGER, description: "Vazifa ID raqami" },
+      title: { type: Type.STRING, description: "Vazifa nomi" },
+      newTimeOrDate: { type: Type.STRING, description: "Yangi sana yoki soat (masalan: '17:00' yoki '2026-10-16' yoki 'ertaga')" },
+    },
+  },
+};
+
 const saveYouTubeAndBookDeclaration: FunctionDeclaration = {
   name: "saveYouTubeAndBook",
   description:
@@ -262,21 +437,23 @@ export async function processAgentMessage(
     try {
       const ai = new GoogleGenAI({ apiKey });
 
-      const systemInstruction = `Siz FlowDesk loyihasining shaxsiy aqlli boshqaruv AI Agentisiz.
-Sizning xo'jayiningiz va foydalanuvchingiz: Sulaymonov Sohibjon (@sulaymonovss, ID: 6724823030).
+      const systemInstruction = `Siz FlowDesk loyihasining shaxsiy aqlli boshqaruv kotibi va intizom kuratorisiz (Madina).
+Foydalanuvchingiz: Sulaymonov Sohibjon (@sulaymonovss, ID: 6724823030).
 Bugungi sana: ${todayISO}.
 
-Muloqot qoidalari:
-1. Sohibjonga samimiy, hurmatli, muloyim va professional o'zbek tilida murojaat qiling ("Sohibjon", "Bajarildi Sohibjon!", "Tushundim").
-2. Sizda quyidagi amaliy vositalar (tools) mavjud:
+Muloqot qoidalari va xarakteringiz:
+1. Siz shunchaki bot emassiz — tirik insondek, do'stona, g'amxo'r, tirishqoq va intizomli shaxsiy yordamchisiz.
+2. Sohibjonga doimo samimiy, hurmatli o'zbek tilida murojaat qiling ("Sohibjon", "Bajarildi Sohibjon!", "Tushundim").
+3. Sizda quyidagi amaliy vositalar (tools) mavjud:
    - getCalendarSchedule: Sohibjonning taqvimidagi kunlik rejalari yoki vazifalarini ko'rish.
    - createTask: yangi reja yoki vazifa kiritish.
+   - completeTask: Sohibjon "bitirdim", "bajarildi", "tugatdim" deganda vazifani yopish.
+   - rescheduleTask: Sohibjon "ulgurmadim", "yana vaqt kerak", "surib qo'y" deganda muddatni yangi soatga yoki ertaga surish.
    - saveYouTubeAndBook: YouTube havolasini qabul qilib, chuqur tahliliy xulosa hosil qilib, uni 'videos' va 'books' (PDF kitob) ga saqlash.
-3. Agar Sohibjon YouTube video yoki havola bersa, videoning mazmunli konspektini o'zingiz chiroyli tuzib berib, uni 'saveYouTubeAndBook' vositasi orqali bazaga va PDF kitobga saqlang!
-4. Agar taqvim yoki rejalar so'ralsa, 'getCalendarSchedule' orqali olib, tartibli ro'yxat ko'rinishida taqdim eting.
-5. Har bir vazifani aniq va lo'nda yakunlang.`;
+4. Agar Sohibjon YouTube video yoki havola bersa, videoning mazmunli konspektini o'zingiz chiroyli tuzib berib, uni 'saveYouTubeAndBook' vositasi orqali bazaga va PDF kitobga saqlang!
+5. Agar taqvim yoki rejalar so'ralsa, 'getCalendarSchedule' orqali olib, tartibli ro'yxat ko'rinishida taqdim eting.
+6. Javoblaringiz aniq, qisqa va qat'iy intizomni ushlashga undovchi bo'lsin.`;
 
-      // 1-bosqich: Modelga foydalanuvchi so'rovini yuboramiz
       const chatResponse = await ai.models.generateContent({
         model: "gemini-2.0-flash",
         contents: clean,
@@ -287,6 +464,8 @@ Muloqot qoidalari:
               functionDeclarations: [
                 getCalendarScheduleDeclaration,
                 createTaskDeclaration,
+                completeTaskDeclaration,
+                rescheduleTaskDeclaration,
                 saveYouTubeAndBookDeclaration,
               ],
             },
@@ -309,6 +488,10 @@ Muloqot qoidalari:
             result = await getCalendarSchedule(args);
           } else if (call.name === "createTask") {
             result = await createTask(args);
+          } else if (call.name === "completeTask") {
+            result = await completeTask(args);
+          } else if (call.name === "rescheduleTask") {
+            result = await rescheduleTask(args);
           } else if (call.name === "saveYouTubeAndBook") {
             result = await saveYouTubeAndBook(args);
             if (result.pdfUrl) lastPdfUrl = result.pdfUrl;
@@ -398,7 +581,26 @@ Muloqot qoidalari:
     };
   }
 
-  // B. Taqvim / Rejalar so'ralsa
+  // B. Vazifani tugatish / bitirdim
+  if (/bitirdim|bajarildi|tugatdim|yopib qo'?y|bajardim/i.test(clean)) {
+    const taskName = clean.replace(/bitirdim|bajarildi|tugatdim|yopib qo'?y|bajardim|vazifani/gi, "").trim();
+    const res = await completeTask({ title: taskName || undefined });
+    return {
+      text: res.message || "Ajoyib, Sohibjon! Vazifa bajarildi deb belgilandi! 🎉",
+      actionTaken: "completeTask",
+    };
+  }
+
+  // C. Vaqtni surish / yana vaqt kerak
+  if (/yana.*vaqt kerak|surib qo'?y|kechroq|keyinga sur/i.test(clean)) {
+    const res = await rescheduleTask({ title: clean, newTimeOrDate: "ertaga" });
+    return {
+      text: res.message || "Tushundim Sohibjon, vazifangiz vaqti surildi! ⏱️",
+      actionTaken: "rescheduleTask",
+    };
+  }
+
+  // D. Taqvim / Rejalar so'ralsa
   if (/reja|taqvim|jadval|bugun nima|ertaga nima/i.test(clean)) {
     const isTomorrow = /ertaga/i.test(clean);
     const tmDate = new Date(d);
@@ -428,7 +630,7 @@ Muloqot qoidalari:
     return { text, actionTaken: "getCalendarSchedule" };
   }
 
-  // C. Yangi vazifa qo'shish so'ralsa
+  // E. Yangi vazifa qo'shish so'ralsa
   if (/vazifa|qo'?sh|yozib qo'?y|kirit/i.test(clean) && !/rasm|hisob|mijoz/i.test(clean)) {
     const title = clean.replace(/vazifa|qo'?sh|yozib qo'?y|kirit|bugun|ertaga/gi, "").trim() || "Yangi vazifa";
     const res = await createTask({ title, date: todayISO });
@@ -439,6 +641,6 @@ Muloqot qoidalari:
   }
 
   return {
-    text: `Tushundim Sohibjon! 😊 Sizga taqvimingizni ko'rsatishim, yangi vazifa kiritishim yoki YouTube videolarni xulosa qilib PDF kitob yaratib berishim mumkin. Qanday buyruq bajaramiz? 🚀`,
+    text: `Tushundim Sohibjon! 😊 Sizga taqvimingizni ko'rsatishim, yangi vazifa kiritishim, bitirilgan ishlarni belgilashim yoki YouTube videolarni xulosa qilib PDF kitob yaratib berishim mumkin. Qanday buyruq bajaramiz? 🚀`,
   };
 }
