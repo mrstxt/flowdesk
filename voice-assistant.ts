@@ -37,6 +37,7 @@ import {
   goals,
   contentItems,
   socialProfiles,
+  uploadedFiles,
 } from "./src/db/schema";
 import { eq, desc, asc, sql, and, ilike, or, isNull } from "drizzle-orm";
 import { getCardAvailableBalance, getPrimaryCard } from "./src/lib/cardActions";
@@ -257,90 +258,121 @@ function parseIncomeInput(text: string): { amount: number; title: string } | nul
   return { amount: num, title: desc };
 }
 
-function parseDesignCaption(caption: string, defaultIndex: number): { title: string; amount: number } {
+function parseDesignCaption(caption: string, defaultIndex: number): { title: string; amount: number; isForwardedPost: boolean } {
   let title = "Dizayn #" + defaultIndex;
   let amount = 0;
 
-  if (!caption) return { title, amount };
+  if (!caption) return { title, amount, isForwardedPost: false };
 
-  const amtRegex = /\b(\d+(?:[\s.,]\d{3})*(?:[.,]\d+)?|\b\d+)\s*(ming(?:ga|a)?|mln(?:ga)?|million(?:ga)?|\bk\b)?\s*(?:so'?m|sum)?/i;
-  const match = caption.match(amtRegex);
-  if (match) {
-    let rawNum = match[1].replace(/[\s_]/g, "");
-    if (/\d+[.,]\d{3}$/.test(rawNum)) {
-      rawNum = rawNum.replace(/[.,]/g, "");
-    } else {
-      rawNum = rawNum.replace(",", ".");
-    }
-    let num = parseFloat(rawNum);
-    if (!isNaN(num) && num > 0) {
-      const unit = (match[2] || "").toLowerCase();
+  // 1. Kanal posti, reklama yoki yangilik ekanligini aniqlash
+  const isForwardedPost =
+    caption.length > 70 ||
+    caption.split("\n").length >= 3 ||
+    /[#@]|https?:\/\/|icpc|tiktok|ro'yxatdan|talabalari|olimpiada|saralash|musobaqa|boshlandi|reklama|аккаунт|регистрация|telegram\s*\|\s*instagram/i.test(caption);
+
+  // 2. Aniq narxni ajratib olish (yillar yoki vaqtlarni narx deb hisoblamaslik)
+  const usdMatch = caption.match(/(\d+(?:[.,]\d+)?)\s*(?:\$|dollar|usd)\b/i);
+  if (usdMatch) {
+    amount = parseFloat(usdMatch[1].replace(",", ".")) * 12800;
+  } else {
+    const sumMatch =
+      caption.match(/(\d+[\d\s.,]*)\s*(ming|mln|million|k)?\s*(?:so'?m|sum)\b/i) ||
+      caption.match(/(\d+[\d\s.,]*)\s*(ming|mln|million)\b/i);
+    if (sumMatch) {
+      let num = parseFloat(sumMatch[1].replace(/[\s,]/g, ""));
+      const unit = (sumMatch[2] || "").toLowerCase();
       if (unit.startsWith("ming") || unit === "k") num *= 1000;
-      else if (unit.startsWith("mln") || unit.startsWith("million")) num *= 1000000;
-      if (num >= 1000 || /so'?m/i.test(match[0]) || unit) {
-        amount = num;
-      }
+      if (unit.startsWith("mln") || unit.startsWith("million")) num *= 1000000;
+      const isYear = num >= 1990 && num <= 2099 && !unit;
+      if (!isYear && num >= 500) amount = num;
     }
   }
 
-  let cleanTitle = caption;
-  if (match) cleanTitle = cleanTitle.replace(match[0], "");
-  cleanTitle = cleanTitle
-    .replace(/\b(dizayni|dizayn|narxi|narx|summa|summasi|so'?m|sum|ming|uchun)\b/gi, "")
-    .replace(/[:;!?"'()[\]-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // 3. Nomini aniqlash
+  if (isForwardedPost) {
+    const firstLine = caption
+      .split("\n")[0]
+      .replace(/[*_#@~`]+/g, "")
+      .replace(/https?:\/\/\S+/g, "")
+      .trim();
+    if (firstLine.length >= 3 && firstLine.length <= 40) {
+      title = firstLine;
+    } else if (firstLine.length > 40) {
+      title = firstLine.slice(0, 35).trim() + "...";
+    }
+  } else {
+    let clean = caption
+      .replace(/(\d+(?:[.,]\d+)?)\s*(?:\$|dollar|usd)/gi, "")
+      .replace(/(\d+[\d\s.,]*)\s*(ming|mln|million|k)?\s*(?:so'?m|sum)?/gi, "")
+      .replace(/\b(dizayni|dizayn|narxi|narx|summa|summasi|so'?m|sum|ming|uchun)\b/gi, "")
+      .replace(/[:;!?"'()[\]-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  if (cleanTitle.length >= 2) {
-    title = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
+    if (clean.length >= 2 && clean.length <= 45) {
+      title = clean.charAt(0).toUpperCase() + clean.slice(1);
+    }
   }
 
-  return { title, amount };
+  return { title, amount, isForwardedPost };
 }
 
-function parseSettlementCommand(text: string): { isSettlement: boolean; clientName: string } | null {
+function parseSettlementCommand(text: string, hasPendingDesigns = false): { isSettlement: boolean; clientName: string } | null {
   const q = text.toLowerCase().trim();
 
   // Exclude payments or general questions
-  if (/(to'?lov|pulini\s*berdi|to'?ladi|toladi)/i.test(q)) return null;
+  if (/(to'?lov|pulini\s*berdi|to'?ladi|toladi|tasdiqla)/i.test(q)) return null;
 
-  const isSettlement =
+  // Salomlashish yoki minnatdorchilik bo'lsa
+  if (/^(salom|assalom|qalaysan|qandaysan|tuzikmisan|rahmat|raxmat)$/i.test(q)) return null;
+
+  const isExplicitSettlement =
     /(hisob\s*kitob|hisob-kitob)/i.test(q) ||
     (/(saqla|saqlagin)/i.test(q) && /(umumiy|narx|hisoblab|yozib\s*qo'?y|yozvor|yoz)/i.test(q)) ||
     (/(umumiy\s*narx.*hisoblab|hisoblab.*yoz)/i.test(q)) ||
-    /\b([A-ZА-ЯЁa-zа-яё'`]+(?:ga|ka))\s*(?:rasmni\s+|rasmlarni\s+|yangi\s+rasmni\s+)?(qo'?sh|qosh|yozib\s*qo'?y|saqla|yoz)\b/i.test(q) ||
-    /\b(qo'?sh|qosh|saqla)\s+(?:rasmni\s+)?([A-ZА-ЯЁa-zа-яё'`]+(?:ga|ka)?)\b/i.test(q);
+    /(?:qo'?sh|qosh|qoʻsh|qo`sh|yozib\s*qo'?y|yoz|saqla|biriktir|kirit)\b/i.test(q) ||
+    /\b([A-ZА-ЯЁa-zа-яё'`]+)(?:ga|ka|uchun)\b/i.test(q);
 
-  if (!isSettlement) return null;
+  if (!isExplicitSettlement && !hasPendingDesigns) return null;
 
   let clientName: string | null = null;
 
   // 1) "Akmal bilan hisob kitob"
   const withMatch = text.match(/([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)\s*bilan\s*hisob/i);
-  // 2) "Akmalga yozib qo'y" / "Akmalga qo'sh" / "Alisher akaga hisob kitob"
-  const toMatch = text.match(/\b([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)(?:ga|ka|uchun)\s*(?:hisob|yozib|yoz|saqla|kirit|qilib|qo'?sh|qosh)/i);
+  // 2) "Akmalga yozib qo'y" / "Akmalga qo'sh" / "Alisher akaga hisob kitob" / "Akmal uchun"
+  const toMatch = text.match(/\b([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)(?:ga|ka|uchun)\b/i);
   // 3) "mijoz: Akmal", "ism: Akmal", "hisoblab Akmalga", "qo'sh Akmalga"
-  const prefixMatch = text.match(/(?:hisoblab|mijoz|ism|klient|qo'?sh|qosh)\s+([A-ZА-ЯЁa-zа-яё'`]+(?:\s+[a-zа-яё'`]+)?)/i);
+  const prefixMatch = text.match(/(?:hisoblab|mijoz|ism|klient|qo'?sh|qosh|qoʻsh|qo`sh|saqla|biriktir)[:\s]+([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)/i);
 
-  if (withMatch) {
+  if (prefixMatch) {
+    clientName = prefixMatch[1].replace(/(?:ga|ka|uchun)$/i, "");
+  } else if (withMatch) {
     clientName = withMatch[1];
   } else if (toMatch) {
     clientName = toMatch[1];
-  } else if (prefixMatch) {
-    clientName = prefixMatch[1].replace(/(?:ga|ka|uchun)$/i, "");
+  } else if (hasPendingDesigns) {
+    // Agar rasm kutib turgan bo'lsa va foydalanuvchi shunchaki ism yozsa: masalan "Akmal", "Sardor", "Farhod aka"
+    const cleaned = text
+      .replace(/(?:ga|ka|uchun|qo'?sh|qosh|qoʻsh|qo`sh|yoz|saqla|buni|shu|rasmni|rasmlarni|narxi|\d+[\d\s.,]*)/gi, "")
+      .trim();
+    if (cleaned.length >= 2 && cleaned.length <= 30 && !/\b(ha|yoq|ok|hop|haqida|nima)\b/i.test(cleaned)) {
+      clientName = cleaned;
+    }
   }
 
   if (clientName) {
     clientName = clientName
-      .replace(/\b(shu|odam|odamga|rasmdi|rasmni|rasmlarni|narxini|umumiy|hisoblab|va|qilib|yangi|buni)\b/gi, "")
+      .replace(/\b(shu|odam|odamga|rasmdi|rasmni|rasmlarni|narxini|umumiy|hisoblab|va|qilib|yangi|buni|uchun|dizayn)\b/gi, "")
       .trim();
     if (clientName) {
       clientName = clientName
-        .split(" ")
+        .split(/\s+/)
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
         .join(" ");
     }
   }
+
+  if (!clientName && !hasPendingDesigns) return null;
 
   return { isSettlement: true, clientName: clientName || "Mijoz" };
 }
@@ -852,9 +884,30 @@ async function runWorker() {
             fs.writeFileSync(fullPath, mediaBuffer);
             const webPath = `/uploads/designs/${fileName}`;
 
+            // Neon PostgreSQL-ga ham doimiy saqlaymiz (server restart bo'lsa ham yo'qolmasligi uchun)
+            try {
+              await db.insert(uploadedFiles).values({
+                fileName,
+                mimeType: "image/jpeg",
+                data: mediaBuffer.toString("base64"),
+              });
+            } catch (dbErr) {
+              console.error("DB uploadedFiles save error:", dbErr);
+            }
+
             const userKey = String(target);
             const currentList = pendingDesigns.get(userKey) || [];
-            const { title, amount } = parseDesignCaption(receivedText, currentList.length + 1);
+            const { title, amount, isForwardedPost } = parseDesignCaption(receivedText, currentList.length + 1);
+
+            currentList.push({
+              id: String(Date.now()),
+              fileName,
+              webPath,
+              title,
+              amount,
+              date: getTashkentTimeString().todayISO,
+            });
+            pendingDesigns.set(userKey, currentList);
 
             // Agar rasm izohida mijoz nomi bo'lsa va u bo'yicha ochiq hisob mavjud bo'lsa - darhol qo'shamiz
             const directClient = parseClientFromCaption(receivedText);
@@ -887,6 +940,8 @@ async function runWorker() {
                   })
                   .where(eq(orders.id, existingClientOrder.id));
 
+                pendingDesigns.delete(userKey);
+
                 const rep =
                   `🖼️ <b>${existingClientOrder.clientName}</b> hisob-kitobiga yangi rasm muvaffaqiyatli qo'shildi!\n\n` +
                   `📌 <b>Dizayn:</b> ${title}\n` +
@@ -899,15 +954,19 @@ async function runWorker() {
               }
             }
 
-            currentList.push({
-              id: String(Date.now()),
-              fileName,
-              webPath,
-              title,
-              amount,
-              date: getTashkentTimeString().todayISO,
-            });
-            pendingDesigns.set(userKey, currentList);
+            // Agar bu kanal posti yoki reklama bo'lsa (masalan ICPC, yangiliklar yoki postlar)
+            if (isForwardedPost) {
+              const rep =
+                `📰 <b>Kanal posti / ma'lumot qabul qilindi!</b>\n\n` +
+                `📌 <b>Mavzu:</b> ${title}\n` +
+                `🖼️ <b>Rasm:</b> Platformaga yuklandi.\n\n` +
+                `<i>💡 <b>Buni qayerga saqlaymiz?</b>\n` +
+                `• «Kontentga saqla» desangiz — Media ➔ Kontent bo'limiga g'oya sifatida kiritaman;\n` +
+                `• «[Mijoz]ga qo'sh» (masalan: «Akmalga qo'sh») desangiz — Hisob-kitobga kiritaman! 🚀</i>`;
+
+              await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+              return;
+            }
 
             const totalSoFar = currentList.reduce((s, it) => s + it.amount, 0);
             const count = currentList.length;
@@ -915,10 +974,11 @@ async function runWorker() {
             const rep =
               `🖼️ <b>Dizayn rasmi qabul qilindi!</b> (#${count})\n\n` +
               `📌 <b>Nomi:</b> ${title}\n` +
-              `💰 <b>Narxi:</b> ${amount > 0 ? fmt(amount) : "Hali belgilanmadi (matn bilan yozishingiz mumkin)"}\n` +
-              (totalSoFar > 0 ? `📊 <b>Hozirgacha jami:</b> <b>${fmt(totalSoFar)}</b>\n\n` : "\n") +
-              `<i>Buni saqlash yoki mijozga biriktirish uchun:\n` +
-              `«[Mijoz]ga qo'sh» yoki «Shu rasmlarni saqla va [Mijoz]ga yozib qo'y» deb yozing! 🚀</i>`;
+              `💰 <b>Narxi:</b> ${amount > 0 ? fmt(amount) : "Hali belgilanmadi"}\n` +
+              (totalSoFar > 0 ? `📊 <b>Hozirgacha jami hisob:</b> <b>${fmt(totalSoFar)}</b>\n\n` : "\n") +
+              `<i>💡 <b>Buni hisob-kitobga saqlash uchun:</b>\n` +
+              `• Mijoz ismini yozing (masalan: «Akmal» yoki «Akmalga qo'sh»);\n` +
+              `• Agar narxi bo'lsa: «50 ming» yoki «50000 Akmalga» deb yuboring! 🚀</i>`;
 
             await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
             return;
@@ -1035,17 +1095,23 @@ async function runWorker() {
         return;
       }
 
-      // A.0) Hisob-kitob qilish va rasmlarni saqlash ("Shu rasmni saqla va umumiy narxini hisoblab Akmalga yozib qo'y" yoki "Akmalga qo'sh")
-      const settlement = parseSettlementCommand(clean);
+      // A.0) Hisob-kitob qilish va rasmlarni saqlash ("Shu rasmni saqla va umumiy narxini hisoblab Akmalga yozib qo'y", "Akmalga qo'sh", "Akmal")
+      const userKey = String(target);
+      const items = pendingDesigns.get(userKey) || [];
+      const hasPending = items.length > 0;
+      const settlement = parseSettlementCommand(clean, hasPending);
       if (settlement) {
         console.log(`💼 Hisob-kitob buyrug'i qabul qilindi: Mijoz "${settlement.clientName}"`);
-        const userKey = String(target);
-        const items = pendingDesigns.get(userKey) || [];
 
         let totalAmount = items.reduce((s, it) => s + it.amount, 0);
-        if (totalAmount === 0) {
-          const { amount: extraAmt } = parseDesignCaption(clean, 0);
-          if (extraAmt > 0) totalAmount = extraAmt;
+        const { amount: extraAmt } = parseDesignCaption(clean, 0);
+        if (extraAmt > 0) {
+          if (items.length > 0 && items[items.length - 1].amount === 0) {
+            items[items.length - 1].amount = extraAmt;
+            totalAmount = items.reduce((s, it) => s + it.amount, 0);
+          } else if (totalAmount === 0) {
+            totalAmount = extraAmt;
+          }
         }
 
         // Avval mavjud ochiq hisob-kitobni tekshiramiz
@@ -1161,7 +1227,6 @@ async function runWorker() {
       }
 
       // Agar oldingi rasmga narx kiritilayotgan bo'lsa
-      const userKey = String(target);
       const existingPending = pendingDesigns.get(userKey) || [];
       if (existingPending.length > 0) {
         const lastItem = existingPending[existingPending.length - 1];
