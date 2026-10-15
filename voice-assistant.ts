@@ -1765,6 +1765,69 @@ async function runWorker() {
         }
       }
 
+      // D) KONTENT REJASI BO'YICHA OGOHLANTIRISH (Hook, Body, CTA va 4 ta kadr bilan Telegramga yuborish)
+      const scheduledContents = await db
+        .select()
+        .from(contentItems)
+        .where(
+          and(
+            eq(contentItems.scheduledDate, todayISO),
+            eq(contentItems.scheduledTime, timeStr),
+            or(isNull(contentItems.notified), eq(contentItems.notified, false))
+          )
+        );
+
+      for (const item of scheduledContents) {
+        console.log(`📱 Kontent vaqti bo'ldi (${item.scheduledTime}): "${item.title}". Foydalanuvchiga yuborilmoqda...`);
+
+        let framesList: string[] = [];
+        if (item.frames) {
+          try {
+            const parsed = JSON.parse(item.frames);
+            if (Array.isArray(parsed)) framesList = parsed;
+          } catch {}
+        }
+        if (item.mediaUrls && framesList.length === 0) {
+          framesList.push(item.mediaUrls);
+        }
+
+        const lines: string[] = [
+          `🎬 <b>KONTENT CHIQARISH VAQTI BO'LDI!</b> (Soat ${item.scheduledTime || timeStr})`,
+          ``,
+          `📌 <b>Mavzu:</b> ${escapeHtml(item.title)}`,
+          `📂 <b>Format:</b> ${item.type.toUpperCase()}`,
+        ];
+
+        if (item.hook) {
+          lines.push(``, `🪝 <b>Hook (Ilmoq):</b>\n${escapeHtml(item.hook)}`);
+        }
+        if (item.body) {
+          lines.push(``, `📖 <b>Body (Asosiy matn):</b>\n${escapeHtml(item.body)}`);
+        }
+        if (item.cta) {
+          lines.push(``, `🎯 <b>CTA (Harakatga chaqiruv):</b>\n${escapeHtml(item.cta)}`);
+        }
+        if (item.caption) {
+          lines.push(``, `📝 <b>To'liq Caption:</b>\n${escapeHtml(item.caption)}`);
+        }
+        if (framesList.length > 0) {
+          lines.push(``, `🖼️ <b>Kadrlar (${framesList.length} ta):</b>`);
+          framesList.forEach((f, idx) => {
+            lines.push(`  ${idx + 1}-kadr: ${f}`);
+          });
+        }
+
+        lines.push(``, `🚀 <i>Postni ijtimoiy tarmoqqa joylab, bosqichini "Chop etilgan" ga o'tkazishingiz mumkin!</i>`);
+
+        await client.sendMessage(entity, { message: lines.join("\n"), parseMode: "html" });
+        await makeCallWithClient(client, entity, `Kontent vaqti bo'ldi: ${item.title}`);
+
+        await db
+          .update(contentItems)
+          .set({ notified: true })
+          .where(eq(contentItems.id, item.id));
+      }
+
       // Har kuni yarim kechada tozalash
       if (minutes === 0) {
         calledRoutinesToday.clear();

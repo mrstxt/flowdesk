@@ -301,6 +301,11 @@ export const contentItems = pgTable("content_items", {
   type: varchar("type", { length: 50 }).notNull().default("post"), // post, reels, carousel, story, article, portfolio
   stage: varchar("stage", { length: 50 }).notNull().default("idea"), // idea, draft, in_progress, ready, published
   caption: text("caption"),
+  hook: text("hook"),
+  body: text("body"),
+  cta: text("cta"),
+  frames: text("frames"), // JSON array of frame URLs: e.g. '["url1", "url2", "url3", "url4"]'
+  notified: boolean("notified").default(false),
   mediaUrls: text("media_urls"),
   scheduledDate: date("scheduled_date"),
   scheduledTime: varchar("scheduled_time", { length: 5 }),

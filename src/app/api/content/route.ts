@@ -62,6 +62,11 @@ export async function POST(req: Request) {
     const notes = body.notes ? String(body.notes).trim() : null;
     const publishedAt = stage === "published" ? new Date() : null;
 
+    const hook = body.hook ? String(body.hook).trim() : null;
+    const itemBody = body.body ? String(body.body).trim() : null;
+    const cta = body.cta ? String(body.cta).trim() : null;
+    const frames = body.frames ? (typeof body.frames === "string" ? body.frames : JSON.stringify(body.frames)) : null;
+
     const [created] = await db
       .insert(contentItems)
       .values({
@@ -70,6 +75,10 @@ export async function POST(req: Request) {
         type,
         stage,
         caption,
+        hook,
+        body: itemBody,
+        cta,
+        frames,
         mediaUrls,
         scheduledDate,
         scheduledTime,
@@ -104,6 +113,13 @@ export async function PUT(req: Request) {
       }
     }
     if (rest.caption !== undefined) payload.caption = rest.caption ? String(rest.caption).trim() : null;
+    if (rest.hook !== undefined) payload.hook = rest.hook ? String(rest.hook).trim() : null;
+    if (rest.body !== undefined) payload.body = rest.body ? String(rest.body).trim() : null;
+    if (rest.cta !== undefined) payload.cta = rest.cta ? String(rest.cta).trim() : null;
+    if (rest.frames !== undefined) {
+      payload.frames = rest.frames ? (typeof rest.frames === "string" ? rest.frames : JSON.stringify(rest.frames)) : null;
+    }
+    if (rest.notified !== undefined) payload.notified = Boolean(rest.notified);
     if (rest.mediaUrls !== undefined) payload.mediaUrls = rest.mediaUrls ? String(rest.mediaUrls).trim() : null;
     if (rest.scheduledDate !== undefined) payload.scheduledDate = rest.scheduledDate ? String(rest.scheduledDate).trim() : null;
     if (rest.scheduledTime !== undefined) payload.scheduledTime = rest.scheduledTime ? String(rest.scheduledTime).trim() : null;

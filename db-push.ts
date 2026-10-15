@@ -325,6 +325,13 @@ CREATE TABLE IF NOT EXISTS profile_assets (
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+-- Migrations for content_items (hook, body, cta, frames, notified)
+ALTER TABLE content_items ADD COLUMN IF NOT EXISTS hook TEXT;
+ALTER TABLE content_items ADD COLUMN IF NOT EXISTS body TEXT;
+ALTER TABLE content_items ADD COLUMN IF NOT EXISTS cta TEXT;
+ALTER TABLE content_items ADD COLUMN IF NOT EXISTS frames TEXT;
+ALTER TABLE content_items ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE;
 `;
 
 async function main() {

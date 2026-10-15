@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, use } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -30,6 +30,12 @@ import {
   AlertCircle,
   X,
   FileText,
+  Bot,
+  Zap,
+  ChevronRight,
+  Bookmark,
+  Bell,
+  PhoneCall,
 } from "lucide-react";
 import { Modal } from "@/components/Modal";
 
@@ -56,6 +62,11 @@ type ContentItem = {
   type: string;
   stage: string;
   caption: string | null;
+  hook: string | null;
+  body: string | null;
+  cta: string | null;
+  frames: string | null; // JSON array of frame URLs
+  notified: boolean | null;
   mediaUrls: string | null;
   scheduledDate: string | null;
   scheduledTime: string | null;
@@ -171,7 +182,7 @@ const STAGES: Record<
 const CONTENT_TYPES: Record<string, { label: string; icon: string }> = {
   post: { label: "Post (Rasm)", icon: "🖼️" },
   reels: { label: "Reels / Video", icon: "🎬" },
-  carousel: { label: "Karusel", icon: "📚" },
+  carousel: { label: "Karusel (4 kadr)", icon: "📚" },
   story: { label: "Story", icon: "⚡" },
   article: { label: "Maqola / Matn", icon: "📝" },
   portfolio: { label: "Portfolio", icon: "💼" },
@@ -229,18 +240,31 @@ export default function ProfileDetailPage() {
     getCurrentMonthKey(),
   ]);
 
-  // Modals
+  // Modals & States
   const [editProfileModal, setEditProfileModal] = useState(false);
   const [addContentModal, setAddContentModal] = useState(false);
   const [editingContent, setEditingContent] = useState<ContentItem | null>(null);
   const [uploadAssetModal, setUploadAssetModal] = useState(false);
   const [uploadAssetType, setUploadAssetType] = useState<"face" | "monthly" | "grid">("face");
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  // Copy feedback states
+  const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
 
   // Upload state
   const [uploading, setUploading] = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState<string>("");
+
+  // Frames state for Content Modal (4 frames)
+  const [contentFrames, setContentFrames] = useState<string[]>([]);
+
+  // Drag over state for dropzone
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  function showToast(msg: string) {
+    setCopiedNotification(msg);
+    setTimeout(() => setCopiedNotification(null), 3000);
+  }
 
   async function loadData() {
     if (!profileId) return;
@@ -264,7 +288,6 @@ export default function ProfileDetailPage() {
         const aData: ProfileAsset[] = await aRes.json();
         setAssets(aData);
 
-        // Extract unique months
         const monthsSet = new Set<string>();
         monthsSet.add(getCurrentMonthKey());
         aData.forEach((a) => {
@@ -284,16 +307,183 @@ export default function ProfileDetailPage() {
     loadData();
   }, [profileId]);
 
+  // Upload single file to server
+  async function uploadFileBlob(file: File): Promise<string | null> {
+    try {
+      setUploading(true);
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: fd,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.url;
+      }
+      return null;
+    } catch (err) {
+      console.error(err);
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // Save asset directly to database
+  async function saveAssetDirectly(url: string, type: "face" | "monthly" | "grid", title?: string) {
+    try {
+      const res = await fetch("/api/profiles/assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profileId,
+          title: title || (type === "face" ? "Feys referens rasm" : "Yuklangan kreativ"),
+          type,
+          month: type === "monthly" ? selectedMonth : null,
+          fileUrl: url,
+          fileType: "image",
+        }),
+      });
+      if (res.ok) {
+        loadData();
+        showToast(
+          type === "face"
+            ? "✅ Feys referens rasm saqlandi! (AI uchun nusxalashingiz mumkin)"
+            : `✅ ${formatMonthLabel(selectedMonth)} ga kontent saqlandi!`
+        );
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // 1. GLOBAL CLIPBOARD PASTE HANDLER (Ctrl+V / Cmd+V)
+  const handleGlobalPaste = useCallback(
+    async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf("image") !== -1) {
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          e.preventDefault();
+          showToast("⏳ Nusxalangan rasm yuklanmoqda...");
+          const url = await uploadFileBlob(file);
+          if (!url) {
+            alert("Rasmni yuklashda xatolik yuz berdi");
+            return;
+          }
+
+          // If content modal is currently open: add as frame
+          if (addContentModal) {
+            setContentFrames((prev) => [...prev, url]);
+            showToast("✅ Rasm yangi kadr sifatida qo'shildi!");
+            return;
+          }
+
+          // Otherwise save to current active tab
+          if (activeTab === "face") {
+            await saveAssetDirectly(url, "face", `Feys AI referens ${new Date().toLocaleTimeString()}`);
+          } else if (activeTab === "monthly") {
+            await saveAssetDirectly(url, "monthly", `Oylik kreativ ${new Date().toLocaleTimeString()}`);
+          } else {
+            // In content tab, open modal with this frame
+            setContentFrames([url]);
+            setUploadedUrl(url);
+            setEditingContent(null);
+            setAddContentModal(true);
+            showToast("✅ Rasm biriktirildi, rejalashtirish oynasi ochildi!");
+          }
+          break;
+        }
+      }
+    },
+    [activeTab, addContentModal, selectedMonth, profileId]
+  );
+
+  useEffect(() => {
+    window.addEventListener("paste", handleGlobalPaste);
+    return () => window.removeEventListener("paste", handleGlobalPaste);
+  }, [handleGlobalPaste]);
+
+  // 2. DRAG & DROP HANDLERS
+  async function handleDropFiles(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingOver(false);
+
+    const files = Array.from(e.dataTransfer.files).filter((f) =>
+      f.type.startsWith("image/")
+    );
+    if (files.length === 0) return;
+
+    showToast(`⏳ ${files.length} ta rasm yuklanmoqda...`);
+    for (const file of files) {
+      const url = await uploadFileBlob(file);
+      if (!url) continue;
+
+      if (addContentModal) {
+        setContentFrames((prev) => [...prev, url]);
+      } else if (activeTab === "face") {
+        await saveAssetDirectly(url, "face", file.name.replace(/\.[^/.]+$/, ""));
+      } else if (activeTab === "monthly") {
+        await saveAssetDirectly(url, "monthly", file.name.replace(/\.[^/.]+$/, ""));
+      } else {
+        setContentFrames((prev) => [...prev, url]);
+        setAddContentModal(true);
+      }
+    }
+  }
+
+  // 3. COPY IMAGE TO CLIPBOARD (for pasting into Midjourney, ChatGPT, Flux, Photoshop, etc.)
+  async function copyImageToClipboard(assetUrl: string, assetTitle: string) {
+    try {
+      // First copy full URL to clipboard as universal fallback
+      const fullUrl = assetUrl.startsWith("http")
+        ? assetUrl
+        : `${window.location.origin}${assetUrl}`;
+
+      try {
+        const response = await fetch(assetUrl);
+        const blob = await response.blob();
+        // Convert to PNG if JPEG/WEBP for best clipboard compatibility
+        const imgBitmap = await createImageBitmap(blob);
+        const canvas = document.createElement("canvas");
+        canvas.width = imgBitmap.width;
+        canvas.height = imgBitmap.height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(imgBitmap, 0, 0);
+
+        canvas.toBlob(async (pngBlob) => {
+          if (pngBlob) {
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png": pngBlob }),
+            ]);
+            showToast("✨ Rasm buferga nusxalandi! Endi AI vositasiga Ctrl+V qiling!");
+          }
+        }, "image/png");
+      } catch (clipErr) {
+        // Fallback: copy image link
+        await navigator.clipboard.writeText(fullUrl);
+        showToast("🔗 Rasm havolasi nusxalandi! AI ga yuborishingiz mumkin.");
+      }
+    } catch (e) {
+      console.error("Nusxa olishda xatolik:", e);
+      showToast("❌ Nusxalashda xatolik");
+    }
+  }
+
   // Assets grouped
   const faceAssets = useMemo(() => {
     return assets.filter((a) => a.type === "face" || a.type === "highlight");
   }, [assets]);
 
   const gridAssets = useMemo(() => {
-    // 9-Grid preview can show assets marked 'grid', or recent face/content photos
     const explicit = assets.filter((a) => a.type === "grid");
     if (explicit.length > 0) return explicit;
-    // Fallback: take recent face and monthly images
     return assets.slice(0, 9);
   }, [assets]);
 
@@ -316,35 +506,18 @@ export default function ProfileDetailPage() {
     });
   }, [contentList, contentStageFilter, contentTypeFilter]);
 
-  // File Upload Handler
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // File Upload Handler (input change)
+  async function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    try {
-      setUploading(true);
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: fd,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUploadedUrl(data.url);
-      } else {
-        alert("Faylni yuklashda xatolik yuz berdi");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Faylni yuklashda xatolik");
-    } finally {
-      setUploading(false);
+    const url = await uploadFileBlob(file);
+    if (url) {
+      setUploadedUrl(url);
     }
   }
 
-  // Save Asset Form
-  async function handleSaveAsset(e: React.FormEvent<HTMLFormElement>) {
+  // Save Asset Form Modal
+  async function handleSaveAssetForm(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!uploadedUrl) {
       alert("Iltimos, avval rasm yoki fayl yuklang!");
@@ -356,35 +529,10 @@ export default function ProfileDetailPage() {
     const title = String(fd.get("title") || "Nomsiz").trim();
     const caption = String(fd.get("caption") || "").trim();
     const type = uploadAssetType;
-    const month = type === "monthly" ? selectedMonth : null;
 
-    try {
-      const res = await fetch("/api/profiles/assets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profileId,
-          title,
-          caption,
-          type,
-          month,
-          fileUrl: uploadedUrl,
-          fileType: "image",
-        }),
-      });
-
-      if (res.ok) {
-        setUploadAssetModal(false);
-        setUploadedUrl("");
-        loadData();
-      } else {
-        const err = await res.json();
-        alert(err.error || "Xatolik yuz berdi");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Xatolik yuz berdi");
-    }
+    await saveAssetDirectly(uploadedUrl, type, title);
+    setUploadAssetModal(false);
+    setUploadedUrl("");
   }
 
   // Delete Asset
@@ -402,7 +550,31 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // Save Content Post
+  // Open Content Modal for Edit / Create
+  function openContentModal(item?: ContentItem) {
+    if (item) {
+      setEditingContent(item);
+      let frames: string[] = [];
+      if (item.frames) {
+        try {
+          const parsed = JSON.parse(item.frames);
+          if (Array.isArray(parsed)) frames = parsed;
+        } catch {}
+      }
+      if (frames.length === 0 && item.mediaUrls) {
+        frames = [item.mediaUrls];
+      }
+      setContentFrames(frames);
+      setUploadedUrl(item.mediaUrls || "");
+    } else {
+      setEditingContent(null);
+      setContentFrames([]);
+      setUploadedUrl("");
+    }
+    setAddContentModal(true);
+  }
+
+  // Save Content Post with Hook, Body, CTA & 4 Frames
   async function handleSaveContent(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -414,14 +586,23 @@ export default function ProfileDetailPage() {
       return;
     }
 
+    const hook = String(fd.get("hook") || "").trim() || null;
+    const bodyText = String(fd.get("body") || "").trim() || null;
+    const cta = String(fd.get("cta") || "").trim() || null;
+    const caption = String(fd.get("caption") || "").trim() || null;
+
     const payload = {
       id: editingContent?.id,
       profileId,
       title,
-      type: String(fd.get("type") || "post"),
+      type: String(fd.get("type") || "carousel"),
       stage: String(fd.get("stage") || "idea"),
-      caption: String(fd.get("caption") || ""),
-      mediaUrls: uploadedUrl || editingContent?.mediaUrls || null,
+      hook,
+      body: bodyText,
+      cta,
+      caption,
+      frames: contentFrames.length > 0 ? JSON.stringify(contentFrames) : null,
+      mediaUrls: contentFrames[0] || uploadedUrl || editingContent?.mediaUrls || null,
       scheduledDate: String(fd.get("scheduledDate") || "") || null,
       scheduledTime: String(fd.get("scheduledTime") || "") || null,
       notes: String(fd.get("notes") || ""),
@@ -438,8 +619,10 @@ export default function ProfileDetailPage() {
       if (res.ok) {
         setAddContentModal(false);
         setEditingContent(null);
+        setContentFrames([]);
         setUploadedUrl("");
         loadData();
+        showToast("✅ Kontent rejalashtirildi! Belgilangan vaqtda yordamchi ogohlantiradi.");
       }
     } catch (e) {
       console.error(e);
@@ -447,7 +630,7 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // Stage Quick Change
+  // Quick Stage Change
   async function handleStageChange(id: number, nextStage: string) {
     try {
       const res = await fetch("/api/content", {
@@ -472,13 +655,6 @@ export default function ProfileDetailPage() {
     } catch (e) {
       console.error(e);
     }
-  }
-
-  // Copy caption
-  function copyCaption(id: number, text: string) {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
   }
 
   if (loading && !profile) {
@@ -513,27 +689,62 @@ export default function ProfileDetailPage() {
   const PlatformIcon = pl.icon;
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDraggingOver(true);
+      }}
+      onDragLeave={() => setIsDraggingOver(false)}
+      onDrop={handleDropFiles}
+      className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 relative min-h-screen"
+    >
+      {/* Toast Notification Banner */}
+      {copiedNotification && (
+        <div className="fixed top-6 right-6 z-50 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-bold animate-in fade-in slide-in-from-top-4 duration-300">
+          <Sparkles className="w-4 h-4 text-amber-400" />
+          <span>{copiedNotification}</span>
+        </div>
+      )}
+
+      {/* Fullscreen Drag Overlay */}
+      {isDraggingOver && (
+        <div className="fixed inset-0 z-50 bg-accent/20 backdrop-blur-sm border-4 border-dashed border-accent flex flex-col items-center justify-center p-8 pointer-events-none">
+          <Upload className="w-16 h-16 text-accent animate-bounce mb-3" />
+          <h2 className="text-2xl font-black text-slate-900 dark:text-slate-100">
+            Rasmni shu yerga tashlang!
+          </h2>
+          <p className="text-sm font-semibold text-slate-600 dark:text-slate-400 mt-1">
+            Fayllar avtomatik yuklanadi va saqlanadi
+          </p>
+        </div>
+      )}
+
       {/* Back button */}
-      <div>
+      <div className="flex items-center justify-between">
         <Link
           href="/profillar"
           className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 transition-colors py-1"
         >
           <ArrowLeft className="w-4 h-4" /> Barcha profillar
         </Link>
+
+        {/* Quick Paste Guide Hint */}
+        <div className="hidden sm:flex items-center gap-2 text-[11px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-3 py-1 rounded-full border border-slate-200 dark:border-slate-700">
+          <span className="font-mono bg-white dark:bg-slate-700 px-1.5 py-0.5 rounded text-[10px] font-bold text-slate-700 dark:text-slate-200">
+            Ctrl + V
+          </span>
+          <span>yoki rasmni sichqoncha bilan tashlang (Drag & Drop)</span>
+        </div>
       </div>
 
       {/* Profile Header Hero Card */}
       <div className="glass rounded-3xl p-6 sm:p-8 border border-black/[0.05] dark:border-white/[0.06] shadow-sm relative overflow-hidden">
-        {/* Ambient background decoration */}
         <div
           className={`absolute -right-20 -top-20 w-80 h-80 rounded-full blur-3xl opacity-20 pointer-events-none ${pl.bg}`}
         />
 
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
           <div className="flex items-center gap-5">
-            {/* Avatar / Brand Image */}
             <div className="relative group">
               <div
                 className={`w-20 h-20 sm:w-24 sm:h-24 rounded-3xl ${pl.bg} border-2 ${pl.border} flex items-center justify-center shadow-md overflow-hidden relative`}
@@ -555,7 +766,6 @@ export default function ProfileDetailPage() {
               </div>
             </div>
 
-            {/* Info */}
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100">
@@ -597,7 +807,6 @@ export default function ProfileDetailPage() {
             </div>
           </div>
 
-          {/* Quick Metrics & Actions */}
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-start md:justify-end">
             {profile.url && (
               <a
@@ -641,10 +850,10 @@ export default function ProfileDetailPage() {
 
           <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-2xl">
             <span className="text-[11px] text-slate-400 block font-medium">
-              Feys & Brend rasmlar
+              AI Feys Referenslar
             </span>
             <span className="text-base sm:text-lg font-black text-purple-600 dark:text-purple-400">
-              {faceAssets.length} ta
+              {faceAssets.length} ta rasm
             </span>
           </div>
 
@@ -670,7 +879,7 @@ export default function ProfileDetailPage() {
           }`}
         >
           <Calendar className="w-4 h-4" />
-          Kontent Reja
+          Kontent Reja (Hook, Body, CTA)
           <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
             {contentList.length}
           </span>
@@ -684,8 +893,8 @@ export default function ProfileDetailPage() {
               : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
           }`}
         >
-          <ImageIcon className="w-4 h-4" />
-          Feys Rasmlari & 9-Grid
+          <Bot className="w-4 h-4 text-purple-500" />
+          AI Feys Rasmlari & 9-Grid
           <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
             {faceAssets.length}
           </span>
@@ -707,13 +916,12 @@ export default function ProfileDetailPage() {
         </button>
       </div>
 
-      {/* ── TAB 1: KONTENT REJA ── */}
+      {/* ── TAB 1: KONTENT REJA (Hook, Body, CTA + 4 Kadr) ── */}
       {activeTab === "content" && (
         <div className="space-y-6">
           {/* Controls Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
-              {/* Stage Filter */}
               <select
                 value={contentStageFilter}
                 onChange={(e) => setContentStageFilter(e.target.value)}
@@ -727,7 +935,6 @@ export default function ProfileDetailPage() {
                 ))}
               </select>
 
-              {/* Type Filter */}
               <select
                 value={contentTypeFilter}
                 onChange={(e) => setContentTypeFilter(e.target.value)}
@@ -743,15 +950,31 @@ export default function ProfileDetailPage() {
             </div>
 
             <button
-              onClick={() => {
-                setEditingContent(null);
-                setUploadedUrl("");
-                setAddContentModal(true);
-              }}
+              onClick={() => openContentModal()}
               className="px-5 py-2.5 rounded-full bg-accent text-white hover:bg-accent-hover text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-all"
             >
-              <Plus className="w-4 h-4" /> Yangi kontent qo'shish
+              <Plus className="w-4 h-4" /> + 4 Kadrli Kontent Rejalashtirish
             </button>
+          </div>
+
+          {/* Assistant Reminder Banner Info */}
+          <div className="bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 border border-blue-500/20 p-4 rounded-2xl flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Bell className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <span>Avtomatik Telegram Ogohlantirish</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500 text-white font-mono">
+                    24/7 LIVE
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Rejalashtirilgan sana va vaqt kelganda, FlowDesk yordamchingiz sizga qo'ng'iroq qiladi va barcha kadrlar + Hook, Body, CTA ni Telegramingizga yuboradi!
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Content Items List / Grid */}
@@ -764,17 +987,13 @@ export default function ProfileDetailPage() {
                 Ushbu filtr bo'yicha kontent topilmadi
               </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-                Ushbu profil uchun yangi reels, post yoki karusel g'oyasini rejalashtiring!
+                4 ta kadr, Hook, Body va CTA bilan yangi kontent rejalashtiring!
               </p>
               <button
-                onClick={() => {
-                  setEditingContent(null);
-                  setUploadedUrl("");
-                  setAddContentModal(true);
-                }}
-                className="px-4 py-2 bg-accent text-white text-xs font-bold rounded-full hover:bg-accent-hover shadow-sm"
+                onClick={() => openContentModal()}
+                className="px-5 py-2 bg-accent text-white text-xs font-bold rounded-full hover:bg-accent-hover shadow-sm"
               >
-                + Post rejalashtirish
+                + Kontent qo'shish
               </button>
             </div>
           ) : (
@@ -782,6 +1001,17 @@ export default function ProfileDetailPage() {
               {filteredContent.map((item) => {
                 const st = STAGES[item.stage] || STAGES.idea;
                 const ct = CONTENT_TYPES[item.type] || CONTENT_TYPES.post;
+
+                let framesList: string[] = [];
+                if (item.frames) {
+                  try {
+                    const parsed = JSON.parse(item.frames);
+                    if (Array.isArray(parsed)) framesList = parsed;
+                  } catch {}
+                }
+                if (framesList.length === 0 && item.mediaUrls) {
+                  framesList = [item.mediaUrls];
+                }
 
                 return (
                   <div
@@ -797,11 +1027,7 @@ export default function ProfileDetailPage() {
 
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
-                            onClick={() => {
-                              setEditingContent(item);
-                              setUploadedUrl(item.mediaUrls || "");
-                              setAddContentModal(true);
-                            }}
+                            onClick={() => openContentModal(item)}
                             className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
                             title="Tahrirlash"
                           >
@@ -817,19 +1043,30 @@ export default function ProfileDetailPage() {
                         </div>
                       </div>
 
-                      {/* Image Preview if attached */}
-                      {item.mediaUrls && (
-                        <div
-                          onClick={() => setPreviewImage(item.mediaUrls)}
-                          className="w-full h-36 mb-3 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 cursor-pointer relative group/img"
-                        >
-                          <img
-                            src={item.mediaUrls}
-                            alt={item.title}
-                            className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
-                          />
-                          <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white">
-                            <Eye className="w-5 h-5" />
+                      {/* 4-Frames Thumbnail Row */}
+                      {framesList.length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
+                            <span>Kadrlar ({framesList.length} ta)</span>
+                            <span className="text-slate-400">Bosib ko'rish</span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {framesList.slice(0, 4).map((frameUrl, idx) => (
+                              <div
+                                key={idx}
+                                onClick={() => setPreviewImage(frameUrl)}
+                                className="aspect-square rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative group/frame cursor-pointer border border-black/[0.04] dark:border-white/[0.06]"
+                              >
+                                <img
+                                  src={frameUrl}
+                                  alt={`Kadr ${idx + 1}`}
+                                  className="w-full h-full object-cover group-hover/frame:scale-105 transition-transform"
+                                />
+                                <div className="absolute top-1 left-1 px-1 py-0.2 bg-black/60 rounded text-[9px] text-white font-bold">
+                                  #{idx + 1}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -839,42 +1076,87 @@ export default function ProfileDetailPage() {
                         {item.title}
                       </h4>
 
-                      {/* Caption Preview */}
-                      {item.caption && (
-                        <div className="relative bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl mb-3">
-                          <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-3 leading-relaxed whitespace-pre-line font-sans">
+                      {/* Hook, Body, CTA Structured Badges */}
+                      <div className="space-y-2 mb-3">
+                        {item.hook && (
+                          <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl relative group/copy">
+                            <div className="text-[10px] font-bold text-amber-700 dark:text-amber-400 flex items-center justify-between">
+                              <span>🪝 HOOK (ILMOQ):</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.hook!);
+                                  showToast("🪝 Hook nusxalandi!");
+                                }}
+                                className="opacity-0 group-hover/copy:opacity-100 text-[10px] text-amber-600 hover:underline flex items-center gap-1"
+                              >
+                                <Copy className="w-3 h-3" /> Nusxa
+                              </button>
+                            </div>
+                            <p className="text-xs text-slate-700 dark:text-slate-300 font-medium line-clamp-2 mt-0.5">
+                              {item.hook}
+                            </p>
+                          </div>
+                        )}
+
+                        {item.body && (
+                          <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl relative group/copy">
+                            <div className="text-[10px] font-bold text-blue-700 dark:text-blue-400 flex items-center justify-between">
+                              <span>📖 BODY (ASOSIY):</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.body!);
+                                  showToast("📖 Body nusxalandi!");
+                                }}
+                                className="opacity-0 group-hover/copy:opacity-100 text-[10px] text-blue-600 hover:underline flex items-center gap-1"
+                              >
+                                <Copy className="w-3 h-3" /> Nusxa
+                              </button>
+                            </div>
+                            <p className="text-xs text-slate-700 dark:text-slate-300 font-medium line-clamp-2 mt-0.5">
+                              {item.body}
+                            </p>
+                          </div>
+                        )}
+
+                        {item.cta && (
+                          <div className="bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-xl relative group/copy">
+                            <div className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center justify-between">
+                              <span>🎯 CTA (HARAKAT):</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.cta!);
+                                  showToast("🎯 CTA nusxalandi!");
+                                }}
+                                className="opacity-0 group-hover/copy:opacity-100 text-[10px] text-emerald-600 hover:underline flex items-center gap-1"
+                              >
+                                <Copy className="w-3 h-3" /> Nusxa
+                              </button>
+                            </div>
+                            <p className="text-xs text-slate-700 dark:text-slate-300 font-medium line-clamp-2 mt-0.5">
+                              {item.cta}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Full caption if present */}
+                        {item.caption && !item.hook && !item.body && (
+                          <div className="bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl text-xs text-slate-600 dark:text-slate-300 line-clamp-3">
                             {item.caption}
-                          </p>
-                          <button
-                            onClick={() => copyCaption(item.id, item.caption!)}
-                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-accent shadow-xs border border-slate-200 dark:border-slate-700 text-[10px] flex items-center gap-1"
-                          >
-                            {copiedId === item.id ? (
-                              <>
-                                <Check className="w-3 h-3 text-emerald-500" />
-                                <span className="text-emerald-500">Nusxalandi</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-3 h-3" />
-                                <span>Copy</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Bottom Status & Schedule */}
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
                       <div className="flex items-center justify-between text-xs text-slate-400">
                         {item.scheduledDate ? (
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5" />
+                          <span className="flex items-center gap-1 text-slate-700 dark:text-slate-300 font-semibold">
+                            <Clock className="w-3.5 h-3.5 text-accent" />
                             {item.scheduledDate} {item.scheduledTime || ""}
                           </span>
                         ) : (
-                          <span className="text-slate-400 italic">Reja sanasi yo'q</span>
+                          <span className="text-slate-400 italic">Reja vaqti yo'q</span>
                         )}
 
                         <span
@@ -909,38 +1191,60 @@ export default function ProfileDetailPage() {
         </div>
       )}
 
-      {/* ── TAB 2: FEYS RASMLARI & 9-GRID ── */}
+      {/* ── TAB 2: FEYS RASMLARI (AI REFERENS BANKI - NOT PUBLISHED POSTS) ── */}
       {activeTab === "face" && (
         <div className="space-y-8">
-          {/* Section 1: Feys & Shaxsiy brend rasmlari */}
-          <div className="glass rounded-3xl p-6 sm:p-8 border border-black/[0.04] dark:border-white/[0.06] shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5 text-accent" /> Feys va Shaxsiy Brend Rasmlari
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Fotosessiya suratlari, brend logotipi, avatar va shaxsiy feys rasmlarini saqlash
+          {/* AI Face Bank Explanatory Banner */}
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-amber-500/10 border border-purple-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
+                <Bot className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <span>Sun'iy Intellekt (AI) Referens & Feys Banki</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-mono">
+                    Post emas
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400 max-w-2xl leading-relaxed">
+                  Bu rasmlar <b>ijtimoiy tarmoqqa post qilinmaydi!</b> Bu sizning shaxsiy feys va brending referenslaringiz: Midjourney, Flux, ChatGPT, HeyGen va AI vositalarida yangi kadrlar yaratish uchun bitta tugma bilan nusxa olib (`Ctrl+V`) ishlatasiz.
                 </p>
               </div>
+            </div>
 
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => {
                   setUploadAssetType("face");
                   setUploadedUrl("");
                   setUploadAssetModal(true);
                 }}
-                className="px-4 py-2 rounded-full bg-accent text-white hover:bg-accent-hover text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-all"
+                className="px-4 py-2 rounded-full bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all"
               >
-                <Plus className="w-4 h-4" /> Feys rasmi yuklash
+                <Plus className="w-4 h-4" /> Yangi Feys Yuklash
               </button>
+            </div>
+          </div>
+
+          {/* Feys Rasmlari Gallery */}
+          <div className="glass rounded-3xl p-6 sm:p-8 border border-black/[0.04] dark:border-white/[0.06] shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-purple-500" /> Mavjud Feys Referenslari ({faceAssets.length})
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Istalgan rasm ustidagi <b>"Nusxa olish"</b> tugmasini bosing — rasm clipboardga tushadi, so'ng AI dasturiga tashlang.
+                </p>
+              </div>
             </div>
 
             {faceAssets.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                <ImageIcon className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+              <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/30 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+                <Bot className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
                 <p className="text-xs text-slate-500 mb-3">
-                  Ushbu profil uchun hali feys rasmlari yuklanmagan.
+                  Hali feys rasmlari yuklanmagan. Istalgan rasmni sahifaga <b>Ctrl + V</b> qiling yoki fayl tanlang!
                 </p>
                 <button
                   onClick={() => {
@@ -948,7 +1252,7 @@ export default function ProfileDetailPage() {
                     setUploadedUrl("");
                     setUploadAssetModal(true);
                   }}
-                  className="px-4 py-1.5 bg-accent text-white text-xs font-bold rounded-full hover:bg-accent-hover shadow-sm"
+                  className="px-4 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-full hover:bg-purple-700 shadow-sm"
                 >
                   + Rasm yuklash
                 </button>
@@ -958,7 +1262,7 @@ export default function ProfileDetailPage() {
                 {faceAssets.map((asset) => (
                   <div
                     key={asset.id}
-                    className="group relative rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-square border border-black/[0.04] dark:border-white/[0.06] shadow-sm"
+                    className="group relative rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-square border border-black/[0.04] dark:border-white/[0.06] shadow-sm flex flex-col justify-between"
                   >
                     <img
                       src={asset.fileUrl}
@@ -966,27 +1270,36 @@ export default function ProfileDetailPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
 
-                    {/* Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-between">
+                    {/* Quick Copy Button on Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-2.5 flex flex-col justify-between">
                       <div className="flex justify-end gap-1">
                         <button
                           onClick={() => setPreviewImage(asset.fileUrl)}
-                          className="p-1 rounded-full bg-white/20 hover:bg-white/40 text-white backdrop-blur-xs"
-                          title="Kattalashtirish"
+                          className="p-1.5 rounded-full bg-white/20 hover:bg-white/40 text-white backdrop-blur-xs"
+                          title="Ko'rish"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteAsset(asset.id)}
-                          className="p-1 rounded-full bg-rose-500/80 hover:bg-rose-500 text-white"
+                          className="p-1.5 rounded-full bg-rose-500/80 hover:bg-rose-500 text-white"
                           title="O'chirish"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      <div className="text-white text-xs font-semibold truncate">
-                        {asset.title}
+                      <div className="space-y-1.5">
+                        <div className="text-white text-xs font-bold truncate">
+                          {asset.title}
+                        </div>
+                        <button
+                          onClick={() => copyImageToClipboard(asset.fileUrl, asset.title)}
+                          className="w-full py-1.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>AI uchun Nusxa</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1003,7 +1316,7 @@ export default function ProfileDetailPage() {
                   <Camera className="w-5 h-5 text-pink-500" /> Instagram 9-Grid (Feed Simulyatori)
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Postlar va fotosuratlar Instagram lentasida qanday ko'rinishini oldindan tekshiring va vizual uyg'unlik yarating
+                  Lentadagi 9 ta kadr bir-biri bilan qanday uyg'unlashishini oldindan tekshiring
                 </p>
               </div>
 
@@ -1019,9 +1332,8 @@ export default function ProfileDetailPage() {
               </button>
             </div>
 
-            {/* Instagram Profile Mockup & 3x3 Grid */}
+            {/* Instagram Profile Mockup */}
             <div className="max-w-md mx-auto bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 shadow-lg space-y-4">
-              {/* Instagram mini header */}
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 rounded-full p-0.5 bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-500">
                   <div className="w-full h-full rounded-full bg-white dark:bg-slate-900 p-0.5 overflow-hidden">
@@ -1092,7 +1404,7 @@ export default function ProfileDetailPage() {
               </div>
 
               <div className="text-[11px] text-slate-400 text-center">
-                ✨ 9-Grid estetikasi: ranglar gammasi va kompozitsiya uyg'unligi
+                ✨ 9-Grid estetikasi: ranglar va kompozitsiya uyg'unligi
               </div>
             </div>
           </div>
@@ -1102,7 +1414,6 @@ export default function ProfileDetailPage() {
       {/* ── TAB 3: OYLIK KONTENTLAR ── */}
       {activeTab === "monthly" && (
         <div className="space-y-6">
-          {/* Controls Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="text-xs font-semibold text-slate-400">Oy:</span>
@@ -1135,7 +1446,6 @@ export default function ProfileDetailPage() {
             </button>
           </div>
 
-          {/* Monthly Assets Grid */}
           {monthlyAssets.length === 0 ? (
             <div className="glass p-12 text-center rounded-3xl border border-black/[0.04] dark:border-white/[0.06]">
               <div className="w-14 h-14 mx-auto mb-4 rounded-3xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 flex items-center justify-center">
@@ -1145,7 +1455,7 @@ export default function ProfileDetailPage() {
                 {formatMonthLabel(selectedMonth)} uchun kontentlar yo'q
               </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-                Ushbu oy uchun tayyorlangan bannerlar, dizaynlar, videolar va kreativlarni shu yerga yuklab, papka qilib saqlang!
+                Ushbu oy uchun tayyorlangan bannerlar, dizaynlar va videolarni yuklang yoki to'g'ridan-to'g'ri <b>Ctrl + V</b> qiling!
               </p>
               <button
                 onClick={() => {
@@ -1195,6 +1505,13 @@ export default function ProfileDetailPage() {
                       {new Date(asset.createdAt).toLocaleDateString()}
                     </span>
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => copyImageToClipboard(asset.fileUrl, asset.title)}
+                        className="p-1 text-slate-400 hover:text-purple-600 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+                        title="Nusxa olish"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
                       <a
                         href={asset.fileUrl}
                         download
@@ -1230,22 +1547,22 @@ export default function ProfileDetailPage() {
         }}
         title={
           uploadAssetType === "face"
-            ? "Feys rasmi yuklash"
+            ? "AI Feys Referens Rasmi Yuklash"
             : uploadAssetType === "grid"
             ? "Instagram Grid uchun rasm"
             : `${formatMonthLabel(selectedMonth)} uchun kontent yuklash`
         }
       >
-        <form onSubmit={handleSaveAsset} className="space-y-4">
+        <form onSubmit={handleSaveAssetForm} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Rasm yoki Dizayn fayli *
+              Rasm yoki Fayl * (yoki Ctrl + V bosing)
             </label>
             <div className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-center hover:border-accent transition-colors relative">
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleFileUpload}
+                onChange={handleFileInputChange}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 disabled={uploading}
               />
@@ -1269,7 +1586,7 @@ export default function ProfileDetailPage() {
                 <div className="py-4 space-y-1">
                   <Upload className="w-8 h-8 text-slate-400 mx-auto mb-1" />
                   <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                    Faylni tanlash yoki shu yerga tashlash
+                    Faylni tanlang yoki tashlang (Drag & Drop)
                   </div>
                   <div className="text-[11px] text-slate-400">
                     PNG, JPG, WEBP formatlar (maks. 25MB)
@@ -1286,7 +1603,11 @@ export default function ProfileDetailPage() {
             <input
               name="title"
               required
-              placeholder="Masalan: Fotosessiya - Oq ko'ylak, yoki Banner v2"
+              placeholder={
+                uploadAssetType === "face"
+                  ? "Masalan: Feys - Tabassum, yoki Studio Oq fon"
+                  : "Kreativ nomi"
+              }
               className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/20"
             />
           </div>
@@ -1325,17 +1646,19 @@ export default function ProfileDetailPage() {
         </form>
       </Modal>
 
-      {/* ── MODAL: YANGI / TAHRIRLASH KONTENT ── */}
+      {/* ── MODAL: 4-KADRLI KONTENT REJALASHTIRISH (Hook, Body, CTA) ── */}
       <Modal
         open={addContentModal}
         onClose={() => {
           setAddContentModal(false);
           setEditingContent(null);
+          setContentFrames([]);
           setUploadedUrl("");
         }}
-        title={editingContent ? "Kontentni tahrirlash" : "Yangi kontent rejalashtirish"}
+        title={editingContent ? "Kontentni Tahrirlash" : "4 Kadrli Kontent Rejalashtirish"}
       >
-        <form onSubmit={handleSaveContent} className="space-y-4">
+        <form onSubmit={handleSaveContent} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+          {/* Title */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Sarlavha (Mavzu) *
@@ -1344,11 +1667,166 @@ export default function ProfileDetailPage() {
               name="title"
               required
               defaultValue={editingContent?.title || ""}
-              placeholder="Masalan: Yangi brending sirlari reels"
+              placeholder="Masalan: Qanday qilib 1 oyda brendingni noldan qurdik?"
               className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/20"
             />
           </div>
 
+          {/* 4 FRAMES / KADRLAR BO'LIMI */}
+          <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                <span>🖼️ 4 ta Kadr (Karusel / Storyboard):</span>
+                <span className="text-[11px] text-slate-400">({contentFrames.length} ta kadr)</span>
+              </label>
+              <div className="text-[10px] text-slate-400 font-mono">
+                Ctrl+V yoki Drag qiling
+              </div>
+            </div>
+
+            {/* Frame Thumbnails Grid */}
+            <div className="grid grid-cols-4 gap-2">
+              {Array.from({ length: Math.max(4, contentFrames.length) }).map((_, idx) => {
+                const frameUrl = contentFrames[idx];
+                return (
+                  <div
+                    key={idx}
+                    className="aspect-square rounded-xl overflow-hidden bg-white dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 relative group/slot flex flex-col items-center justify-center"
+                  >
+                    {frameUrl ? (
+                      <>
+                        <img
+                          src={frameUrl}
+                          alt={`Kadr ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-black/70 rounded text-[9px] text-white font-bold">
+                          #{idx + 1}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setContentFrames((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                          className="absolute top-1 right-1 p-1 bg-rose-500 rounded-full text-white opacity-0 group-hover/slot:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </>
+                    ) : (
+                      <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-1 text-center hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                        <Upload className="w-4 h-4 text-slate-400 mb-1" />
+                        <span className="text-[10px] text-slate-500 font-bold">
+                          {idx + 1}-kadr
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const f = e.target.files?.[0];
+                            if (f) {
+                              const u = await uploadFileBlob(f);
+                              if (u) setContentFrames((prev) => [...prev, u]);
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* HOOK, BODY, CTA STRUCTURED FIELDS */}
+          <div className="space-y-3 pt-1">
+            {/* HOOK */}
+            <div>
+              <label className="block text-xs font-bold text-amber-700 dark:text-amber-400 mb-1 flex items-center justify-between">
+                <span>🪝 1. Hook (Kirish / Ilmoq) *</span>
+                <span className="text-[10px] font-normal text-slate-400">
+                  Dastlabki 3 soniyada to'xtatuvchi kuchli sarlavha
+                </span>
+              </label>
+              <textarea
+                name="hook"
+                rows={2}
+                defaultValue={editingContent?.hook || ""}
+                placeholder="Masalan: Dizaynerlar sizdan yashiradigan 3 ta sir..."
+                className="w-full px-4 py-2 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+              />
+            </div>
+
+            {/* BODY */}
+            <div>
+              <label className="block text-xs font-bold text-blue-700 dark:text-blue-400 mb-1 flex items-center justify-between">
+                <span>📖 2. Body (Asosiy qism / Qiymat) *</span>
+                <span className="text-[10px] font-normal text-slate-400">
+                  2, 3 va 4-kadrlardagi asosiy ma'lumot
+                </span>
+              </label>
+              <textarea
+                name="body"
+                rows={3}
+                defaultValue={editingContent?.body || ""}
+                placeholder="Masalan: 1-kadrda muammo, 2-kadrda yechim, 3-kadrda natija..."
+                className="w-full px-4 py-2 bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/30 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
+
+            {/* CTA */}
+            <div>
+              <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 mb-1 flex items-center justify-between">
+                <span>🎯 3. CTA (Harakatga chaqiruv) *</span>
+                <span className="text-[10px] font-normal text-slate-400">
+                  Oxirgi kadr va izohga chaqiruv
+                </span>
+              </label>
+              <textarea
+                name="cta"
+                rows={2}
+                defaultValue={editingContent?.cta || ""}
+                placeholder="Masalan: Izohda 'DIZAYN' deb yozing, qo'llanmani yuboraman!"
+                className="w-full px-4 py-2 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              />
+            </div>
+          </div>
+
+          {/* Schedule Date & Time */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-accent" /> Reja sanasi
+              </label>
+              <input
+                type="date"
+                name="scheduledDate"
+                defaultValue={editingContent?.scheduledDate || ""}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-accent" /> Reja vaqti (Soat)
+              </label>
+              <input
+                type="time"
+                name="scheduledTime"
+                defaultValue={editingContent?.scheduledTime || ""}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100"
+              />
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 text-[11px] text-blue-700 dark:text-blue-300 flex items-center gap-2">
+            <PhoneCall className="w-4 h-4 shrink-0 text-blue-500" />
+            <span>
+              Shu soat kelganda FlowDesk Telegram yordamchisi telefon qilib, Hook, Body, CTA va kadrlarni chatga tashlaydi.
+            </span>
+          </div>
+
+          {/* Format & Stage */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -1356,7 +1834,7 @@ export default function ProfileDetailPage() {
               </label>
               <select
                 name="type"
-                defaultValue={editingContent?.type || "post"}
+                defaultValue={editingContent?.type || "carousel"}
                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100"
               >
                 {Object.entries(CONTENT_TYPES).map(([k, t]) => (
@@ -1385,83 +1863,27 @@ export default function ProfileDetailPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Reja sanasi
-              </label>
-              <input
-                type="date"
-                name="scheduledDate"
-                defaultValue={editingContent?.scheduledDate || ""}
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Reja vaqti
-              </label>
-              <input
-                type="time"
-                name="scheduledTime"
-                defaultValue={editingContent?.scheduledTime || ""}
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100"
-              />
-            </div>
-          </div>
-
+          {/* Optional Caption */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Rasm yoki media biriktirish
-            </label>
-            <div className="border border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-3 flex items-center justify-between gap-3">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleFileUpload}
-                className="text-xs text-slate-500"
-              />
-              {(uploadedUrl || editingContent?.mediaUrls) && (
-                <img
-                  src={uploadedUrl || editingContent?.mediaUrls || ""}
-                  alt="Thumb"
-                  className="w-10 h-10 object-cover rounded-lg shrink-0"
-                />
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Post matni (Caption)
+              To'liq post matni (Caption - ixtiyoriy)
             </label>
             <textarea
               name="caption"
-              rows={4}
+              rows={3}
               defaultValue={editingContent?.caption || ""}
-              placeholder="Post ostidagi matn, xeshteglar va havolalar..."
-              className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/20"
+              placeholder="Xeshteglar, to'liq matn yoki eslatma..."
+              className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-accent/20"
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Eslatmalar (Notes)
-            </label>
-            <input
-              name="notes"
-              defaultValue={editingContent?.notes || ""}
-              placeholder="Masalan: Dizaynerga topshirildi"
-              className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800 sticky bottom-0 bg-white dark:bg-slate-900 py-2">
             <button
               type="button"
               onClick={() => {
                 setAddContentModal(false);
                 setEditingContent(null);
+                setContentFrames([]);
               }}
               className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
             >
@@ -1623,7 +2045,7 @@ export default function ProfileDetailPage() {
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleFileUpload}
+                onChange={handleFileInputChange}
                 className="text-xs text-slate-500"
               />
               {(uploadedUrl || profile.avatarUrl) && (
@@ -1690,4 +2112,3 @@ export default function ProfileDetailPage() {
     </div>
   );
 }
-
