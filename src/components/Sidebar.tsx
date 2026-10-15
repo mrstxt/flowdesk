@@ -25,6 +25,7 @@ const groups = [
     label: "Boshqaruv",
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/ai-chat", label: "AI Kotib (Madina)", icon: Sparkles },
       { href: "/orders", label: "Buyurtmalar", icon: Kanban },
       { href: "/hisob-kitob", label: "Hisob-kitob", icon: Receipt },
       { href: "/finance", label: "Moliya", icon: Wallet },

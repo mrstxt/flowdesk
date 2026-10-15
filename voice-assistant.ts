@@ -1941,10 +1941,17 @@ async function runWorker() {
           if (minutes !== lastWakeCallMinute && (minutes - wakeMinutes) % 5 === 0) {
             lastWakeCallMinute = minutes;
             console.log(`🔔 Uyg'otish qo'ng'irog'i amalga oshirilmoqda (${timeStr})...`);
-            await makeCallWithClient(client, entity, `Uyg'onish vaqti: ${wakeTime}`);
-            const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, UYG'ONISH VAQTI!</b>\n\nYengillik bilan o'rningizdan turing va suv iching 💧. Menga xabar yozing!`;
+            const todayTasks = await db.select().from(tasks).where(eq(tasks.date, todayISO));
+            let planList = "";
+            if (todayTasks.length > 0) {
+              planList = "\n\n📋 <b>Bugungi asosiy rejalaringiz:</b>\n" + todayTasks.slice(0, 4).map((t, idx) => `${idx + 1}. ${escapeHtml(t.title)}`).join("\n");
+            }
+            const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, XAYRLI TONG SOHIBJON!</b>\n\nYengillik bilan o'rningizdan turing va bir stakan suv iching 💧.${planList}\n\nKeling, yangi kunni intizom bilan boshlaymiz! 🚀`;
             await client.sendMessage(entity, { message: wakeMsg, parseMode: "html" });
-            void sendVoiceNote(client, entity, `Assalomu alaykum Sohibjon! Soat ${wakeTime} bo'ldi, o'rningizdan turing!`);
+            const voiceBriefing = todayTasks.length > 0
+              ? `Assalomu alaykum Sohibjon! Xayrli tong! Soat ${wakeTime} bo'ldi. Bugungi taqvimingizda ${todayTasks.length} ta vazifa kutmoqda. O'rningizdan turing, yangi kunni g'alaba bilan boshlaymiz!`
+              : `Assalomu alaykum Sohibjon! Xayrli tong! Soat ${wakeTime} bo'ldi. Yangi kun muborak, tetik bo'lib o'rningizdan turing!`;
+            void sendVoiceNote(client, entity, voiceBriefing);
           }
         }
       }
