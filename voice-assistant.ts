@@ -876,13 +876,15 @@ async function runWorker() {
       // QAT'IY FILTR: Kanallar va guruhlardagi postlar mutlaqo e'tiborga olinmaydi!
       if (msg.isChannel || msg.isGroup) return;
 
-      // QAT'IY FILTR: Faqat Sohibjon (@sulaymonovss) dan kelgan shaxsiy chat xabarlarigina olinadi!
-      const senderId = msg.senderId ? msg.senderId.toString() : "";
+      const senderId = msg.senderId ? msg.senderId.toString() : (msg.fromId && "userId" in msg.fromId ? (msg.fromId as any).userId.toString() : "");
       const chatId = msg.chatId ? msg.chatId.toString() : "";
       const peerUserId = msg.peerId && "userId" in msg.peerId ? (msg.peerId as any).userId.toString() : "";
 
+      console.log(`📨 [Telegram] Xabar keldi: "${msg.message || msg.text || '<media>'}" | senderId: ${senderId} | chatId: ${chatId} | peerUserId: ${peerUserId} | targetId: ${targetIdStr}`);
+
       if (targetIdStr && senderId !== targetIdStr && chatId !== targetIdStr && peerUserId !== targetIdStr) {
-        return; // Boshqa profillar, kanallar yoki begona chatlar mutlaqo o'tkazib yuboriladi!
+        console.log(`⚠️ Xabar boshqa foydalanuvchidan kelgani sababli e'tiborga olinmadi (kutilgan: ${targetIdStr})`);
+        return;
       }
 
       let receivedText = msg.text || msg.message || "";
