@@ -121,6 +121,7 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
       .replace(/\b(da|gacha|vaqtida|soat|ertalab|kechqurun|tushlikda)\b/gi, "")
       .replace(/\b(man|men|menga|manga|biz|bizga)\b/gi, "")
       .replace(/\b(kerakda|kerak|lozim|shart|kerak edi)\b/gi, "")
+      .replace(/\b(eslatib\s*(?:qo'?y|qoy|ber|yubor)|yozib\s*(?:qo'?y|qoy|ber|yubor)|eslatvor|eslat)\b/gi, "")
       .replace(/^[-•*0-9.)\s]+/, "")
       .replace(/^(reja|vazifa|ishim):\s*/i, "")
       .replace(/\s+/g, " ")

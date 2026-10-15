@@ -29,26 +29,35 @@ export async function generateUzbekSpeechAudio(text: string): Promise<Buffer | n
       OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3
     );
 
-    return new Promise((resolve) => {
+    const ttsPromise = new Promise<Buffer | null>((resolve) => {
       try {
         const { audioStream } = tts.toStream(cleanText);
         const chunks: Buffer[] = [];
         audioStream.on("data", (chunk: Buffer) => chunks.push(chunk));
         audioStream.on("end", () => {
-          tts.close();
+          try { tts.close(); } catch {}
           resolve(Buffer.concat(chunks));
         });
         audioStream.on("error", (err) => {
           console.error("TTS stream error:", err);
-          tts.close();
+          try { tts.close(); } catch {}
           resolve(null);
         });
       } catch (e) {
         console.error("toStream error:", e);
-        tts.close();
+        try { tts.close(); } catch {}
         resolve(null);
       }
     });
+
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        try { tts.close(); } catch {}
+        resolve(null);
+      }, 5000);
+    });
+
+    return await Promise.race([ttsPromise, timeoutPromise]);
   } catch (error) {
     console.error("generateUzbekSpeechAudio xatolik:", error);
     return null;

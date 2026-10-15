@@ -13,12 +13,13 @@ const globalForDb = globalThis as typeof globalThis & {
 
 // Hosted databases (Vercel Postgres, Neon, Supabase...) require SSL.
 const isLocal = databaseUrl ? /localhost|127\.0\.0\.1/.test(databaseUrl) : false;
+const connectionString = databaseUrl ? databaseUrl.replace(/sslmode=[^&]+/g, "sslmode=no-verify") : undefined;
 
 export const pool =
-  databaseUrl
+  connectionString
     ? globalForDb.__arenaNextJsPostgresqlPool ??
       new Pool({
-        connectionString: databaseUrl,
+        connectionString,
         ssl: isLocal ? undefined : { rejectUnauthorized: false },
         max: 5,
       })

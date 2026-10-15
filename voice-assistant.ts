@@ -289,84 +289,85 @@ async function runWorker() {
 
   // 1. INCOMING MESSAGES (Ovozli va matnli xabarlarni eshitish va javob berish)
   client.addEventHandler(async (event) => {
-    const msg = event.message;
-    if (!msg || msg.out) return;
-
-    let receivedText = msg.text || msg.message || "";
-    let isVoice = false;
-
-    // Agar ovozli xabar bo'lsa
-    if (msg.voice || msg.audio) {
-      isVoice = true;
-      console.log("🎙️ Foydalanuvchidan ovozli xabar keldi...");
-      try {
-        const mediaBuffer = await client.downloadMedia(msg);
-        if (mediaBuffer && Buffer.isBuffer(mediaBuffer)) {
-          const transcribed = await transcribeWithGemini(mediaBuffer);
-          if (transcribed) {
-            console.log(`🗣️ Transkripsiya (Gemini): "${transcribed}"`);
-            receivedText = transcribed;
-          }
-        }
-      } catch (err) {
-        console.error("Ovozni yuklab olishda xatolik:", err);
-      }
-    }
-
-    const clean = receivedText.trim();
-    const replyPeer = msg.chatId || msg.senderId || entity;
-
-    if (!clean) {
-      if (isVoice) {
-        const replyText = "🎙️ Ovozli xabaringiz qabul qilindi, lekin ovozni aniqlab bo'lmadi. Iltimos, rejalaringizni aniqroq ayting yoki matn qilib yozing!";
-        await client.sendMessage(replyPeer, { message: replyText });
-        await sendVoiceNote(client, replyPeer, replyText);
-      }
-      return;
-    }
-
-    console.log(`📥 Kelgan xabar: "${clean}"`);
-
-    // Foydalanuvchi javob yozdi -> bugungi uyg'onish holatini qayd etamiz
-    const { todayISO, tomorrowISO } = getTashkentTimeString();
     try {
-      const [existingSleep] = await db.select().from(sleepLogs).where(eq(sleepLogs.date, todayISO)).limit(1);
-      if (existingSleep && !existingSleep.actualWake) {
-        await db.update(sleepLogs).set({ actualWake: getTashkentTimeString().timeStr }).where(eq(sleepLogs.id, existingSleep.id));
+      const msg = event.message;
+      if (!msg || msg.out) return;
+
+      let receivedText = msg.text || msg.message || "";
+      let isVoice = false;
+
+      // Agar ovozli xabar bo'lsa
+      if (msg.voice || msg.audio) {
+        isVoice = true;
+        console.log("🎙️ Foydalanuvchidan ovozli xabar keldi...");
+        try {
+          const mediaBuffer = await client.downloadMedia(msg);
+          if (mediaBuffer && Buffer.isBuffer(mediaBuffer)) {
+            const transcribed = await transcribeWithGemini(mediaBuffer);
+            if (transcribed) {
+              console.log(`🗣️ Transkripsiya (Gemini): "${transcribed}"`);
+              receivedText = transcribed;
+            }
+          }
+        } catch (err) {
+          console.error("Ovozni yuklab olishda xatolik:", err);
+        }
       }
-    } catch {}
 
-    const q = clean.toLowerCase();
+      const clean = receivedText.trim();
+      const replyPeer = entity;
 
-    // A) Qo'ng'iroq qilish buyrug'i ("tel qil", "telefon qil", "qo'ng'iroq qil", "manga tel qil")
-    if (/(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil|chaqir|manga\s*tel|menga\s*tel)/i.test(q)) {
-      console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
-      await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
-      await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
-      await sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!");
-      return;
-    }
+      if (!clean) {
+        if (isVoice) {
+          const replyText = "🎙️ Ovozli xabaringiz qabul qilindi, lekin ovozni aniqlab bo'lmadi. Iltimos, rejalaringizni aniqroq ayting yoki matn qilib yozing!";
+          await client.sendMessage(replyPeer, { message: replyText });
+          sendVoiceNote(client, replyPeer, replyText).catch(() => {});
+        }
+        return;
+      }
 
-    // A.1) Minnatdorchilik ("raxmat", "rahmat", "katta rahmat", "spasibo", "tashakkur")
-    if (/(rahmat|raxmat|tashakkur|barakalla|katta rahmat|spasibo|gap yo'?q|zo'?r)/i.test(q)) {
-      console.log("🙏 Minnatdorchilik qabul qilindi...");
-      const reply = "Arzimaydi, Sohibjon! 😊 Sizga yordam berishdan doim mamnunman. Biror reja yoki savolingiz bo'lsa bemalol aytavering!";
-      await client.sendMessage(replyPeer, { message: reply });
-      await sendVoiceNote(client, replyPeer, "Arzimaydi Sohibjon! Sizga yordam berishdan doim xursandman.");
-      return;
-    }
+      console.log(`📥 Kelgan xabar: "${clean}"`);
 
-    // A.2) Aloqa tekshiruvi, nuqta yoki qisqa tasdiq (".", "..", "alo", "ha", "ok", "shu yerdamisan")
-    if (
-      /^(\.|\.\.|\.\.\.|alo|qani|ok|hop|xo'?p|ha|ha bo'?ldi|yaxshi|tushundim)$/i.test(q) ||
-      /(shu yerdamisan|ishlayapsanmi|eshtyapsanmi|eshityapsanmi|nima gap)/i.test(q)
-    ) {
-      console.log("💬 Muloqot / tekshiruv qabul qilindi...");
-      const reply = "Eshitaman Sohibjon! Men 24/7 siz bilanmanki, buyrug'ingizga tayyorman. Biror vazifa belgilaymizmi yoki telefon qilaymi? 😊";
-      await client.sendMessage(replyPeer, { message: reply });
-      await sendVoiceNote(client, replyPeer, "Eshitaman Sohibjon, men tayyorman! Qanday yordam bera olaman?");
-      return;
-    }
+      // Foydalanuvchi javob yozdi -> bugungi uyg'onish holatini qayd etamiz
+      const { todayISO, tomorrowISO } = getTashkentTimeString();
+      try {
+        const [existingSleep] = await db.select().from(sleepLogs).where(eq(sleepLogs.date, todayISO)).limit(1);
+        if (existingSleep && !existingSleep.actualWake) {
+          await db.update(sleepLogs).set({ actualWake: getTashkentTimeString().timeStr }).where(eq(sleepLogs.id, existingSleep.id));
+        }
+      } catch {}
+
+      const q = clean.toLowerCase();
+
+      // A) Qo'ng'iroq qilish buyrug'i ("tel qil", "telefon qil", "qo'ng'iroq qil", "manga tel qil")
+      if (/(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil|chaqir|manga\s*tel|menga\s*tel)/i.test(q)) {
+        console.log("📲 Foydalanuvchi qo'ng'iroq so'radi...");
+        await client.sendMessage(replyPeer, { message: "📲 Hozir telefon qilaman, Sohibjon..." });
+        await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
+        sendVoiceNote(client, replyPeer, "Hozir telefon qilmoqdaman, Sohibjon!").catch(() => {});
+        return;
+      }
+
+      // A.1) Minnatdorchilik ("raxmat", "rahmat", "katta rahmat", "spasibo", "tashakkur")
+      if (/(rahmat|raxmat|tashakkur|barakalla|katta rahmat|spasibo|gap yo'?q|zo'?r)/i.test(q)) {
+        console.log("🙏 Minnatdorchilik qabul qilindi...");
+        const reply = "Arzimaydi, Sohibjon! 😊 Sizga yordam berishdan doim mamnunman. Biror reja yoki savolingiz bo'lsa bemalol aytavering!";
+        await client.sendMessage(replyPeer, { message: reply });
+        sendVoiceNote(client, replyPeer, "Arzimaydi Sohibjon! Sizga yordam berishdan doim xursandman.").catch(() => {});
+        return;
+      }
+
+      // A.2) Aloqa tekshiruvi, nuqta yoki qisqa tasdiq (".", "..", "alo", "ha", "ok", "shu yerdamisan")
+      if (
+        /^(\.|\.\.|\.\.\.|alo|qani|ok|hop|xo'?p|ha|ha bo'?ldi|yaxshi|tushundim)$/i.test(q) ||
+        /(shu yerdamisan|ishlayapsanmi|eshtyapsanmi|eshityapsanmi|nima gap)/i.test(q)
+      ) {
+        console.log("💬 Muloqot / tekshiruv qabul qilindi...");
+        const reply = "Eshitaman Sohibjon! Men 24/7 siz bilanmanki, buyrug'ingizga tayyorman. Biror vazifa belgilaymizmi yoki telefon qilaymi? 😊";
+        await client.sendMessage(replyPeer, { message: reply });
+        sendVoiceNote(client, replyPeer, "Eshitaman Sohibjon, men tayyorman! Qanday yordam bera olaman?").catch(() => {});
+        return;
+      }
 
     // A.3) YouTube Video havolasi
     const ytMatch = clean.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
@@ -399,7 +400,7 @@ async function runWorker() {
 
         const reply = `🎬 <b>YouTube video Rivojlanishga saqlandi!</b>\n\n📌 <b>${videoTitle}</b>\n🔗 <a href="${fullUrl}">Videoni ochish</a>\n\n⏰ <b>Rejaga qo'shildi:</b> ${dateLabel} (<b>${targetDate}</b>) bo'sh vaqtingizga kiritildi! 🚀`;
         await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-        await sendVoiceNote(client, replyPeer, `Sohibjon, YouTube videoni saqlab qo'ydim. Uni ${dateLabel.toLowerCase()} bo'sh vaqtingizda ko'rish uchun rejalarga qo'shdim.`);
+        void sendVoiceNote(client, replyPeer, `Sohibjon, YouTube videoni saqlab qo'ydim. Uni ${dateLabel.toLowerCase()} bo'sh vaqtingizda ko'rish uchun rejalarga qo'shdim.`);
       } catch (e) {
         console.error("Video saqlash xatoligi:", e);
       }
@@ -424,7 +425,7 @@ async function runWorker() {
 
           const reply = `💼 <b>Yangi buyurtma qabul qilindi va saqlandi!</b>\n\n👤 <b>Mijoz:</b> ${order.clientName || "Ko'rsatilmagan"}\n📌 <b>Buyurtma:</b> ${order.title}\n💰 <b>Narxi:</b> ${fmt(order.amount)}${order.deadline ? `\n📅 <b>Muddati (Deadline):</b> ${order.deadline}` : ""}\n\nDashboard Buyurtmalar bo'limida ko'rishingiz mumkin! 🚀`;
           await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-          await sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Yangi buyurtmani tizimga saqlab qo'ydim.`);
+          void sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Yangi buyurtmani tizimga saqlab qo'ydim.`);
           return;
         } catch (e) {
           console.error("Buyurtma saqlash xatoligi:", e);
@@ -450,7 +451,7 @@ async function runWorker() {
           });
           const reply = `💸 <b>Chiqim saqlandi:</b> ${fmt(amt)}\n📝 <b>Izoh:</b> ${desc}`;
           await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-          await sendVoiceNote(client, replyPeer, `${fmt(amt)} chiqim bazaga kiritildi.`);
+          void sendVoiceNote(client, replyPeer, `${fmt(amt)} chiqim bazaga kiritildi.`);
           return;
         } catch (e) {
           console.error("Chiqim saqlash xatoligi:", e);
@@ -475,7 +476,7 @@ async function runWorker() {
           });
           const reply = `💰 <b>Kirim saqlandi:</b> ${fmt(amt)}\n📝 <b>Izoh:</b> ${desc}`;
           await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-          await sendVoiceNote(client, replyPeer, `${fmt(amt)} daromad qabul qilindi.`);
+          void sendVoiceNote(client, replyPeer, `${fmt(amt)} daromad qabul qilindi.`);
           return;
         } catch (e) {
           console.error("Kirim saqlash xatoligi:", e);
@@ -500,7 +501,7 @@ async function runWorker() {
       await db.insert(settings).values({ key: "wake_time", value: wt }).onConflictDoUpdate({ target: settings.key, set: { value: wt } });
       const wakeReply = `⏰ Tushundim Sohibjon! Uyg'onish vaqti soat <b>${wt}</b> ga belgilandi. Shu vaqtda o'zim sizga telefon qilaman va uyg'otaman! 🚀`;
       await client.sendMessage(replyPeer, { message: wakeReply, parseMode: "html" });
-      await sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Uyg'onish vaqtini soat ${wt} ga belgilab qo'ydim.`);
+      void sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! Uyg'onish vaqtini soat ${wt} ga belgilab qo'ydim.`);
       return;
     }
 
@@ -513,7 +514,7 @@ async function runWorker() {
       }
       const reply = `✅ Oxirgi kiritilgan vazifalar bugungi kun (<b>${todayISO}</b>) ga o'zgartirildi!`;
       await client.sendMessage(replyPeer, { message: reply, parseMode: "html" });
-      await sendVoiceNote(client, replyPeer, "Barcha kiritilgan vazifalar bugungi kunga o'tkazildi Sohibjon!");
+      void sendVoiceNote(client, replyPeer, "Barcha kiritilgan vazifalar bugungi kunga o'tkazildi Sohibjon!");
       return;
     }
 
@@ -522,7 +523,7 @@ async function runWorker() {
       console.log("👋 Salomlashish qabul qilindi...");
       const greeting = `👋 <b>Assalomu alaykum Sohibjon!</b>\n\nMen sizning shaxsiy yordamchingizman. Menga bemalol:\n• Rejalaringizni ayting (masalan: <i>"Bugun soat 18:00 da kitob o'qish"</i>);\n• "Kartada qancha pul bor?" deb so'rang;\n• "Nimalar bor?" deb vazifalaringizni so'rang;\n• "5:30 da turishim kerak" deb uyg'onish vaqtini ayting!\n\nVaqti kelganda esa o'zim sizga telefon qilib eslataman!`;
       await client.sendMessage(replyPeer, { message: greeting, parseMode: "html" });
-      await sendVoiceNote(client, replyPeer, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
+      void sendVoiceNote(client, replyPeer, "Assalomu alaykum Sohibjon! Eshitaman, sizga qanday yordam bera olaman?");
       return;
     }
 
@@ -533,7 +534,7 @@ async function runWorker() {
       if (allCards.length === 0) {
         const textReply = "💳 Hozircha hech qanday karta kiritilmagan.";
         await client.sendMessage(replyPeer, { message: textReply });
-        await sendVoiceNote(client, replyPeer, "Sohibjon, platformada hozircha birorta ham karta mavjud emas.");
+        void sendVoiceNote(client, replyPeer, "Sohibjon, platformada hozircha birorta ham karta mavjud emas.");
         return;
       }
       let total = 0;
@@ -545,48 +546,56 @@ async function runWorker() {
       }
       const textReply = `💳 <b>Sizning kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami balans:</b> <b>${fmt(total)}</b>`;
       await client.sendMessage(replyPeer, { message: textReply, parseMode: "html" });
-      await sendVoiceNote(client, replyPeer, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`);
+      void sendVoiceNote(client, replyPeer, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`);
       return;
     }
 
-    // F) Vazifalar / Rejalar / Ishlar ro'yxati savoli
-    if (/(vazifa|reja|ishlar|nima bor|nima ish|nimalar|qanaqa vazifa)/i.test(q) && !/(soat \d|\d:\d|\d da|kerak|borish|qilish)/i.test(q)) {
+    // F) Vazifalar / Rejalar / Ishlar ro'yxati savoli ("rejalar qanday", "bugun nimalar bor", "ertangi rejalar")
+    const wordCount = q.split(/\s+/).filter(Boolean).length;
+    const hasPlanTopic = /(reja|vazifa|ishlar|ishim|eslat|nima\s*(bor|ish|qilish)|nimalar|ro'?yxat|jadval|kun\s*tartib)/i.test(q);
+    const hasAskWord = /(qanday|qanaqa|qaysi|nima|bor\b|bormi|ko'?rsat|korsat|ayt|jo'?nat|jonat|yubor|tashla|\?|qani|kerak)/i.test(q);
+    if (hasPlanTopic && (hasAskWord || wordCount <= 3) && !/\d/.test(q)) {
       console.log("📋 Rejalar ro'yxati so'raldi...");
       const isTomorrow = /(ertag|ertangi)/i.test(q);
       const targetDate = isTomorrow ? tomorrowISO : todayISO;
       const dayLabel = isTomorrow ? "Ertangi" : "Bugungi";
 
       const [dayTasks, dayRoutines] = await Promise.all([
-        db.select().from(tasks).where(eq(tasks.date, targetDate)).orderBy(desc(tasks.id)),
+        db.select().from(tasks).where(eq(tasks.date, targetDate)).orderBy(asc(tasks.id)),
         db.select().from(routines).where(sql`${routines.targetDate} IS NULL OR ${routines.targetDate} = ${targetDate}`).orderBy(asc(routines.time)),
       ]);
 
-      const totalCount = dayTasks.length + dayRoutines.length;
+      // Vaqtli rejalar tasks jadvalida ham bor — takrorlanmasligi uchun ajratamiz
+      const routineTitles = new Set(dayRoutines.map((r) => r.title.trim().toLowerCase()));
+      const otherTasks = dayTasks.filter((t) => !routineTitles.has(t.title.trim().toLowerCase()));
+
+      const totalCount = dayRoutines.length + otherTasks.length;
       if (totalCount === 0) {
-        const reply = `📋 ${dayLabel} kun (${targetDate}) uchun hali rejalashtirilgan vazifa yo'q. Rejalaringiz bo'lsa aytib bering, yozib qo'yaman!`;
+        const reply = `📋 ${dayLabel} kun (${targetDate}) uchun hali hech qanday reja yo'q. Rejalaringizni aytib bering, yozib qo'yaman! 😊`;
         await client.sendMessage(replyPeer, { message: reply });
-        await sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hech qanday vazifa belgilanmagan.`);
+        void sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kun uchun hali reja yo'q.`);
         return;
       }
 
       const lines: string[] = [];
       if (dayRoutines.length > 0) {
-        lines.push("⏰ <b>Vaqtli rejalar (Intizom):</b>");
+        lines.push("⏰ <b>Vaqtli rejalar:</b>");
         dayRoutines.forEach((r) => {
-          lines.push(`• <b>${r.time}</b> — ${r.title} ${r.lastDoneDate === targetDate ? "✅" : "⬜"}`);
+          const done = r.lastDoneDate && String(r.lastDoneDate).slice(0, 10) === targetDate;
+          lines.push(`${done ? "✅" : "⬜"} <b>${r.time}</b> — ${r.title}${r.targetDate ? "" : " <i>(har kuni)</i>"}`);
         });
       }
-      if (dayTasks.length > 0) {
+      if (otherTasks.length > 0) {
         if (lines.length > 0) lines.push("");
-        lines.push("📋 <b>Kunlik vazifalar:</b>");
-        dayTasks.forEach((t) => {
-          lines.push(`• ${t.completed ? "✅" : "⬜"} ${t.title}`);
+        lines.push("📋 <b>Vazifalar:</b>");
+        otherTasks.forEach((t) => {
+          lines.push(`${t.completed ? "✅" : "⬜"} ${t.title}`);
         });
       }
 
-      const textReply = `📋 <b>${dayLabel} vazifalaringiz (${totalCount} ta):</b>\n\n${lines.join("\n")}`;
+      const textReply = `📅 <b>${dayLabel} rejalaringiz — ${targetDate} (${totalCount} ta):</b>\n\n${lines.join("\n")}`;
       await client.sendMessage(replyPeer, { message: textReply, parseMode: "html" });
-      await sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta vazifa belgilangan. Ro'yxatni chatga yubordim.`);
+      void sendVoiceNote(client, replyPeer, `Sohibjon, ${dayLabel.toLowerCase()} kunga ${totalCount} ta reja bor. Hammasini chatga yubordim.`);
       return;
     }
 
@@ -609,13 +618,19 @@ async function runWorker() {
       reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda o'zim telefon qilib eslatib turaman! 🚀`;
 
       await client.sendMessage(replyPeer, { message: reportMsg, parseMode: "html" });
-      await sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
+      void sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
       return;
     }
 
     // Noma'lum xabar bo'lsa
     const fallback = `Eshitdim Sohibjon! 😊 Agar bu yangi rejangiz bo'lsa (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), aytib yuborsangiz saqlab qo'yaman. Qo'ng'iroq qilishimni xohlasangiz <i>"Tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });
+    } catch (handlerErr) {
+      console.error("❌ Xabarni qayta ishlashda xatolik:", handlerErr);
+      try {
+        await client.sendMessage(entity, { message: "⚠️ Kechirasiz Sohibjon, kichik xatolik bo'ldi. Iltimos, qaytadan yozib yuboring." });
+      } catch {}
+    }
   }, new NewMessage({ incoming: true }));
 
   // 2. BACKGROUND ALARM & REMINDER LOOP (Har 30 soniyada tekshirish)
@@ -654,7 +669,7 @@ async function runWorker() {
             await makeCallWithClient(client, entity, `Uyg'onish vaqti: ${wakeTime}`);
             const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, UYG'ONISH VAQTI!</b>\n\nYengillik bilan o'rningizdan turing va suv iching 💧. Menga xabar yozing!`;
             await client.sendMessage(entity, { message: wakeMsg, parseMode: "html" });
-            await sendVoiceNote(client, entity, `Assalomu alaykum Sohibjon! Soat ${wakeTime} bo'ldi, o'rningizdan turing!`);
+            void sendVoiceNote(client, entity, `Assalomu alaykum Sohibjon! Soat ${wakeTime} bo'ldi, o'rningizdan turing!`);
           }
         }
       }
@@ -669,7 +684,7 @@ async function runWorker() {
             await makeCallWithClient(client, entity, "Ertangi rejalar kiritilmagan");
             const sleepMsg = `🌙 <b>Ertangi rejalaringizni ayting!</b>\n\nSohibjon, ertangi kun (${tomorrowISO}) uchun hali birorta vazifa kiritilmadi. Iltimos, nimalar qilmoqchi ekanligingizni ovozli xabar orqali menga aytib bering!`;
             await client.sendMessage(entity, { message: sleepMsg, parseMode: "html" });
-            await sendVoiceNote(client, entity, "Sohibjon, ertangi kun uchun rejalaringizni ovozli xabar qilib aytib bering!");
+            void sendVoiceNote(client, entity, "Sohibjon, ertangi kun uchun rejalaringizni ovozli xabar qilib aytib bering!");
           }
         }
       }
