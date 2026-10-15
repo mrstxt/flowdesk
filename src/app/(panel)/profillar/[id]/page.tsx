@@ -1690,3 +1690,4 @@ export default function ProfileDetailPage() {
     </div>
   );
 }
+

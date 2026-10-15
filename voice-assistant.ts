@@ -772,7 +772,7 @@ async function runWorker() {
   console.log("==========================================================\n");
 
   const port = process.env.PORT;
-  if (port) {
+  if (port && process.env.STANDALONE_WORKER === "true") {
     const healthServer = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end("FlowDesk Telegram Userbot Assistant is running 24/7\n");
