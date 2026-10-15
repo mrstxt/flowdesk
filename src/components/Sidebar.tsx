@@ -16,6 +16,7 @@ import {
   Sparkles,
   Globe,
   Bot,
+  GraduationCap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ const groups = [
       { href: "/intizom", label: "Intizom", icon: AlarmClock },
       { href: "/rivojlanish", label: "Videolar", icon: Clapperboard },
       { href: "/kitoblar", label: "Kitoblar", icon: BookOpen },
+      { href: "/oqish", label: "O'qish Tahlili", icon: GraduationCap },
       { href: "/analitika", label: "Analitika", icon: BarChart3 },
     ],
   },

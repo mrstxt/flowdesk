@@ -355,6 +355,61 @@ export const aiModels = pgTable("ai_models", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/* ── O'qish: Universitetlar tahlili ── */
+
+export const universities = pgTable("universities", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  country: varchar("country", { length: 100 }).notNull().default("O'zbekiston"),
+  city: varchar("city", { length: 100 }),
+  major: varchar("major", { length: 255 }).notNull(), // Ta'lim yo'nalishi / Mutaxassislik
+  degree: varchar("degree", { length: 50 }).default("Bakalavr"), // Bakalavr, Magistratura, PhD, Kurs
+  tuitionFee: varchar("tuition_fee", { length: 100 }), // Masalan: "12,000,000 so'm / yil" yoki "$15,000 / year"
+  hasGrant: boolean("has_grant").default(false), // Davlat granti yoki stipendiya bormi
+  grantDetails: text("grant_details"), // Grant shartlari
+  requirements: text("requirements"), // IELTS 6.5, SAT 1200+, DTMI 140+ va h.k.
+  deadline: date("deadline"), // Hujjat topshirish oxirgi muddati
+  admissionStatus: varchar("admission_status", { length: 50 }).notNull().default("rejalashtirilgan"), // rejalashtirilgan, hujjat_topshirildi, qabul_qilindi, rad_etildi
+  ranking: varchar("ranking", { length: 50 }), // QS reyting yoki O'zbekiston reytingi
+  websiteUrl: text("website_url"),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/* ── O'qish: O'rganish rejalari (Roadmap & Ko'nikmalar) ── */
+
+export const studyRoadmaps = pgTable("study_roadmaps", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull().default("Dasturlash"), // Dasturlash, AI / ML, Til o'rganish, Biznes, Matematika, Boshqa
+  priority: varchar("priority", { length: 20 }).default("high"), // high, medium, low
+  status: varchar("status", { length: 50 }).notNull().default("in_progress"), // rejalashtirilgan, in_progress, completed
+  progress: integer("progress").default(0), // 0 to 100 foiz
+  targetDate: date("target_date"),
+  resources: text("resources"), // Kurslar, kitoblar, linklar
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/* ── O'qish: Kunlik 5 ta AI Yangilik ── */
+
+export const aiDailyNews = pgTable("ai_daily_news", {
+  id: serial("id").primaryKey(),
+  newsDate: date("news_date").notNull(), // Sana bo'yicha guruhlash (masalan 2026-10-15)
+  title: varchar("title", { length: 300 }).notNull(),
+  summary: text("summary").notNull(),
+  keyTakeaway: text("key_takeaway"),
+  sourceUrl: text("source_url"),
+  sourceName: varchar("source_name", { length: 100 }),
+  category: varchar("category", { length: 50 }).default("AI & Tech"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
 
 
 

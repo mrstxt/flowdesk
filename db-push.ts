@@ -355,6 +355,57 @@ CREATE TABLE IF NOT EXISTS ai_models (
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+-- 21. universities (universitetlar tahlili)
+CREATE TABLE IF NOT EXISTS universities (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  country VARCHAR(100) NOT NULL DEFAULT 'O''zbekiston',
+  city VARCHAR(100),
+  major VARCHAR(255) NOT NULL,
+  degree VARCHAR(50) DEFAULT 'Bakalavr',
+  tuition_fee VARCHAR(100),
+  has_grant BOOLEAN DEFAULT FALSE,
+  grant_details TEXT,
+  requirements TEXT,
+  deadline DATE,
+  admission_status VARCHAR(50) NOT NULL DEFAULT 'rejalashtirilgan',
+  ranking VARCHAR(50),
+  website_url TEXT,
+  notes TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+-- 22. study_roadmaps (o'rganish rejalari & ko'nikmalar)
+CREATE TABLE IF NOT EXISTS study_roadmaps (
+  id SERIAL PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  category VARCHAR(100) NOT NULL DEFAULT 'Dasturlash',
+  priority VARCHAR(20) DEFAULT 'high',
+  status VARCHAR(50) NOT NULL DEFAULT 'in_progress',
+  progress INTEGER DEFAULT 0,
+  target_date DATE,
+  resources TEXT,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+-- 23. ai_daily_news (kunlik 5 ta AI yangilik)
+CREATE TABLE IF NOT EXISTS ai_daily_news (
+  id SERIAL PRIMARY KEY,
+  news_date DATE NOT NULL,
+  title VARCHAR(300) NOT NULL,
+  summary TEXT NOT NULL,
+  key_takeaway TEXT,
+  source_url TEXT,
+  source_name VARCHAR(100),
+  category VARCHAR(50) DEFAULT 'AI & Tech',
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
 `;
 
 async function main() {
