@@ -612,6 +612,46 @@ async function runWorker() {
         return;
       }
 
+      // A.25) Reja yoki vazifani o'chirish ("...ni ob tashla", "...ni ochir", "...ni olib tashla", "barcha rejalarni ochir")
+      if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil)/i.test(q)) {
+        console.log("🗑️ Rejani o'chirish so'raldi...");
+        const isAll = /(barcha|hamma|barchasini|hammasini)/i.test(q);
+        if (isAll) {
+          await db.delete(tasks).where(eq(tasks.date, todayISO));
+          await db.delete(routines).where(eq(routines.targetDate, todayISO));
+          const rep = "🗑️ Bugungi barcha rejalar o'chirildi!";
+          await client.sendMessage(replyPeer, { message: rep });
+          sendVoiceNote(client, replyPeer, rep).catch(() => {});
+          return;
+        }
+
+        // Qaysi vazifani o'chirish kerakligini aniqlash
+        let targetWord = clean
+          .replace(/(?:o'?chirib\s*tashla|ob\s*tashla|olib\s*tashla|o'?chir|bekor\s*qil|tashla)/gi, "")
+          .replace(/(?:vazifasini|rejasini|vazifani|rejani|ishni)/gi, "")
+          .replace(/(?:bugungi|ertangi|iltimos)/gi, "")
+          .replace(/(?:ni|di)$/gi, "")
+          .trim();
+
+        if (targetWord.length >= 2) {
+          const pattern = `%${targetWord.replace(/['`]/g, "")}%`;
+          const delT = await db.delete(tasks).where(ilike(tasks.title, pattern)).returning({ id: tasks.id });
+          const delR = await db.delete(routines).where(ilike(routines.title, pattern)).returning({ id: routines.id });
+
+          if (delT.length || delR.length) {
+            const rep = `🗑️ <b>"${targetWord}"</b> rejasi muvaffaqiyatli o'chirildi!`;
+            await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+            sendVoiceNote(client, replyPeer, `${targetWord} rejasi o'chirildi.`).catch(() => {});
+            return;
+          } else {
+            const rep = `🤔 Ro'yxatdan "${targetWord}" degan reja topilmadi.`;
+            await client.sendMessage(replyPeer, { message: rep });
+            sendVoiceNote(client, replyPeer, rep).catch(() => {});
+            return;
+          }
+        }
+      }
+
     // A.3) YouTube Video havolasi
     const ytMatch = clean.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
     if (ytMatch) {
