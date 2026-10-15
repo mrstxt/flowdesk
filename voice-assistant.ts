@@ -1843,17 +1843,20 @@ async function runWorker() {
       console.log(`💾 Aniqlangan vazifalar: ${plans.length} ta (${dateLabel}: ${targetDate}). Bazaga saqlanmoqda...`);
       const { savedTasks, savedRoutines } = await saveParsedPlansToDb(plans, targetDate);
 
-      let reportMsg = `✅ <b>Qabul qilindi Sohibjon!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n\n`;
+      let reportMsg = `✅ <b>Qabul qilindi!</b>\n\n${dateLabel} (<b>${targetDate}</b>) uchun saqlandi:\n\n`;
       plans.forEach((p, i) => {
         const timeDisplay = p.startTime && p.endTime
           ? `⏰ <b>${p.startTime} - ${p.endTime}</b>`
           : p.time ? `⏰ <b>${p.time}</b>` : "";
         reportMsg += `${i + 1}. ${timeDisplay ? `${timeDisplay} — ` : ""}${p.title}\n`;
       });
-      reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda o'zim telefon qilib eslatib turaman! 🚀`;
+      reportMsg += `\n📊 ${savedTasks} ta vazifa, ${savedRoutines} ta intizom rejasi kiritildi. Vaqti kelganda eslatib turaman! 🚀`;
 
       await client.sendMessage(replyPeer, { message: reportMsg, parseMode: "html" });
-      void sendVoiceNote(client, replyPeer, `Tushundim Sohibjon! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
+      const wantsVoiceEarly = /(?:golos|ovozli|audio|ovoz bilan|gapir)/i.test(clean);
+      if (wantsVoiceEarly) {
+        void sendVoiceNote(client, replyPeer, `Tushundim! ${savedTasks} ta vazifani ${dateLabel.toLowerCase()} uchun platformaga yozib qo'ydim.`);
+      }
       return;
     }
 
@@ -1890,19 +1893,24 @@ async function runWorker() {
         }
 
         await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
-        void sendVoiceNote(client, replyPeer, agentRes.text);
+
+        // Faqat foydalanuvchi "golos", "ovozli", "audio" yoki "gapir" desa ovozli xabar yuboriladi
+        const wantsVoice = /(?:golos|ovozli|audio|ovoz bilan|gapir|aytib ber)/i.test(clean);
+        if (wantsVoice) {
+          void sendVoiceNote(client, replyPeer, agentRes.text);
+        }
         return;
       }
     } catch (agentErr) {
       console.error("AI Agent fallback xatosi:", agentErr);
     }
 
-    const fallback = `Eshitdim Sohibjon! 😊 Agar bu yangi rejangiz bo'lsa (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), aytib yuborsangiz saqlab qo'yaman. Qo'ng'iroq qilishimni xohlasangiz <i>"Tel qil"</i> deb yozing! 🚀`;
+    const fallback = `Eshitdim! 😊 Agar bu yangi rejangiz bo'lsa (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), aytib yuborsangiz saqlab qo'yaman. Qo'ng'iroq qilishimni xohlasangiz <i>"Tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });
     } catch (handlerErr) {
       console.error("❌ Xabarni qayta ishlashda xatolik:", handlerErr);
       try {
-        await client.sendMessage(entity, { message: "⚠️ Kechirasiz Sohibjon, kichik xatolik bo'ldi. Iltimos, qaytadan yozib yuboring." });
+        await client.sendMessage(entity, { message: "⚠️ Kichik xatolik bo'ldi. Iltimos, qaytadan yozib yuboring." });
       } catch {}
     }
   }, new NewMessage({ incoming: true }));
@@ -1946,11 +1954,11 @@ async function runWorker() {
             if (todayTasks.length > 0) {
               planList = "\n\n📋 <b>Bugungi asosiy rejalaringiz:</b>\n" + todayTasks.slice(0, 4).map((t, idx) => `${idx + 1}. ${escapeHtml(t.title)}`).join("\n");
             }
-            const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, XAYRLI TONG SOHIBJON!</b>\n\nYengillik bilan o'rningizdan turing va bir stakan suv iching 💧.${planList}\n\nKeling, yangi kunni intizom bilan boshlaymiz! 🚀`;
+            const wakeMsg = `☀️ <b>SOAT ${wakeTime} BO'LDI, XAYRLI TONG!</b>\n\nYengillik bilan o'rningizdan turing va bir stakan suv iching 💧.${planList}\n\nKeling, yangi kunni intizom bilan boshlaymiz! 🚀`;
             await client.sendMessage(entity, { message: wakeMsg, parseMode: "html" });
             const voiceBriefing = todayTasks.length > 0
-              ? `Assalomu alaykum Sohibjon! Xayrli tong! Soat ${wakeTime} bo'ldi. Bugungi taqvimingizda ${todayTasks.length} ta vazifa kutmoqda. O'rningizdan turing, yangi kunni g'alaba bilan boshlaymiz!`
-              : `Assalomu alaykum Sohibjon! Xayrli tong! Soat ${wakeTime} bo'ldi. Yangi kun muborak, tetik bo'lib o'rningizdan turing!`;
+              ? `Xayrli tong! Soat ${wakeTime} bo'ldi. Bugungi taqvimingizda ${todayTasks.length} ta vazifa kutmoqda. O'rningizdan turing, yangi kunni g'alaba bilan boshlaymiz!`
+              : `Xayrli tong! Soat ${wakeTime} bo'ldi. Yangi kun muborak, tetik bo'lib o'rningizdan turing!`;
             void sendVoiceNote(client, entity, voiceBriefing);
           }
         }
@@ -1964,7 +1972,7 @@ async function runWorker() {
             lastSleepCallMinute = minutes;
             console.log(`🌙 Ertangi rejalar bo'sh! Qo'ng'iroq qilinmoqda (${timeStr})...`);
             await makeCallWithClient(client, entity, "Ertangi rejalar kiritilmagan");
-            const sleepMsg = `🌙 <b>Ertangi rejalaringizni ayting!</b>\n\nSohibjon, ertangi kun (${tomorrowISO}) uchun hali birorta vazifa kiritilmadi. Iltimos, nimalar qilmoqchi ekanligingizni ovozli xabar orqali menga aytib bering!`;
+            const sleepMsg = `🌙 <b>Ertangi rejalaringizni ayting!</b>\n\nErtangi kun (${tomorrowISO}) uchun hali birorta vazifa kiritilmadi. Nimalar qilmoqchi ekanligingizni yozib yoki aytib yuborsangiz, taqvimga kiritib qo'yaman!`;
             await client.sendMessage(entity, { message: sleepMsg, parseMode: "html" });
             void sendVoiceNote(client, entity, "Sohibjon, ertangi kun uchun rejalaringizni ovozli xabar qilib aytib bering!");
           }
@@ -2065,14 +2073,14 @@ async function runWorker() {
             const deadlineMsg =
               `⏱️ <b>DEADLINE VAQTI YETDI!</b>\n\n` +
               `📌 <b>${escapeHtml(r.title)}</b> (Muddat: <b>${r.endTime}</b>)\n\n` +
-              `Sohibjon, ushbu topshiriqni bitirdingizmi? 🎯\n\n` +
+              `Ushbu topshiriqni bitirdingizmi? 🎯\n\n` +
               `• Agar tugatgan bo'lsangiz: <b>«Bitirdim»</b> deb ayting (men vazifani yopaman).\n` +
               `• Agar yana vaqt kerak bo'lsa: <b>«Yana 30 daqiqa kerak»</b> yoki <b>«Ertaga sur»</b> desangiz, vaqtini surib qo'yaman!`;
             await client.sendMessage(entity, { message: deadlineMsg, parseMode: "html" });
             void sendVoiceNote(
               client,
               entity,
-              `Sohibjon, '${r.title}' vazifangizning muddati yetdi. Ishni bitirdingizmi yoki yana vaqt kerakmi?`
+              `'${r.title}' vazifangizning muddati yetdi. Ishni bitirdingizmi yoki yana vaqt kerakmi?`
             );
           }
         }
