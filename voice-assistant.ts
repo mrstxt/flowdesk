@@ -931,6 +931,7 @@ async function runWorker() {
 
   let lastWakeCallMinute = -1;
   let lastSleepCallMinute = -1;
+  const calledRoutinesToday = new Set<string>();
 
   setInterval(async () => {
     try {
@@ -980,6 +981,31 @@ async function runWorker() {
             void sendVoiceNote(client, entity, "Sohibjon, ertangi kun uchun rejalaringizni ovozli xabar qilib aytib bering!");
           }
         }
+      }
+
+      // C) VAQTLI REJALAR BO'YICHA QO'NG'IROQ QILISH (soat kelganda avtomatik tel qilish)
+      const activeRoutines = await db
+        .select()
+        .from(routines)
+        .where(or(isNull(routines.targetDate), eq(routines.targetDate, todayISO)));
+
+      for (const r of activeRoutines) {
+        if (r.time === timeStr) {
+          const callKey = `${todayISO}_${r.id}_${r.time}`;
+          if (!calledRoutinesToday.has(callKey)) {
+            calledRoutinesToday.add(callKey);
+            console.log(`⏰ Reja vaqti bo'ldi (${r.time}): "${r.title}". Foydalanuvchiga qo'ng'iroq qilinmoqda...`);
+            await makeCallWithClient(client, entity, `Reja vaqti: ${r.time} — ${r.title}`);
+            const msg = `⏰ <b>SOAT ${r.time} BO'LDI!</b>\n\n📌 <b>${escapeHtml(r.title)}</b>\n\nSohibjon, rejalashtirilgan ish vaqti keldi. Boshlaymizmi? 🚀`;
+            await client.sendMessage(entity, { message: msg, parseMode: "html" });
+            void sendVoiceNote(client, entity, `Sohibjon, soat ${r.time} bo'ldi! ${r.title} vaqti keldi, ishni boshlaymiz!`);
+          }
+        }
+      }
+
+      // Har kuni yarim kechada tozalash
+      if (minutes === 0) {
+        calledRoutinesToday.clear();
       }
     } catch (err) {
       console.error("Interval loop error:", err);
