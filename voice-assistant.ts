@@ -612,24 +612,26 @@ async function runWorker() {
         return;
       }
 
-      // A.25) Reja yoki vazifani o'chirish ("...ni ob tashla", "...ni ochir", "...ni olib tashla", "barcha rejalarni ochir")
-      if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil)/i.test(q)) {
+      // A.25) Reja yoki vazifani o'chirish ("ob tashla", "ochir", "bularni ob tashla", "schoolga borishni ob tashla")
+      if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla)/i.test(q)) {
         console.log("🗑️ Rejani o'chirish so'raldi...");
-        const isAll = /(barcha|hamma|barchasini|hammasini)/i.test(q);
+        const isAll = /(barcha|hamma|barchasini|hammasini|bularni|bular|hammasi|tozala|kerakmas|kerak\s*emas)/i.test(q) ||
+                      /^(\s*o'?chir\s*|\s*ob\s*tashla\s*|\s*olib\s*tashla\s*|\s*o'?chirib\s*tashla\s*)$/i.test(clean);
+
         if (isAll) {
           await db.delete(tasks).where(eq(tasks.date, todayISO));
           await db.delete(routines).where(eq(routines.targetDate, todayISO));
-          const rep = "🗑️ Bugungi barcha rejalar o'chirildi!";
+          const rep = "🗑️ Tushundim Sohibjon! Bugungi barcha rejalarni o'chirib tashladim, ro'yxatingiz top-toza bo'ldi. Yangi reja tuzamizmi? 😊";
           await client.sendMessage(replyPeer, { message: rep });
-          sendVoiceNote(client, replyPeer, rep).catch(() => {});
+          sendVoiceNote(client, replyPeer, "Tushundim Sohibjon! Bugungi barcha rejalarni o'chirib tashladim.").catch(() => {});
           return;
         }
 
-        // Qaysi vazifani o'chirish kerakligini aniqlash
+        // Qaysi aniq vazifani o'chirish kerakligini aniqlash
         let targetWord = clean
           .replace(/(?:o'?chirib\s*tashla|ob\s*tashla|olib\s*tashla|o'?chir|bekor\s*qil|tashla)/gi, "")
           .replace(/(?:vazifasini|rejasini|vazifani|rejani|ishni)/gi, "")
-          .replace(/(?:bugungi|ertangi|iltimos)/gi, "")
+          .replace(/(?:bugungi|ertangi|iltimos|menga|manga|shuni)/gi, "")
           .replace(/(?:ni|di)$/gi, "")
           .trim();
 
@@ -639,16 +641,24 @@ async function runWorker() {
           const delR = await db.delete(routines).where(ilike(routines.title, pattern)).returning({ id: routines.id });
 
           if (delT.length || delR.length) {
-            const rep = `🗑️ <b>"${targetWord}"</b> rejasi muvaffaqiyatli o'chirildi!`;
+            const rep = `🗑️ Tushundim Sohibjon! <b>"${targetWord}"</b> rejangizni ro'yxatdan o'chirib tashladim.`;
             await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
-            sendVoiceNote(client, replyPeer, `${targetWord} rejasi o'chirildi.`).catch(() => {});
+            sendVoiceNote(client, replyPeer, `${targetWord} rejasini o'chirib tashladim.`).catch(() => {});
             return;
           } else {
-            const rep = `🤔 Ro'yxatdan "${targetWord}" degan reja topilmadi.`;
+            const rep = `🤔 Sohibjon, ro'yxatdan "${targetWord}" degan reja topilmadi. "Rejalar qanday" deb yozsangiz hozirgi rejalarni ko'rib olasiz!`;
             await client.sendMessage(replyPeer, { message: rep });
-            sendVoiceNote(client, replyPeer, rep).catch(() => {});
+            sendVoiceNote(client, replyPeer, `Ro'yxatdan ${targetWord} degan reja topilmadi Sohibjon.`).catch(() => {});
             return;
           }
+        } else {
+          // Aniq biror so'z aytilmagan bo'lsa -> hammasini tozalash
+          await db.delete(tasks).where(eq(tasks.date, todayISO));
+          await db.delete(routines).where(eq(routines.targetDate, todayISO));
+          const rep = "🗑️ Tushundim Sohibjon! Bugungi rejalarni tozalab tashladim. Qanday yangi rejalaringiz bor?";
+          await client.sendMessage(replyPeer, { message: rep });
+          sendVoiceNote(client, replyPeer, "Bugungi rejalarni tozalab tashladim Sohibjon.").catch(() => {});
+          return;
         }
       }
 
