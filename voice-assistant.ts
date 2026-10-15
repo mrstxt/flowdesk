@@ -45,8 +45,27 @@ import {
   type BrainResult,
 } from "./src/lib/assistantBrain";
 import * as fs from "fs";
+import * as path from "path";
 import * as crypto from "crypto";
 import * as http from "http";
+
+const DESIGNS_DIR = path.join(process.cwd(), "public", "uploads", "designs");
+try {
+  if (!fs.existsSync(DESIGNS_DIR)) {
+    fs.mkdirSync(DESIGNS_DIR, { recursive: true });
+  }
+} catch {}
+
+type PendingDesignItem = {
+  id: string;
+  fileName: string;
+  webPath: string;
+  title: string;
+  amount: number;
+  date: string;
+};
+
+const pendingDesigns = new Map<string, PendingDesignItem[]>();
 
 async function fetchYouTubeTitle(url: string): Promise<string> {
   try {
@@ -232,6 +251,89 @@ function parseIncomeInput(text: string): { amount: number; title: string } | nul
   }
 
   return { amount: num, title: desc };
+}
+
+function parseDesignCaption(caption: string, defaultIndex: number): { title: string; amount: number } {
+  let title = "Dizayn #" + defaultIndex;
+  let amount = 0;
+
+  if (!caption) return { title, amount };
+
+  const amtRegex = /\b(\d+(?:[\s.,]\d{3})*(?:[.,]\d+)?|\b\d+)\s*(ming(?:ga|a)?|mln(?:ga)?|million(?:ga)?|\bk\b)?\s*(?:so'?m|sum)?/i;
+  const match = caption.match(amtRegex);
+  if (match) {
+    let rawNum = match[1].replace(/[\s_]/g, "");
+    if (/\d+[.,]\d{3}$/.test(rawNum)) {
+      rawNum = rawNum.replace(/[.,]/g, "");
+    } else {
+      rawNum = rawNum.replace(",", ".");
+    }
+    let num = parseFloat(rawNum);
+    if (!isNaN(num) && num > 0) {
+      const unit = (match[2] || "").toLowerCase();
+      if (unit.startsWith("ming") || unit === "k") num *= 1000;
+      else if (unit.startsWith("mln") || unit.startsWith("million")) num *= 1000000;
+      if (num >= 1000 || /so'?m/i.test(match[0]) || unit) {
+        amount = num;
+      }
+    }
+  }
+
+  let cleanTitle = caption;
+  if (match) cleanTitle = cleanTitle.replace(match[0], "");
+  cleanTitle = cleanTitle
+    .replace(/\b(dizayni|dizayn|narxi|narx|summa|summasi|so'?m|sum|ming|uchun)\b/gi, "")
+    .replace(/[:;!?"'()[\]-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleanTitle.length >= 2) {
+    title = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
+  }
+
+  return { title, amount };
+}
+
+function parseSettlementCommand(text: string): { isSettlement: boolean; clientName: string } | null {
+  const q = text.toLowerCase().trim();
+
+  const isSettlement =
+    /(hisob\s*kitob|hisob-kitob)/i.test(q) ||
+    (/(saqla|saqlagin)/i.test(q) && /(umumiy|narx|hisoblab|yozib\s*qo'?y|yozvor|yoz)/i.test(q)) ||
+    (/(umumiy\s*narx.*hisoblab|hisoblab.*yoz)/i.test(q));
+
+  if (!isSettlement) return null;
+
+  let clientName: string | null = null;
+
+  // 1) "Akmal bilan hisob kitob"
+  const withMatch = text.match(/([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)\s*bilan\s*hisob/i);
+  // 2) "Akmalga yozib qo'y" / "Alisher akaga hisob kitob"
+  const toMatch = text.match(/\b([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)(?:ga|ka|uchun)\s*(?:hisob|yozib|yoz|saqla|kirit|qilib)/i);
+  // 3) "mijoz: Akmal", "ism: Akmal", "hisoblab Akmalga"
+  const prefixMatch = text.match(/(?:hisoblab|mijoz|ism|klient)\s+([A-ZА-ЯЁa-zа-яё'`]+(?:\s+[a-zа-яё'`]+)?)/i);
+
+  if (withMatch) {
+    clientName = withMatch[1];
+  } else if (toMatch) {
+    clientName = toMatch[1];
+  } else if (prefixMatch) {
+    clientName = prefixMatch[1].replace(/(?:ga|ka|uchun)$/i, "");
+  }
+
+  if (clientName) {
+    clientName = clientName
+      .replace(/\b(shu|odam|odamga|rasmdi|rasmlarni|narxini|umumiy|hisoblab|va|qilib)\b/gi, "")
+      .trim();
+    if (clientName) {
+      clientName = clientName
+        .split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+    }
+  }
+
+  return { isSettlement: true, clientName: clientName || "Mijoz" };
 }
 
 function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
@@ -667,6 +769,54 @@ async function runWorker() {
       const clean = receivedText.trim();
       const replyPeer = entity;
 
+      // Agar rasm (foto) bo'lsa
+      const isPhoto = Boolean(
+        msg.photo ||
+        (msg.media && (msg.media.className === "MessageMediaPhoto" || "photo" in msg.media))
+      );
+
+      if (isPhoto) {
+        console.log("📸 Foydalanuvchidan dizayn rasmi keldi...");
+        try {
+          const mediaBuffer = await client.downloadMedia(msg);
+          if (mediaBuffer && Buffer.isBuffer(mediaBuffer)) {
+            const fileName = `design_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`;
+            const fullPath = path.join(DESIGNS_DIR, fileName);
+            fs.writeFileSync(fullPath, mediaBuffer);
+
+            const userKey = String(target);
+            const currentList = pendingDesigns.get(userKey) || [];
+            const { title, amount } = parseDesignCaption(receivedText, currentList.length + 1);
+
+            currentList.push({
+              id: String(Date.now()),
+              fileName,
+              webPath: `/uploads/designs/${fileName}`,
+              title,
+              amount,
+              date: getTashkentTimeString().todayISO,
+            });
+            pendingDesigns.set(userKey, currentList);
+
+            const totalSoFar = currentList.reduce((s, it) => s + it.amount, 0);
+            const count = currentList.length;
+
+            const rep =
+              `🖼️ <b>Dizayn rasmi qabul qilindi!</b> (#${count})\n\n` +
+              `📌 <b>Nomi:</b> ${title}\n` +
+              `💰 <b>Narxi:</b> ${amount > 0 ? fmt(amount) : "Hali belgilanmadi (matn bilan yozishingiz mumkin)"}\n` +
+              (totalSoFar > 0 ? `📊 <b>Hozirgacha jami:</b> <b>${fmt(totalSoFar)}</b>\n\n` : "\n") +
+              `<i>Yana rasm tashlashingiz mumkin. Barchasini yakunlab saqlash uchun:\n` +
+              `«Shu rasmlarni saqla va [Mijoz ismi]ga yozib qo'y» deb yozing! 🚀</i>`;
+
+            await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+            return;
+          }
+        } catch (photoErr) {
+          console.error("Rasm yuklab olishda xatolik:", photoErr);
+        }
+      }
+
       if (!clean) {
         if (isVoice) {
           const replyText = "🎙️ Ovozli xabaringiz qabul qilindi, lekin ovozni aniqlab bo'lmadi. Iltimos, rejalaringizni aniqroq ayting yoki matn qilib yozing!";
@@ -688,6 +838,122 @@ async function runWorker() {
       } catch {}
 
       const q = clean.toLowerCase();
+
+      // A.0) Hisob-kitob qilish va rasmlarni saqlash ("Shu rasmni saqla va umumiy narxini hisoblab Akmalga yozib qo'y")
+      const settlement = parseSettlementCommand(clean);
+      if (settlement) {
+        console.log(`💼 Hisob-kitob buyrug'i qabul qilindi: Mijoz "${settlement.clientName}"`);
+        const userKey = String(target);
+        const items = pendingDesigns.get(userKey) || [];
+
+        let totalAmount = items.reduce((s, it) => s + it.amount, 0);
+        if (totalAmount === 0) {
+          const { amount: extraAmt } = parseDesignCaption(clean, 0);
+          if (extraAmt > 0) totalAmount = extraAmt;
+        }
+
+        const descLines: string[] = [
+          `📋 Hisob-kitob tafsilotlari:`,
+          `👤 Mijoz: ${settlement.clientName}`,
+          `📅 Sana: ${todayISO}`,
+        ];
+
+        if (items.length > 0) {
+          descLines.push("");
+          descLines.push("🖼️ Dizaynlar va narxlar:");
+          items.forEach((it, i) => {
+            descLines.push(`${i + 1}. ${it.title} — ${it.amount > 0 ? fmt(it.amount) : "Kelishilgan"}`);
+            if (it.webPath) descLines.push(it.webPath);
+          });
+        } else {
+          descLines.push("");
+          descLines.push(`Izoh: ${clean}`);
+        }
+
+        descLines.push("");
+        descLines.push(`💰 Jami summa: ${fmt(totalAmount)}`);
+        descLines.push(`📌 Holat: Hisob-kitob (to'lov kutilmoqda)`);
+
+        await db.insert(orders).values({
+          title: items.length > 0 ? `Dizayn hisob-kitob (${items.length} ta)` : `Dizayn hisob-kitob`,
+          clientName: settlement.clientName,
+          amount: String(totalAmount),
+          stage: "hisob_kitob",
+          paymentType: "cash",
+          description: descLines.join("\n"),
+        });
+
+        pendingDesigns.delete(userKey);
+
+        let rep =
+          `💼 <b>Hisob-kitob muvaffaqiyatli saqlandi!</b>\n\n` +
+          `👤 <b>Mijoz:</b> <b>${settlement.clientName}</b>\n`;
+
+        if (items.length > 0) {
+          rep += `🖼️ <b>Saqlangan dizaynlar:</b> ${items.length} ta rasm\n\n` +
+                 `📋 <b>Tafsilotlar:</b>\n` +
+                 items.map((it, i) => `${i + 1}. ${it.title} — <b>${it.amount > 0 ? fmt(it.amount) : "Belgilanmagan"}</b>`).join("\n") +
+                 `\n\n`;
+        }
+
+        rep +=
+          `💰 <b>Umumiy hisob-kitob summasi:</b> <b>${fmt(totalAmount)}</b>\n` +
+          `📂 <b>Bo'lim:</b> Buyurtmalar taxtasida yangi <b>«Hisob-kitob»</b> bo'limiga kiritildi!\n\n` +
+          `<i>Mijoz to'lov qilganda kartochkani "Tasdiqlandi"ga o'tkazsangiz, tushum avtomatik Asosiy kartangiz balansiga yoziladi! 🚀</i>`;
+
+        await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+        return;
+      }
+
+      // Agar oldingi rasmga narx kiritilayotgan bo'lsa
+      const userKey = String(target);
+      const existingPending = pendingDesigns.get(userKey) || [];
+      if (existingPending.length > 0) {
+        const lastItem = existingPending[existingPending.length - 1];
+        if (lastItem && lastItem.amount === 0) {
+          const { title, amount } = parseDesignCaption(clean, existingPending.length);
+          if (amount > 0) {
+            lastItem.amount = amount;
+            if (title && !title.startsWith("Dizayn #")) lastItem.title = title;
+            const totalSoFar = existingPending.reduce((s, it) => s + it.amount, 0);
+
+            const rep =
+              `✅ <b>${lastItem.title}</b> uchun narx belgilandi: <b>${fmt(amount)}</b>\n\n` +
+              `📊 <b>Hozirgacha jami:</b> <b>${fmt(totalSoFar)}</b>\n\n` +
+              `<i>Yana rasm yuborishingiz yoki: «Shu rasmlarni saqla va [Mijoz]ga yozib qo'y» deb hisob-kitobni yakunlashingiz mumkin! 🚀</i>`;
+
+            await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+            return;
+          }
+        }
+      }
+
+      // A.05) Kutilayotgan hisob-kitoblar so'rovi ("hisob kitoblar qanday?", "qanday hisob kitob bor?")
+      if (
+        /(qanday|nima|kimdan|kimlar|ro'?yxat|bormi|qani)/i.test(q) &&
+        /(hisob\s*kitob|hisob-kitob|qarzdor|olishim kerak|to'?lovlar)/i.test(q)
+      ) {
+        const pendingOrders = await db
+          .select()
+          .from(orders)
+          .where(and(eq(orders.stage, "hisob_kitob"), eq(orders.archived, false)));
+
+        if (pendingOrders.length === 0) {
+          await client.sendMessage(replyPeer, {
+            message: "💼 Hozircha kutilayotgan hisob-kitoblar yo'q, barcha mijozlar bilan hisob-kitob qilingan! 👍",
+          });
+          return;
+        }
+        let total = 0;
+        const lines = pendingOrders.map((o, idx) => {
+          const amt = Number(o.amount) || 0;
+          total += amt;
+          return `${idx + 1}. 👤 <b>${o.clientName || "Mijoz"}</b> — <b>${fmt(amt)}</b> <i>(${o.title})</i>`;
+        });
+        const rep = `💼 <b>Kutilayotgan hisob-kitoblar (${pendingOrders.length} ta):</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami olinishi kerak:</b> <b>${fmt(total)}</b>`;
+        await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+        return;
+      }
 
       // A) Qo'ng'iroq qilish buyrug'i ("tel qil", "telefon qil", "qo'ng'iroq qil", "manga tel qil")
       if (/(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil|chaqir|manga\s*tel|menga\s*tel)/i.test(q)) {

@@ -6,7 +6,7 @@ import { cancelOrderConfirmation, confirmOrder } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
-const ORDER_STAGES = new Set(["new", "in_progress", "review", "confirmed"]);
+const ORDER_STAGES = new Set(["new", "hisob_kitob", "in_progress", "review", "confirmed"]);
 
 export async function GET() {
   const rows = await db

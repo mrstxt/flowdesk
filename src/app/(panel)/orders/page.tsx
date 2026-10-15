@@ -34,6 +34,7 @@ type Order = {
 };
 const STAGES = [
   { id: "new", label: "Yangi", color: "bg-[#8e8e93]" },
+  { id: "hisob_kitob", label: "Hisob-kitob", color: "bg-[#bf5af2]" },
   { id: "in_progress", label: "Jarayonda", color: "bg-[#0a84ff]" },
   { id: "review", label: "Tekshiruvda", color: "bg-[#ff9f0a]" },
   { id: "confirmed", label: "Tasdiqlandi", color: "bg-[#34c759]" },
@@ -230,7 +231,7 @@ export default function OrdersPage() {
         collisionDetection={closestCorners}
         onDragEnd={onDragEnd}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {STAGES.map((stage) => {
             const stageOrders = visibleOrders.filter(
               (o) => o.stage === stage.id
@@ -441,9 +442,31 @@ function OrderCard({
             Mijoz: {order.clientName}
           </div>
         )}
+        {(() => {
+          if (!order.description) return null;
+          const imgMatches = order.description.match(/\/uploads\/designs\/[^\s\)\"\']+/g);
+          if (!imgMatches || imgMatches.length === 0) return null;
+          return (
+            <div className="flex gap-1.5 overflow-x-auto py-1 mb-2">
+              {imgMatches.slice(0, 4).map((src, i) => (
+                <img
+                  key={i}
+                  src={src}
+                  alt="Dizayn"
+                  className="w-12 h-12 object-cover rounded-lg border border-slate-200 dark:border-slate-700 flex-shrink-0"
+                />
+              ))}
+              {imgMatches.length > 4 && (
+                <div className="w-12 h-12 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs text-slate-500 flex-shrink-0">
+                  +{imgMatches.length - 4}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {order.description && (
-          <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 mb-2">
-            {order.description}
+          <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-3 mb-2 whitespace-pre-line">
+            {order.description.replace(/\/uploads\/designs\/[^\s\)\"\']+/g, "").trim()}
           </p>
         )}
         <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700">
