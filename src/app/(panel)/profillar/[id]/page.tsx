@@ -307,12 +307,55 @@ export default function ProfileDetailPage() {
     loadData();
   }, [profileId]);
 
+  // Compress image if larger than 2MB for fast upload
+  async function compressImageIfNeeded(file: File): Promise<File> {
+    if (!file.type.startsWith("image/") || file.size < 2 * 1024 * 1024) {
+      return file;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const maxDim = 2000;
+      let { width, height } = bitmap;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx?.drawImage(bitmap, 0, 0, width, height);
+
+      return new Promise<File>((resolve) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(new File([blob], file.name, { type: "image/jpeg" }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/jpeg",
+          0.85
+        );
+      });
+    } catch {
+      return file;
+    }
+  }
+
   // Upload single file to server
   async function uploadFileBlob(file: File): Promise<string | null> {
     try {
       setUploading(true);
+      const readyFile = await compressImageIfNeeded(file);
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", readyFile);
       const res = await fetch("/api/upload", {
         method: "POST",
         body: fd,
@@ -320,10 +363,14 @@ export default function ProfileDetailPage() {
       if (res.ok) {
         const data = await res.json();
         return data.url;
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        alert(errJson.error || "Faylni yuklashda server xatolik berdi");
+        return null;
       }
-      return null;
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      alert("Yuklashda tarmoq xatosi: " + (err?.message || "Serverga ulanib bo'lmadi"));
       return null;
     } finally {
       setUploading(false);
@@ -506,6 +553,8 @@ export default function ProfileDetailPage() {
     });
   }, [contentList, contentStageFilter, contentTypeFilter]);
 
+  const [modalTitleValue, setModalTitleValue] = useState("");
+
   // File Upload Handler (input change)
   async function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -513,6 +562,9 @@ export default function ProfileDetailPage() {
     const url = await uploadFileBlob(file);
     if (url) {
       setUploadedUrl(url);
+      if (!modalTitleValue) {
+        setModalTitleValue(file.name.replace(/\.[^/.]+$/, ""));
+      }
     }
   }
 
@@ -1214,15 +1266,37 @@ export default function ProfileDetailPage() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              <label className="cursor-pointer px-4 py-2 rounded-full bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all">
+                <Plus className="w-4 h-4" /> Rasm tanlash (Tezkor)
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (files.length === 0) return;
+                    showToast(`⏳ ${files.length} ta rasm yuklanmoqda...`);
+                    for (const f of files) {
+                      const url = await uploadFileBlob(f);
+                      if (url) {
+                        await saveAssetDirectly(url, "face", f.name.replace(/\.[^/.]+$/, ""));
+                      }
+                    }
+                  }}
+                />
+              </label>
+
               <button
                 onClick={() => {
                   setUploadAssetType("face");
                   setUploadedUrl("");
                   setUploadAssetModal(true);
                 }}
-                className="px-4 py-2 rounded-full bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all"
+                className="px-3.5 py-2 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                title="Nom va izoh bilan yuklash"
               >
-                <Plus className="w-4 h-4" /> Yangi Feys Yuklash
+                Qo'lda nomlash
               </button>
             </div>
           </div>
@@ -1246,16 +1320,26 @@ export default function ProfileDetailPage() {
                 <p className="text-xs text-slate-500 mb-3">
                   Hali feys rasmlari yuklanmagan. Istalgan rasmni sahifaga <b>Ctrl + V</b> qiling yoki fayl tanlang!
                 </p>
-                <button
-                  onClick={() => {
-                    setUploadAssetType("face");
-                    setUploadedUrl("");
-                    setUploadAssetModal(true);
-                  }}
-                  className="px-4 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-full hover:bg-purple-700 shadow-sm"
-                >
-                  + Rasm yuklash
-                </button>
+                <label className="cursor-pointer px-4 py-2 bg-purple-600 text-white text-xs font-bold rounded-full hover:bg-purple-700 shadow-sm inline-flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /> + Rasm tanlash
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      if (files.length === 0) return;
+                      showToast(`⏳ ${files.length} ta rasm yuklanmoqda...`);
+                      for (const f of files) {
+                        const url = await uploadFileBlob(f);
+                        if (url) {
+                          await saveAssetDirectly(url, "face", f.name.replace(/\.[^/.]+$/, ""));
+                        }
+                      }
+                    }}
+                  />
+                </label>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -1434,16 +1518,40 @@ export default function ProfileDetailPage() {
               </div>
             </div>
 
-            <button
-              onClick={() => {
-                setUploadAssetType("monthly");
-                setUploadedUrl("");
-                setUploadAssetModal(true);
-              }}
-              className="px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-all"
-            >
-              <Upload className="w-4 h-4" /> {formatMonthLabel(selectedMonth)} ga kontent yuklash
-            </button>
+            <div className="flex items-center gap-2">
+              <label className="cursor-pointer px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-all">
+                <Upload className="w-4 h-4" /> {formatMonthLabel(selectedMonth)} ga yuklash (Tezkor)
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (files.length === 0) return;
+                    showToast(`⏳ ${files.length} ta rasm yuklanmoqda...`);
+                    for (const f of files) {
+                      const url = await uploadFileBlob(f);
+                      if (url) {
+                        await saveAssetDirectly(url, "monthly", f.name.replace(/\.[^/.]+$/, ""));
+                      }
+                    }
+                  }}
+                />
+              </label>
+
+              <button
+                onClick={() => {
+                  setUploadAssetType("monthly");
+                  setUploadedUrl("");
+                  setUploadAssetModal(true);
+                }}
+                className="px-3.5 py-2.5 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                title="Nom va izoh bilan yuklash"
+              >
+                Qo'lda nomlash
+              </button>
+            </div>
           </div>
 
           {monthlyAssets.length === 0 ? (
@@ -1457,16 +1565,26 @@ export default function ProfileDetailPage() {
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
                 Ushbu oy uchun tayyorlangan bannerlar, dizaynlar va videolarni yuklang yoki to'g'ridan-to'g'ri <b>Ctrl + V</b> qiling!
               </p>
-              <button
-                onClick={() => {
-                  setUploadAssetType("monthly");
-                  setUploadedUrl("");
-                  setUploadAssetModal(true);
-                }}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full shadow-sm"
-              >
-                + Fayl yuklash
-              </button>
+              <label className="cursor-pointer px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full shadow-sm inline-flex items-center gap-2">
+                <Upload className="w-4 h-4" /> + Fayl tanlash
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (files.length === 0) return;
+                    showToast(`⏳ ${files.length} ta rasm yuklanmoqda...`);
+                    for (const f of files) {
+                      const url = await uploadFileBlob(f);
+                      if (url) {
+                        await saveAssetDirectly(url, "monthly", f.name.replace(/\.[^/.]+$/, ""));
+                      }
+                    }
+                  }}
+                />
+              </label>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
@@ -1603,6 +1721,8 @@ export default function ProfileDetailPage() {
             <input
               name="title"
               required
+              value={modalTitleValue}
+              onChange={(e) => setModalTitleValue(e.target.value)}
               placeholder={
                 uploadAssetType === "face"
                   ? "Masalan: Feys - Tabassum, yoki Studio Oq fon"

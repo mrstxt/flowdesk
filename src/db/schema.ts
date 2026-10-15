@@ -330,4 +330,15 @@ export const profileAssets = pgTable("profile_assets", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/* ── Yuklangan fayllar (PostgreSQL da doimiy saqlash — ephemeral diskdan himoya) ── */
+
+export const uploadedFiles = pgTable("uploaded_files", {
+  id: serial("id").primaryKey(),
+  fileName: varchar("file_name", { length: 255 }).notNull().unique(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull().default("image/jpeg"),
+  data: text("data").notNull(), // Base64 kodlangan rasm ma'lumoti
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
 

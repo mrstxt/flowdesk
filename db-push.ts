@@ -332,6 +332,15 @@ ALTER TABLE content_items ADD COLUMN IF NOT EXISTS body TEXT;
 ALTER TABLE content_items ADD COLUMN IF NOT EXISTS cta TEXT;
 ALTER TABLE content_items ADD COLUMN IF NOT EXISTS frames TEXT;
 ALTER TABLE content_items ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE;
+
+-- 19. uploaded_files (PostgreSQL da rasmlarni doimiy saqlash)
+CREATE TABLE IF NOT EXISTS uploaded_files (
+  id SERIAL PRIMARY KEY,
+  file_name VARCHAR(255) NOT NULL UNIQUE,
+  mime_type VARCHAR(100) NOT NULL DEFAULT 'image/jpeg',
+  data TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
 `;
 
 async function main() {
