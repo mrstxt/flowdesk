@@ -22,6 +22,7 @@ import {
   saveParsedPlansToDb,
   detectPlanDate,
 } from "./src/lib/planAiParser";
+import { processAgentMessage } from "./src/lib/aiAgent";
 import { db } from "./src/db";
 import {
   cards,
@@ -1025,6 +1026,45 @@ async function runWorker() {
 
       const q = clean.toLowerCase();
 
+      // A.-2) YouTube video / podkast xulosalash & PDF kitobcha yaratish
+      if (/https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/i.test(clean)) {
+        console.log("📹 YouTube video aniqlandi, AI Agentga yuborilmoqda...");
+        try {
+          const agentRes = await processAgentMessage(clean, {
+            senderId,
+            username: targetEntity?.username,
+          });
+
+          let fullReply = agentRes.text;
+          if (agentRes.pdfUrl && !fullReply.includes(agentRes.pdfUrl)) {
+            const domain = process.env.PUBLIC_APP_URL || "https://flowdesk-production-f4a3.up.railway.app";
+            const fullPdfLink = agentRes.pdfUrl.startsWith("http")
+              ? agentRes.pdfUrl
+              : `${domain}${agentRes.pdfUrl}`;
+            fullReply += `\n\n📄 <b>PDF Xulosa Kitobchasi:</b>\n<a href="${fullPdfLink}">${fullPdfLink}</a>`;
+          }
+
+          if (agentRes.pdfUrl) {
+            const localPdfPath = path.join(process.cwd(), "public", agentRes.pdfUrl.replace(/^\//, ""));
+            if (fs.existsSync(localPdfPath)) {
+              try {
+                await client.sendFile(replyPeer, {
+                  file: localPdfPath,
+                  caption: `📚 PDF Xulosa Kitobchasi (FlowDesk)`,
+                });
+              } catch (sendErr) {
+                console.warn("PDF yuborishda ogohlantirish:", sendErr);
+              }
+            }
+          }
+
+          await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
+          return;
+        } catch (ytErr) {
+          console.error("YouTube AI xatolik:", ytErr);
+        }
+      }
+
       // A.-1) To'lov qabul qilish / tasdiqlash ("Akmal to'lov qildi", "to'lov olindi")
       const payment = parsePaymentCommand(clean);
       if (payment) {
@@ -1791,7 +1831,45 @@ async function runWorker() {
       return;
     }
 
-    // Noma'lum xabar bo'lsa
+    // Noma'lum yoki erkin so'rovlar -> Gemini Function Calling AI Agentiga uzatamiz
+    try {
+      console.log("🤖 Erkin xabar AI Agentga uzatilmoqda:", clean);
+      const agentRes = await processAgentMessage(clean, {
+        senderId,
+        username: targetEntity?.username,
+      });
+
+      if (agentRes && agentRes.text) {
+        let fullReply = agentRes.text;
+        if (agentRes.pdfUrl && !fullReply.includes(agentRes.pdfUrl)) {
+          const domain = process.env.PUBLIC_APP_URL || "https://flowdesk-production-f4a3.up.railway.app";
+          const fullPdfLink = agentRes.pdfUrl.startsWith("http")
+            ? agentRes.pdfUrl
+            : `${domain}${agentRes.pdfUrl}`;
+          fullReply += `\n\n📄 <b>PDF Xulosa Kitobchasi:</b>\n<a href="${fullPdfLink}">${fullPdfLink}</a>`;
+        }
+
+        if (agentRes.pdfUrl) {
+          const localPdfPath = path.join(process.cwd(), "public", agentRes.pdfUrl.replace(/^\//, ""));
+          if (fs.existsSync(localPdfPath)) {
+            try {
+              await client.sendFile(replyPeer, {
+                file: localPdfPath,
+                caption: `📚 PDF Xulosa Kitobchasi (FlowDesk)`,
+              });
+            } catch (sendErr) {
+              console.warn("PDF yuborishda ogohlantirish:", sendErr);
+            }
+          }
+        }
+
+        await client.sendMessage(replyPeer, { message: fullReply, parseMode: "html" });
+        return;
+      }
+    } catch (agentErr) {
+      console.error("AI Agent fallback xatosi:", agentErr);
+    }
+
     const fallback = `Eshitdim Sohibjon! 😊 Agar bu yangi rejangiz bo'lsa (masalan: <i>"Bugun 18:00 da kitob o'qish"</i>), aytib yuborsangiz saqlab qo'yaman. Qo'ng'iroq qilishimni xohlasangiz <i>"Tel qil"</i> deb yozing! 🚀`;
     await client.sendMessage(replyPeer, { message: fallback, parseMode: "html" });
     } catch (handlerErr) {

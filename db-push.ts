@@ -333,6 +333,14 @@ ALTER TABLE content_items ADD COLUMN IF NOT EXISTS cta TEXT;
 ALTER TABLE content_items ADD COLUMN IF NOT EXISTS frames TEXT;
 ALTER TABLE content_items ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE;
 
+-- Migrations for books & videos (summary)
+ALTER TABLE books ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE books ALTER COLUMN status SET DEFAULT 'rejalashtirilgan';
+ALTER TABLE books ALTER COLUMN author SET DEFAULT 'AI Podkast Xulosasi';
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE videos ALTER COLUMN category SET DEFAULT 'rivojlanish';
+
+
 -- 19. uploaded_files (PostgreSQL da rasmlarni doimiy saqlash)
 CREATE TABLE IF NOT EXISTS uploaded_files (
   id SERIAL PRIMARY KEY,

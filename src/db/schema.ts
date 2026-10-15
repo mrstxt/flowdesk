@@ -155,10 +155,11 @@ export const routines = pgTable("routines", {
 export const books = pgTable("books", {
   id: serial("id").primaryKey(),
   title: varchar("title", { length: 255 }).notNull(),
-  author: varchar("author", { length: 255 }),
+  author: varchar("author", { length: 255 }).default("AI Podkast Xulosasi"),
   totalPages: integer("total_pages").notNull().default(0),
   currentPage: integer("current_page").notNull().default(0),
-  status: varchar("status", { length: 20 }).notNull().default("plan"),
+  status: varchar("status", { length: 50 }).notNull().default("rejalashtirilgan"),
+  summary: text("summary"),
   // Ixtiyoriy PDF varianti havolasi
   pdfUrl: text("pdf_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -178,8 +179,9 @@ export const videos = pgTable("videos", {
   id: serial("id").primaryKey(),
   title: varchar("title", { length: 255 }).notNull(),
   url: text("url").notNull(),
-  videoId: varchar("video_id", { length: 32 }).notNull(),
-  category: varchar("category", { length: 50 }).default("other"),
+  videoId: varchar("video_id", { length: 64 }).default(""),
+  category: varchar("category", { length: 50 }).default("rivojlanish"),
+  summary: text("summary"),
   watched: boolean("watched").default(false),
   // Pauza qilganda eslab qolish uchun (sekundlarda)
   watchedSeconds: integer("watched_seconds").default(0),
