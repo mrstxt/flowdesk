@@ -14,8 +14,9 @@ import {
   goals,
   contentItems,
 } from "@/db/schema";
-import { eq, or, isNull, and, ilike, desc } from "drizzle-orm";
+import { eq, or, isNull, and, ilike, desc, sql } from "drizzle-orm";
 import { createSummaryPdf } from "@/lib/pdfService";
+import { confirmOrder } from "@/lib/orderActions";
 
 export interface AgentResponse {
   text: string;
@@ -684,6 +685,58 @@ export async function getPendingOrders() {
   }
 }
 
+/**
+ * n) Mijoz to'lovini tasdiqlash va kartaga qabul qilish ("Akmal to'lov qildi", "to'lov olindi")
+ */
+export async function confirmClientPayment(params: { clientName?: string; orderId?: number }) {
+  try {
+    let targetOrder: typeof orders.$inferSelect | null = null;
+    if (params.orderId) {
+      const [o] = await db.select().from(orders).where(eq(orders.id, params.orderId));
+      targetOrder = o;
+    } else if (params.clientName) {
+      const q = params.clientName.trim().toLowerCase();
+      const matched = await db
+        .select()
+        .from(orders)
+        .where(
+          and(
+            sql`LOWER(${orders.clientName}) LIKE ${'%' + q + '%'}`,
+            sql`${orders.stage} != 'confirmed'`
+          )
+        )
+        .orderBy(desc(orders.createdAt))
+        .limit(1);
+      if (matched.length > 0) targetOrder = matched[0];
+    } else {
+      const latest = await db
+        .select()
+        .from(orders)
+        .where(sql`${orders.stage} != 'confirmed'`)
+        .orderBy(desc(orders.createdAt))
+        .limit(1);
+      if (latest.length > 0) targetOrder = latest[0];
+    }
+
+    if (!targetOrder) {
+      return { success: false, message: "To'lov kutilayotgan ochiq hisob-kitob topilmadi." };
+    }
+
+    const res = await confirmOrder(targetOrder.id);
+    if (!res.ok) {
+      return { success: false, message: res.message };
+    }
+
+    return {
+      success: true,
+      message: `${targetOrder.clientName || targetOrder.title} bo'yicha ${Number(targetOrder.amount || 0).toLocaleString("uz-UZ")} so'm to'lov muvaffaqiyatli tasdiqlandi va kartaga tushdi! 🎉`,
+      order: targetOrder,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ─── 2. Gemini Function Declarations ───
 
 const getCalendarScheduleDeclaration: FunctionDeclaration = {
@@ -884,6 +937,19 @@ const getPendingOrdersDeclaration: FunctionDeclaration = {
   },
 };
 
+const confirmClientPaymentDeclaration: FunctionDeclaration = {
+  name: "confirmClientPayment",
+  description:
+    "Mijozdan to'lov olinganda hisob-kitobni tasdiqlash va pulni Asosiy kartaga tushirish (masalan: 'Akmal to'lov qildi', 'to'lov olindi').",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      clientName: { type: Type.STRING, description: "To'lov qilgan mijoz ismi" },
+      orderId: { type: Type.NUMBER, description: "Buyurtma ID si (agar ma'lum bo'lsa)" },
+    },
+  },
+};
+
 // ─── 3. Main Agent Processor ───
 
 const ALL_TOOLS: FunctionDeclaration[] = [
@@ -896,10 +962,11 @@ const ALL_TOOLS: FunctionDeclaration[] = [
   addIncomeDeclaration,
   getFinanceSummaryDeclaration,
   addClientOrderDeclaration,
+  getPendingOrdersDeclaration,
+  confirmClientPaymentDeclaration,
   addGoalDeclaration,
   createContentPlanDeclaration,
   searchWebDeclaration,
-  getPendingOrdersDeclaration,
 ];
 
 export async function processAgentMessage(
@@ -929,31 +996,19 @@ export async function processAgentMessage(
     try {
       const ai = new GoogleGenAI({ apiKey });
 
-      const systemInstruction = `Sen quruq robot emassan, Sulaymonov S. ning jonli, samimiy, quvnoq va aqlli shaxsiy yordamchisisan.
+      const systemInstruction = `Sen quruq robot emassan, Sulaymonov S. ning jonli, samimiy, quvnoq va o'ta aqlli shaxsiy yordamchisisan.
 Quruq rasmiyatchiliksiz, xuddi haqiqiy doʻst va shaxsiy kotibdek sof va ravon oʻzbek tilida gaplash.
 Foydalanuvchi bilan samimiy fikr almash, hazillashib tur va har bir topshiriqni mehr bilan bajar.
 Har gapda foydalanuvchining ismini ("Sohibjon") takrorlash shart EMAS, tabiiy insondek samimiy muloqot qil.
 Bugungi sana: ${todayISO}.
 
-Senga FlowDesk platformasiga TOʻLIQ RUXSAT (FULL ACCESS) berilgan:
-- getCalendarSchedule: kunlik reja va intizom vazifalarini ko'rish
-- createTask: yangi reja yoki vazifa qo'shish (agar dizayn bo'yicha shaxsiy ish bo'lsa ham)
-- completeTask: vazifani bajarildi deb belgilash
-- rescheduleTask: vazifa muddatini surish
-- addExpense: xarajat kiritish va kartadan ayirish
-- addIncome: daromad kiritish va kartaga qo'shish
-- getFinanceSummary: kartalar, qoldiq va jami balansni ko'rish
-- addClientOrder: yangi mijoz buyurtmasi yoki dizayn hisob-kitobini saqlash (masalan: "Akmalga 50 ming dizayn yoz")
-- getPendingOrders: mijozlardan olinishi kerak bo'lgan hisob-kitoblarni ko'rish
-- addGoal: jamg'arma maqsadini qo'shish
-- createContentPlan: media kontent rejasini kiritish
-- saveYouTubeAndBook: YouTube havolasidan tahliliy konspekt chiqarib, kitoblar bo'limiga PDF yaratish
-- searchWeb: Google va internetdan real vaqtda ob-havo, yangiliklar, valyuta kursi va ma'lumot qidirish
-
-Agar foydalanuvchi "dizayndi yozib qo'y" yoki biror narsa haqida aytsa:
-O'zing mustaqil fikrla: agar mijozga hisob bo'lsa addClientOrder, agar reja bo'lsa createTask vositasini chaqir.
-Agar internetdan ma'lumot yoki ob-havo so'ralsa: searchWeb vositasi orqali qidirib aniq ma'lumot ber.
-Agar shunchaki suhbat, fikr almashish, marketing yoki maslahat bo'lsa, to'laqonli dono insondek erkin, samimiy va jonli javob ber.`;
+MUHIM QOIDALAR (MUSTAQIL FIKRLASH VA TO'G'RI TOOL TANLASH):
+1. HAR BIR GAPNI HISOB-KITOB DEB O'YLAMA! Agar foydalanuvchi shunchaki salomlashsa, hol-ahvol so'rasa, suhbatlashsa yoki maslahat so'rasa — HECH QANDAY tool chaqirma, insondek samimiy javob qaytar.
+2. VAZIFA VA REJALAR: Agar foydalanuvchi biror ish yoki reja aytsa (masalan: "Ertaga soat 5 da turish", "Dizayn qilishim kerak", "Kitob o'qish", "Uchrashuv bor") — bular shaxsiy reja hisoblanadi, darhol 'createTask' vositasi bilan taqvimga yoz. Rejalarni so'rasa 'getCalendarSchedule' ni chaqir.
+3. MIJOZ HISOB-KITOBLARI: Faqatgina foydalanuvchi aniq MIJOZ nomini aytib hisob-kitob qilishni aytganda (masalan: "Akmalga 50 ming dizayn yoz", "Sardorga 100 ming hisob-kitob") 'addClientOrder' ni chaqir.
+4. TO'LOV TASDIQLASH: Agar "Akmal to'lov qildi", "pul tushdi", "to'lov olindi" desa — 'confirmClientPayment' ni chaqir.
+5. QIDIRUV VA MA'LUMOT: Agar ob-havo, yangiliklar, valyuta kurslari yoki internetdan ma'lumot so'ralsa — 'searchWeb' orqali qidirib aniq javob ber.
+6. MOLIYA: Kartalar balansi so'ralsa 'getFinanceSummary', xarajat aytsa 'addExpense', daromad aytsa 'addIncome' ni chaqir.`;
 
       const TARGET_MODEL = "gemini-flash-lite-latest";
 
@@ -1007,6 +1062,9 @@ Agar shunchaki suhbat, fikr almashish, marketing yoki maslahat bo'lsa, to'laqonl
               break;
             case "getPendingOrders":
               result = await getPendingOrders();
+              break;
+            case "confirmClientPayment":
+              result = await confirmClientPayment(args);
               break;
             case "addGoal":
               result = await addGoal(args);
