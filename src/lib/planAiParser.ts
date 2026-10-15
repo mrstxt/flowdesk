@@ -81,12 +81,13 @@ export function parseSpokenPlans(input: string): ParsedPlan[] {
 
     const lower = line.toLowerCase();
 
-    // Savol, salom yoki xizmat gaplarini darhol o'tkazib yuborish
+    // Savol, buyruq, o'chirish, telefon qilish yoki xizmat gaplarini darhol o'tkazib yuborish
     if (
-      /^(alo|salom|assalom|ha|yoq|yo'q|rahmat|xop|xo'p|nima|nimalar|qanaqa|qalay|qalesiz|manga tel|tel qil)/i.test(
-        lower
-      ) ||
-      /(kartada|balans|pulim|hisobim|savol|bormi|qancha|ozgartir|o'zgartir)/i.test(lower)
+      /^(alo|salom|assalom|ha|yoq|yo'q|rahmat|xop|xo'p|nima|nimalar|qanaqa|qalay|qalesiz)/i.test(lower) ||
+      /(kartada|balans|pulim|hisobim|savol|bormi|qancha)/i.test(lower) ||
+      /(o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla|yangi\s*tuzamiz)/i.test(lower) ||
+      /(tel\s*qil|telefon\s*qil|manga\s*tel|menga\s*tel|qo'?ng'?iroq\s*qil|chaqir)/i.test(lower) ||
+      /(ozgartir|o'zgartir|almashtir|yozishing\s*kerak\s*edi|eslab\s*qolyapti|nimaga|qob\s*ketgan|ochmagan|o'chmagan)/i.test(lower)
     ) {
       continue;
     }

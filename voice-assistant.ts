@@ -1267,52 +1267,86 @@ async function runWorker() {
         return;
       }
 
-      // A.25) Reja yoki vazifani o'chirish ("ob tashla", "ochir", "bularni ob tashla", "schoolga borishni ob tashla")
-      if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla)/i.test(q)) {
-        console.log("🗑️ Rejani o'chirish so'raldi...");
-        const isAll = /(barcha|hamma|barchasini|hammasini|bularni|bular|hammasi|tozala|kerakmas|kerak\s*emas)/i.test(q) ||
-                      /^(\s*o'?chir\s*|\s*ob\s*tashla\s*|\s*olib\s*tashla\s*|\s*o'?chirib\s*tashla\s*)$/i.test(clean);
+      // A.25) Reja yoki vazifani o'chirish / tozalash ("rejalardi ochirib tur yangi tuzamiz", "ob tashla", "ochir", "bularni ob tashla")
+      if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla|tozalab\s*tur|o'?chirib\s*tur)/i.test(q)) {
+        console.log("🗑️ Rejani o'chirish / tozalash so'raldi...");
 
-        if (isAll) {
-          await db.delete(tasks).where(eq(tasks.date, todayISO));
-          await db.delete(routines).where(eq(routines.targetDate, todayISO));
-          const rep = "🗑️ Tushundim Sohibjon! Bugungi barcha rejalarni o'chirib tashladim, ro'yxatingiz top-toza bo'ldi. Yangi reja tuzamizmi? 😊";
-          await client.sendMessage(replyPeer, { message: rep });
-          sendVoiceNote(client, replyPeer, "Tushundim Sohibjon! Bugungi barcha rejalarni o'chirib tashladim.").catch(() => {});
-          return;
-        }
+        const isTomorrow = /(ertag|ertangi)/i.test(q);
+        const isToday = /(bugun|bugungi)/i.test(q);
+
+        const isAll =
+          /(barcha|hamma|barchasini|hammasini|bularni|bular|hammasi|tozala|tozalab|kerakmas|kerak\s*emas)/i.test(q) ||
+          /(?:rejalarni|rejalardi|vazifalarni|vazifalardi)\s*(?:hammasini|barchasini|tozala|o'?chir|ob\s*tashla)/i.test(q) ||
+          /(?:o'?chirib\s*tur|tozalab\s*tur|yangi\s*tuzamiz)/i.test(q) ||
+          /(?:rejalarni|rejalardi|vazifalarni|vazifalardi)/i.test(q) ||
+          /^(\s*o'?chir\s*|\s*ob\s*tashla\s*|\s*olib\s*tashla\s*|\s*o'?chirib\s*tashla\s*|\s*rejalardi\s*o'?chir\s*|\s*rejalarni\s*o'?chir\s*)$/i.test(clean);
+
+        const wantsCall = /(tel\s*qil|telefon\s*qil|qo'?ng'?iroq\s*qil)/i.test(q);
 
         // Qaysi aniq vazifani o'chirish kerakligini aniqlash
         let targetWord = clean
-          .replace(/(?:o'?chirib\s*tashla|ob\s*tashla|olib\s*tashla|o'?chir|bekor\s*qil|tashla)/gi, "")
-          .replace(/(?:vazifasini|rejasini|vazifani|rejani|ishni)/gi, "")
-          .replace(/(?:bugungi|ertangi|iltimos|menga|manga|shuni)/gi, "")
+          .replace(/(?:o'?chirib\s*tashla|ob\s*tashla|olib\s*tashla|o'?chirib\s*tur|tozalab\s*tur|o'?chir|bekor\s*qil|tozala|tashla)/gi, "")
+          .replace(/(?:vazifasini|rejasini|vazifani|rejani|ishni|rejalarni|rejalardi|vazifalarni|vazifalardi)/gi, "")
+          .replace(/(?:bugungi|ertangi|iltimos|menga|manga|shuni|yangi\s*tuzamiz|reja\s*tuzish\s*uchun|uchun|tel\s*qil|telefon\s*qil)/gi, "")
           .replace(/(?:ni|di)$/gi, "")
           .trim();
 
-        if (targetWord.length >= 2) {
-          const pattern = `%${targetWord.replace(/['`]/g, "")}%`;
-          const delT = await db.delete(tasks).where(ilike(tasks.title, pattern)).returning({ id: tasks.id });
-          const delR = await db.delete(routines).where(ilike(routines.title, pattern)).returning({ id: routines.id });
+        // Agar umumiy tozalash bo'lsa yoki qolgan so'z qisqa bo'lsa -> butun rejalarni tozalash
+        if (isAll || targetWord.length < 3) {
+          let delCount = 0;
+          let label = "";
 
-          if (delT.length || delR.length) {
-            const rep = `🗑️ Tushundim Sohibjon! <b>"${targetWord}"</b> rejangizni ro'yxatdan o'chirib tashladim.`;
-            await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
-            sendVoiceNote(client, replyPeer, `${targetWord} rejasini o'chirib tashladim.`).catch(() => {});
-            return;
+          if (isTomorrow) {
+            const delT = await db.delete(tasks).where(eq(tasks.date, tomorrowISO)).returning({ id: tasks.id });
+            const delR = await db.delete(routines).where(eq(routines.targetDate, tomorrowISO)).returning({ id: routines.id });
+            delCount = delT.length + delR.length;
+            label = `Ertangi (${tomorrowISO})`;
+          } else if (isToday) {
+            const delT = await db.delete(tasks).where(eq(tasks.date, todayISO)).returning({ id: tasks.id });
+            const delR = await db.delete(routines).where(eq(routines.targetDate, todayISO)).returning({ id: routines.id });
+            delCount = delT.length + delR.length;
+            label = `Bugungi (${todayISO})`;
           } else {
-            const rep = `🤔 Sohibjon, ro'yxatdan "${targetWord}" degan reja topilmadi. "Rejalar qanday" deb yozsangiz hozirgi rejalarni ko'rib olasiz!`;
-            await client.sendMessage(replyPeer, { message: rep });
-            sendVoiceNote(client, replyPeer, `Ro'yxatdan ${targetWord} degan reja topilmadi Sohibjon.`).catch(() => {});
-            return;
+            // Kun aniq aytilmagan bo'lsa ("Rejalardi ochirib tur yangi tuzamiz") -> HAM bugungi, HAM ertangi kun rejalari
+            const delT = await db.delete(tasks).where(or(eq(tasks.date, todayISO), eq(tasks.date, tomorrowISO))).returning({ id: tasks.id });
+            const delR = await db.delete(routines).where(or(eq(routines.targetDate, todayISO), eq(routines.targetDate, tomorrowISO))).returning({ id: routines.id });
+            delCount = delT.length + delR.length;
+            label = "Barcha joriy va ertangi";
           }
-        } else {
-          // Aniq biror so'z aytilmagan bo'lsa -> hammasini tozalash
-          await db.delete(tasks).where(eq(tasks.date, todayISO));
-          await db.delete(routines).where(eq(routines.targetDate, todayISO));
-          const rep = "🗑️ Tushundim Sohibjon! Bugungi rejalarni tozalab tashladim. Qanday yangi rejalaringiz bor?";
+
+          let rep = `🗑️ Tushundim Sohibjon! ${label} rejalarni tozalab tashladim (${delCount} ta reja o'chirildi).`;
+          if (wantsCall) {
+            rep += "\n\nYangi reja tuzishingiz uchun hozir telefon qilmoqdaman... 📲";
+          } else {
+            rep += " Ro'yxatingiz top-toza bo'ldi. Yangi reja tuzamizmi? 😊";
+          }
+
           await client.sendMessage(replyPeer, { message: rep });
-          sendVoiceNote(client, replyPeer, "Bugungi rejalarni tozalab tashladim Sohibjon.").catch(() => {});
+          sendVoiceNote(client, replyPeer, "Tushundim Sohibjon! Rejalarni tozalab tashladim.").catch(() => {});
+
+          if (wantsCall) {
+            await makeCallWithClient(client, entity, "Yangi reja tuzish uchun qo'ng'iroq");
+          }
+          return;
+        }
+
+        // Muayyan bitta vazifani o'chirish (masalan: "kitob o'qishni ob tashla")
+        const pattern = `%${targetWord.replace(/['`]/g, "")}%`;
+        const delT = await db.delete(tasks).where(ilike(tasks.title, pattern)).returning({ id: tasks.id });
+        const delR = await db.delete(routines).where(ilike(routines.title, pattern)).returning({ id: routines.id });
+
+        if (delT.length || delR.length) {
+          const rep = `🗑️ Tushundim Sohibjon! <b>"${targetWord}"</b> rejangizni ro'yxatdan o'chirib tashladim.`;
+          await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+          sendVoiceNote(client, replyPeer, `${targetWord} rejasini o'chirib tashladim.`).catch(() => {});
+          if (wantsCall) {
+            await makeCallWithClient(client, entity, "Foydalanuvchi so'ragan qo'ng'iroq");
+          }
+          return;
+        } else {
+          const rep = `🤔 Sohibjon, ro'yxatdan "${targetWord}" degan reja topilmadi. "Rejalar qanday" deb yozsangiz hozirgi rejalarni ko'rib olasiz!`;
+          await client.sendMessage(replyPeer, { message: rep });
+          sendVoiceNote(client, replyPeer, `Ro'yxatdan ${targetWord} degan reja topilmadi Sohibjon.`).catch(() => {});
           return;
         }
       }

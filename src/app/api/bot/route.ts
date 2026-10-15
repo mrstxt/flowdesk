@@ -18,7 +18,7 @@ import {
   workRoles,
   workReports,
 } from "@/db/schema";
-import { desc, eq, gte, and, asc, sql, desc as descOrd, inArray } from "drizzle-orm";
+import { desc, eq, gte, and, or, asc, sql, desc as descOrd, inArray } from "drizzle-orm";
 import { confirmOrder, todayDateISO } from "@/lib/orderActions";
 import { parseMoneyInput } from "@/lib/utils";
 import {
@@ -2623,6 +2623,39 @@ async function handleAssistantVoiceOrTextQuery(chatId: number, query: string): P
     const textReply = `💳 <b>Sizning kartalaringiz:</b>\n\n${lines.join("\n")}\n\n💰 <b>Jami mavjud balans:</b> <b>${fmt(total)}</b>`;
     await sendMessage(chatId, textReply, { reply_markup: MAIN_KEYBOARD });
     sendVoiceAlert(chatId, `Sohibjon, barcha kartalaringizdagi jami balans ${fmt(total)} so'mni tashkil qilmoqda.`).catch(console.error);
+    return true;
+  }
+
+  // 1.5. Rejalarni o'chirish / tozalash ("rejalardi ochirib tur", "rejalarni ochir", "ob tashla", "tozala")
+  if (/(?:o'?chir|ob\s*tashla|olib\s*tashla|bekor\s*qil|tozala|tozalab\s*tashla|tozalab\s*tur|o'?chirib\s*tur)/i.test(q)) {
+    const isTomorrow = /(ertag|ertangi)/i.test(q);
+    const isToday = /(bugun|bugungi)/i.test(q);
+    const today = todayDateISO();
+    const tomorrow = tomorrowTashkentISO();
+
+    let delCount = 0;
+    let label = "";
+
+    if (isTomorrow) {
+      const delT = await db.delete(tasks).where(eq(tasks.date, tomorrow)).returning({ id: tasks.id });
+      const delR = await db.delete(routines).where(eq(routines.targetDate, tomorrow)).returning({ id: routines.id });
+      delCount = delT.length + delR.length;
+      label = `Ertangi (${tomorrow})`;
+    } else if (isToday) {
+      const delT = await db.delete(tasks).where(eq(tasks.date, today)).returning({ id: tasks.id });
+      const delR = await db.delete(routines).where(eq(routines.targetDate, today)).returning({ id: routines.id });
+      delCount = delT.length + delR.length;
+      label = `Bugungi (${today})`;
+    } else {
+      const delT = await db.delete(tasks).where(or(eq(tasks.date, today), eq(tasks.date, tomorrow))).returning({ id: tasks.id });
+      const delR = await db.delete(routines).where(or(eq(routines.targetDate, today), eq(routines.targetDate, tomorrow))).returning({ id: routines.id });
+      delCount = delT.length + delR.length;
+      label = "Barcha joriy va ertangi";
+    }
+
+    const textReply = `🗑️ <b>Tushundim Sohibjon!</b>\n\n${label} rejalar tozalab tashlandi (${delCount} ta o'chirildi).\nRo'yxatingiz top-toza bo'ldi. Yangi reja tuzamizmi? 😊`;
+    await sendMessage(chatId, textReply, { reply_markup: MAIN_KEYBOARD });
+    sendVoiceAlert(chatId, "Tushundim Sohibjon! Rejalaringizni tozalab tashladim.").catch(console.error);
     return true;
   }
 
