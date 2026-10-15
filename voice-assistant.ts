@@ -34,9 +34,11 @@ import {
   incomes,
   expenses,
   cardTransactions,
+  goals,
 } from "./src/db/schema";
 import { eq, desc, asc, sql, and, ilike, or, isNull } from "drizzle-orm";
-import { getCardAvailableBalance } from "./src/lib/cardActions";
+import { getCardAvailableBalance, getPrimaryCard } from "./src/lib/cardActions";
+import { confirmOrder } from "./src/lib/orderActions";
 import {
   askBrain,
   isBrainEnabled,
@@ -297,10 +299,15 @@ function parseDesignCaption(caption: string, defaultIndex: number): { title: str
 function parseSettlementCommand(text: string): { isSettlement: boolean; clientName: string } | null {
   const q = text.toLowerCase().trim();
 
+  // Exclude payments or general questions
+  if (/(to'?lov|pulini\s*berdi|to'?ladi|toladi)/i.test(q)) return null;
+
   const isSettlement =
     /(hisob\s*kitob|hisob-kitob)/i.test(q) ||
     (/(saqla|saqlagin)/i.test(q) && /(umumiy|narx|hisoblab|yozib\s*qo'?y|yozvor|yoz)/i.test(q)) ||
-    (/(umumiy\s*narx.*hisoblab|hisoblab.*yoz)/i.test(q));
+    (/(umumiy\s*narx.*hisoblab|hisoblab.*yoz)/i.test(q)) ||
+    /\b([A-ZА-ЯЁa-zа-яё'`]+(?:ga|ka))\s*(?:rasmni\s+|rasmlarni\s+|yangi\s+rasmni\s+)?(qo'?sh|qosh|yozib\s*qo'?y|saqla|yoz)\b/i.test(q) ||
+    /\b(qo'?sh|qosh|saqla)\s+(?:rasmni\s+)?([A-ZА-ЯЁa-zа-яё'`]+(?:ga|ka)?)\b/i.test(q);
 
   if (!isSettlement) return null;
 
@@ -308,10 +315,10 @@ function parseSettlementCommand(text: string): { isSettlement: boolean; clientNa
 
   // 1) "Akmal bilan hisob kitob"
   const withMatch = text.match(/([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)\s*bilan\s*hisob/i);
-  // 2) "Akmalga yozib qo'y" / "Alisher akaga hisob kitob"
-  const toMatch = text.match(/\b([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)(?:ga|ka|uchun)\s*(?:hisob|yozib|yoz|saqla|kirit|qilib)/i);
-  // 3) "mijoz: Akmal", "ism: Akmal", "hisoblab Akmalga"
-  const prefixMatch = text.match(/(?:hisoblab|mijoz|ism|klient)\s+([A-ZА-ЯЁa-zа-яё'`]+(?:\s+[a-zа-яё'`]+)?)/i);
+  // 2) "Akmalga yozib qo'y" / "Akmalga qo'sh" / "Alisher akaga hisob kitob"
+  const toMatch = text.match(/\b([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)(?:ga|ka|uchun)\s*(?:hisob|yozib|yoz|saqla|kirit|qilib|qo'?sh|qosh)/i);
+  // 3) "mijoz: Akmal", "ism: Akmal", "hisoblab Akmalga", "qo'sh Akmalga"
+  const prefixMatch = text.match(/(?:hisoblab|mijoz|ism|klient|qo'?sh|qosh)\s+([A-ZА-ЯЁa-zа-яё'`]+(?:\s+[a-zа-яё'`]+)?)/i);
 
   if (withMatch) {
     clientName = withMatch[1];
@@ -323,7 +330,7 @@ function parseSettlementCommand(text: string): { isSettlement: boolean; clientNa
 
   if (clientName) {
     clientName = clientName
-      .replace(/\b(shu|odam|odamga|rasmdi|rasmlarni|narxini|umumiy|hisoblab|va|qilib)\b/gi, "")
+      .replace(/\b(shu|odam|odamga|rasmdi|rasmni|rasmlarni|narxini|umumiy|hisoblab|va|qilib|yangi|buni)\b/gi, "")
       .trim();
     if (clientName) {
       clientName = clientName
@@ -334,6 +341,64 @@ function parseSettlementCommand(text: string): { isSettlement: boolean; clientNa
   }
 
   return { isSettlement: true, clientName: clientName || "Mijoz" };
+}
+
+function parsePaymentCommand(text: string): { isPayment: boolean; clientName: string | null } | null {
+  const q = text.toLowerCase().trim();
+
+  // Exclude simple balance/inquiry questions
+  if (/(qancha|bormi\?|qilinganmi\?|qanchadan|balans)/i.test(q)) return null;
+
+  const paymentRegex = /\b(to'?lov\s*(?:qildi|qilindi|olindi|qabul\s*qilindi|bo'?ldi|tushdi|yetib\s*keldi)|pulini\s*berdi|pul\s*berdi|to'?ladi|toladi|tasdiqla|tasdiqlandi|hisobni\s*yop)\b/i;
+  if (!paymentRegex.test(q)) return null;
+
+  let clientName: string | null = null;
+
+  // 1) "Akmal to'lov qildi", "Sardor aka pul berdi", "Akmal to'ladi", "Akmal tasdiqlandi"
+  const beforeMatch = text.match(/([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)\s*(?:dan\s+)?(?:to'?lov|pulini|pul\s*berdi|to'?ladi|toladi|tasdiqla|tasdiqlandi)/i);
+
+  // 2) "to'lov olindi: Akmal", "to'lov qabul qilindi Akmal", "tasdiqla Akmalni", "to'lov qildi Akmal"
+  const afterMatch = text.match(/(?:to'?lov\s*(?:olindi|qabul\s*qilindi|qildi|bo'?ldi|tushdi)|tasdiqla(?:ndi)?)\s+(?:uchun\s+|mijoz\s+|ism\s+)?([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka|opam?))?)/i);
+
+  if (beforeMatch && !/^(to'?lov|pul|bizga|menga|bugun|kecha)$/i.test(beforeMatch[1].trim())) {
+    clientName = beforeMatch[1];
+  } else if (afterMatch && !/^(to'?lov|pul|bizga|menga|bugun|kecha)$/i.test(afterMatch[1].trim())) {
+    clientName = afterMatch[1];
+  }
+
+  if (clientName) {
+    clientName = clientName
+      .replace(/\b(to'?lov|pulini|pul|olindi|qildi|tasdiqla|tasdiqlandi|uchun|mijoz|aka|uka|dan)\b/gi, "")
+      .trim();
+    if (clientName) {
+      clientName = clientName
+        .split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+    }
+  }
+
+  return { isPayment: true, clientName: clientName && clientName.length >= 2 ? clientName : null };
+}
+
+function parseClientFromCaption(caption: string): string | null {
+  if (!caption) return null;
+  // "Akmalga", "Akmal uchun", "Akmalga yangi rasm", "mijoz: Akmal"
+  const m1 = caption.match(/\b([A-ZА-ЯЁa-zа-яё'`]+(?:\s+(?:aka|uka))?)(?:ga|ka|uchun)\b/i);
+  if (m1) {
+    const raw = m1[1].replace(/\b(shu|yangi|dizayn|bitta|yana)\b/gi, "").trim();
+    if (raw.length >= 2) {
+      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    }
+  }
+  const m2 = caption.match(/(?:mijoz|klient|ism)[:\s]+([A-ZА-ЯЁa-zа-яё'`]+)/i);
+  if (m2) {
+    const raw = m2[1].trim();
+    if (raw.length >= 2) {
+      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    }
+  }
+  return null;
 }
 
 function getTashkentTimeString(): { timeStr: string; todayISO: string; tomorrowISO: string; minutes: number } {
@@ -783,15 +848,59 @@ async function runWorker() {
             const fileName = `design_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`;
             const fullPath = path.join(DESIGNS_DIR, fileName);
             fs.writeFileSync(fullPath, mediaBuffer);
+            const webPath = `/uploads/designs/${fileName}`;
 
             const userKey = String(target);
             const currentList = pendingDesigns.get(userKey) || [];
             const { title, amount } = parseDesignCaption(receivedText, currentList.length + 1);
 
+            // Agar rasm izohida mijoz nomi bo'lsa va u bo'yicha ochiq hisob mavjud bo'lsa - darhol qo'shamiz
+            const directClient = parseClientFromCaption(receivedText);
+            if (directClient) {
+              const [existingClientOrder] = await db
+                .select()
+                .from(orders)
+                .where(
+                  and(
+                    sql`LOWER(${orders.clientName}) LIKE ${'%' + directClient.toLowerCase() + '%'}`,
+                    sql`${orders.stage} != 'confirmed'`
+                  )
+                )
+                .orderBy(desc(orders.createdAt))
+                .limit(1);
+
+              if (existingClientOrder) {
+                const addAmt = amount;
+                const newTotal = Number(existingClientOrder.amount) + addAmt;
+                const newDesc =
+                  (existingClientOrder.description ? existingClientOrder.description + "\n\n" : "") +
+                  `🖼️ Yangi dizayn: ${title} — ${addAmt > 0 ? fmt(addAmt) : "Kelishilgan"}\n${webPath}`;
+
+                await db
+                  .update(orders)
+                  .set({
+                    amount: String(newTotal),
+                    description: newDesc,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(orders.id, existingClientOrder.id));
+
+                const rep =
+                  `🖼️ <b>${existingClientOrder.clientName}</b> hisob-kitobiga yangi rasm muvaffaqiyatli qo'shildi!\n\n` +
+                  `📌 <b>Dizayn:</b> ${title}\n` +
+                  `💰 <b>Narxi:</b> ${addAmt > 0 ? `+${fmt(addAmt)}` : "Belgilanmagan"}\n` +
+                  `📊 <b>Yangi umumiy summa:</b> <b>${fmt(newTotal)}</b>\n\n` +
+                  `<i>Mijoz to'lov qilganda «${existingClientOrder.clientName} to'lov qildi» desangiz, darhol tasdiqlanib kartangizga tushadi! 🚀</i>`;
+
+                await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+                return;
+              }
+            }
+
             currentList.push({
               id: String(Date.now()),
               fileName,
-              webPath: `/uploads/designs/${fileName}`,
+              webPath,
               title,
               amount,
               date: getTashkentTimeString().todayISO,
@@ -806,8 +915,8 @@ async function runWorker() {
               `📌 <b>Nomi:</b> ${title}\n` +
               `💰 <b>Narxi:</b> ${amount > 0 ? fmt(amount) : "Hali belgilanmadi (matn bilan yozishingiz mumkin)"}\n` +
               (totalSoFar > 0 ? `📊 <b>Hozirgacha jami:</b> <b>${fmt(totalSoFar)}</b>\n\n` : "\n") +
-              `<i>Yana rasm tashlashingiz mumkin. Barchasini yakunlab saqlash uchun:\n` +
-              `«Shu rasmlarni saqla va [Mijoz ismi]ga yozib qo'y» deb yozing! 🚀</i>`;
+              `<i>Buni saqlash yoki mijozga biriktirish uchun:\n` +
+              `«[Mijoz]ga qo'sh» yoki «Shu rasmlarni saqla va [Mijoz]ga yozib qo'y» deb yozing! 🚀</i>`;
 
             await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
             return;
@@ -839,7 +948,92 @@ async function runWorker() {
 
       const q = clean.toLowerCase();
 
-      // A.0) Hisob-kitob qilish va rasmlarni saqlash ("Shu rasmni saqla va umumiy narxini hisoblab Akmalga yozib qo'y")
+      // A.-1) To'lov qabul qilish / tasdiqlash ("Akmal to'lov qildi", "to'lov olindi")
+      const payment = parsePaymentCommand(clean);
+      if (payment) {
+        console.log(`💰 To'lov tasdiqlash buyrug'i: Mijoz "${payment.clientName ?? 'Nomaʼlum'}"`);
+        let targetOrder: typeof orders.$inferSelect | null = null;
+
+        if (payment.clientName) {
+          const clientQ = payment.clientName.toLowerCase();
+          const matchedOrders = await db
+            .select()
+            .from(orders)
+            .where(
+              and(
+                sql`LOWER(${orders.clientName}) LIKE ${'%' + clientQ + '%'}`,
+                sql`${orders.stage} != 'confirmed'`
+              )
+            )
+            .orderBy(desc(orders.createdAt))
+            .limit(1);
+
+          if (matchedOrders.length > 0) {
+            targetOrder = matchedOrders[0];
+          } else {
+            const matchedByText = await db
+              .select()
+              .from(orders)
+              .where(
+                and(
+                  or(
+                    sql`LOWER(${orders.title}) LIKE ${'%' + clientQ + '%'}`,
+                    sql`LOWER(${orders.description}) LIKE ${'%' + clientQ + '%'}`
+                  ),
+                  sql`${orders.stage} != 'confirmed'`
+                )
+              )
+              .orderBy(desc(orders.createdAt))
+              .limit(1);
+            if (matchedByText.length > 0) targetOrder = matchedByText[0];
+          }
+        } else {
+          // Mijoz ismi aytilmagan bo'lsa (masalan "to'lov olindi"), oxirgi ochiq hisobni olamiz
+          const latestUnconfirmed = await db
+            .select()
+            .from(orders)
+            .where(sql`${orders.stage} != 'confirmed'`)
+            .orderBy(desc(orders.createdAt))
+            .limit(1);
+          if (latestUnconfirmed.length > 0) targetOrder = latestUnconfirmed[0];
+        }
+
+        if (!targetOrder) {
+          const notFoundRep = payment.clientName
+            ? `❓ <b>${payment.clientName}</b> bo'yicha to'lov kutilayotgan ochiq hisob-kitob topilmadi.\n(Balki allaqachon to'langan yoki boshqa nomda saqlangan bo'lishi mumkin)`
+            : `❓ Hozirda to'lov kutilayotgan ochiq hisob-kitob topilmadi.`;
+          await client.sendMessage(replyPeer, { message: notFoundRep, parseMode: "html" });
+          return;
+        }
+
+        // Tasdiqlash va avtomatik taqsimot (confirmOrder)
+        const confirmRes = await confirmOrder(targetOrder.id);
+        if (!confirmRes.ok) {
+          await client.sendMessage(replyPeer, {
+            message: `⚠️ <b>To'lovni tasdiqlashda xatolik:</b>\n${confirmRes.message}`,
+            parseMode: "html",
+          });
+          return;
+        }
+
+        const primary = await getPrimaryCard();
+        const primaryBal = primary ? await getCardAvailableBalance(primary.id) : 0;
+        const amtNum = Number(targetOrder.amount) || 0;
+
+        const successRep =
+          `🎉 <b>To'lov qabul qilindi va Tasdiqlandi!</b>\n\n` +
+          `👤 <b>Mijoz:</b> <b>${targetOrder.clientName || targetOrder.title}</b>\n` +
+          `💰 <b>Summa:</b> <b>${fmt(amtNum)}</b>\n` +
+          `💳 <b>Asosiy karta:</b> Pul qabul qilindi va balansga qo'shildi!\n` +
+          `🎯 <b>Taqsimot:</b> Belgilangan maqsadlarga avtomatik foizlar ajratildi.\n` +
+          (primary ? `📊 <b>Asosiy karta joriy balansi:</b> <b>${fmt(primaryBal)}</b>\n\n` : "\n") +
+          `📂 Buyurtma <b>«Tasdiqlandi»</b> holatiga o'tkazildi va arxivlandi! 🚀`;
+
+        await client.sendMessage(replyPeer, { message: successRep, parseMode: "html" });
+        return;
+      }
+
+      // A.0) Hisob-kitob qilish va rasmlarni saqlash ("Shu rasmni saqla va umumiy narxini hisoblab Akmalga yozib qo'y" yoki "Akmalga qo'sh")
       const settlement = parseSettlementCommand(clean);
       if (settlement) {
         console.log(`💼 Hisob-kitob buyrug'i qabul qilindi: Mijoz "${settlement.clientName}"`);
@@ -852,6 +1046,65 @@ async function runWorker() {
           if (extraAmt > 0) totalAmount = extraAmt;
         }
 
+        // Avval mavjud ochiq hisob-kitobni tekshiramiz
+        const [existingClientOrder] = await db
+          .select()
+          .from(orders)
+          .where(
+            and(
+              sql`LOWER(${orders.clientName}) LIKE ${'%' + settlement.clientName.toLowerCase() + '%'}`,
+              sql`${orders.stage} != 'confirmed'`
+            )
+          )
+          .orderBy(desc(orders.createdAt))
+          .limit(1);
+
+        if (existingClientOrder) {
+          // Mavjud hisobga qo'shamiz (Append)
+          const addAmt = totalAmount;
+          let appendDesc = "";
+          if (items.length > 0) {
+            appendDesc += "\n\n🖼️ Yangi qo'shilgan dizaynlar:\n";
+            items.forEach((it, i) => {
+              appendDesc += `${i + 1}. ${it.title} — ${it.amount > 0 ? fmt(it.amount) : "Kelishilgan"}\n`;
+              if (it.webPath) appendDesc += `${it.webPath}\n`;
+            });
+          } else {
+            appendDesc += `\n\n+ Qo'shildi: ${clean} (${addAmt > 0 ? fmt(addAmt) : "kelishilgan"})`;
+          }
+
+          const newTotal = Number(existingClientOrder.amount) + addAmt;
+          await db
+            .update(orders)
+            .set({
+              amount: String(newTotal),
+              description: (existingClientOrder.description || "") + appendDesc,
+              updatedAt: new Date(),
+            })
+            .where(eq(orders.id, existingClientOrder.id));
+
+          pendingDesigns.delete(userKey);
+
+          let rep =
+            `🖼️ <b>${existingClientOrder.clientName}</b> hisob-kitobiga ${items.length > 0 ? `${items.length} ta dizayn rasmi` : "yangi qo'shimcha"} muvaffaqiyatli qo'shildi!\n\n`;
+
+          if (items.length > 0) {
+            rep +=
+              `📋 <b>Qo'shilganlar:</b>\n` +
+              items.map((it, i) => `${i + 1}. ${it.title} — <b>${it.amount > 0 ? fmt(it.amount) : "Belgilanmagan"}</b>`).join("\n") +
+              `\n\n`;
+          }
+
+          rep +=
+            `💰 <b>Oldingi summa:</b> ${fmt(Number(existingClientOrder.amount))}\n` +
+            `📊 <b>Yangi umumiy summa:</b> <b>${fmt(newTotal)}</b>\n\n` +
+            `<i>Mijoz to'lov qilganda «${existingClientOrder.clientName} to'lov qildi» desangiz, darhol tasdiqlanib kartangizga tushadi! 🚀</i>`;
+
+          await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
+          return;
+        }
+
+        // Yangi hisob-kitob yaratamiz
         const descLines: string[] = [
           `📋 Hisob-kitob tafsilotlari:`,
           `👤 Mijoz: ${settlement.clientName}`,
@@ -898,8 +1151,8 @@ async function runWorker() {
 
         rep +=
           `💰 <b>Umumiy hisob-kitob summasi:</b> <b>${fmt(totalAmount)}</b>\n` +
-          `📂 <b>Bo'lim:</b> Buyurtmalar taxtasida yangi <b>«Hisob-kitob»</b> bo'limiga kiritildi!\n\n` +
-          `<i>Mijoz to'lov qilganda kartochkani "Tasdiqlandi"ga o'tkazsangiz, tushum avtomatik Asosiy kartangiz balansiga yoziladi! 🚀</i>`;
+          `📂 <b>Bo'lim:</b> Hisob-kitob bo'limiga kiritildi!\n\n` +
+          `<i>Mijoz to'lov qilganda «${settlement.clientName} to'lov qildi» deb yozsangiz, tushum avtomatik Asosiy kartangiz balansiga tushadi va maqsadlarga taqsimlanadi! 🚀</i>`;
 
         await client.sendMessage(replyPeer, { message: rep, parseMode: "html" });
         return;

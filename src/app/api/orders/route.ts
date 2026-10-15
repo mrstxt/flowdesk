@@ -53,7 +53,17 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
 
-  const oldStage = rest._oldStage;
+  const [existingOrder] = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, id))
+    .limit(1);
+
+  if (!existingOrder) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+
+  const oldStage = (rest._oldStage as string) || existingOrder.stage;
   const payload: Record<string, unknown> = { ...rest };
   delete payload._oldStage;
   payload.updatedAt = new Date();
@@ -63,7 +73,7 @@ export async function PUT(req: Request) {
   }
 
   // Automation: move to confirmed -> income + goals allocation + archive
-  if (oldStage && oldStage !== "confirmed" && payload.stage === "confirmed") {
+  if (oldStage !== "confirmed" && payload.stage === "confirmed") {
     const result = await confirmOrder(id);
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: 400 });
@@ -79,7 +89,7 @@ export async function PUT(req: Request) {
   }
 
   // Automation: move out of confirmed/archive -> reverse order income/allocation
-  if (oldStage === "confirmed" && payload.stage !== "confirmed") {
+  if (oldStage === "confirmed" && payload.stage && payload.stage !== "confirmed") {
     const result = await cancelOrderConfirmation(id, String(payload.stage));
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: 400 });

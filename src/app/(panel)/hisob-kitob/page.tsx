@@ -15,6 +15,7 @@ import {
   FileText,
   CreditCard,
   Check,
+  Upload,
 } from "lucide-react";
 import { formatCurrency, parseMoneyInput } from "@/lib/utils";
 import { Modal } from "@/components/Modal";
@@ -41,6 +42,13 @@ export default function HisobKitobPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
 
+  // Photo upload modal state
+  const [addingPhotoToOrder, setAddingPhotoToOrder] = useState<Order | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoTitle, setPhotoTitle] = useState("");
+  const [photoAmount, setPhotoAmount] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+
   async function load() {
     try {
       const rows = await fetch("/api/orders").then((r) => r.json());
@@ -57,7 +65,7 @@ export default function HisobKitobPage() {
   // Filter hisob-kitob orders: either stage === 'hisob_kitob' or clientName exists
   const hisobOrders = useMemo(() => {
     return orders.filter(
-      (o) => o.stage === "hisob_kitob" || (o.clientName && !o.archived)
+      (o) => o.stage === "hisob_kitob" || Boolean(o.clientName)
     );
   }, [orders]);
 
@@ -134,6 +142,58 @@ export default function HisobKitobPage() {
       alert("Xatolik yuz berdi");
     } finally {
       setConfirmingId(null);
+    }
+  }
+
+  async function handleAddPhotoSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!addingPhotoToOrder || !photoFile) return;
+
+    setIsUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", photoFile);
+      const upRes = await fetch("/api/upload", {
+        method: "POST",
+        body: fd,
+      });
+      if (!upRes.ok) throw new Error("Rasm yuklashda xatolik");
+      const upData = await upRes.json();
+      const imgUrl = upData.url;
+
+      const amt = parseMoneyInput(photoAmount);
+      const title = photoTitle.trim() || "Yangi dizayn";
+
+      const newDesc =
+        (addingPhotoToOrder.description ? addingPhotoToOrder.description + "\n\n" : "") +
+        `🖼️ Dizayn: ${title} — ${amt > 0 ? formatCurrency(amt) : "Kelishilgan"}\n${imgUrl}`;
+
+      const newTotal = parseMoneyInput(addingPhotoToOrder.amount) + amt;
+
+      const res = await fetch("/api/orders", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: addingPhotoToOrder.id,
+          amount: String(newTotal),
+          description: newDesc,
+        }),
+      });
+
+      if (res.ok) {
+        setAddingPhotoToOrder(null);
+        setPhotoFile(null);
+        setPhotoTitle("");
+        setPhotoAmount("");
+        await load();
+      } else {
+        alert("Saqlashda xatolik yuz berdi");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Xatolik yuz berdi");
+    } finally {
+      setIsUploading(false);
     }
   }
 
@@ -396,13 +456,30 @@ export default function HisobKitobPage() {
                     )}
                   </div>
 
-                  {/* Image Gallery */}
-                  {imgMatches.length > 0 && (
-                    <div className="mb-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
+                  {/* Image Gallery & Add Photo */}
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                         <ImageIcon className="w-3 h-3" />
                         Dizayn rasmlari ({imgMatches.length} ta)
                       </div>
+                      {!isConfirmed && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddingPhotoToOrder(o);
+                            setPhotoFile(null);
+                            setPhotoTitle("");
+                            setPhotoAmount("");
+                          }}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-purple-600 dark:text-purple-400 hover:text-purple-700 bg-purple-50 dark:bg-purple-950/40 px-2.5 py-1 rounded-full transition-colors"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Rasm qo'shish
+                        </button>
+                      )}
+                    </div>
+                    {imgMatches.length > 0 ? (
                       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
                         {imgMatches.map((src, idx) => (
                           <div
@@ -421,8 +498,25 @@ export default function HisobKitobPage() {
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      !isConfirmed && (
+                        <div
+                          onClick={() => {
+                            setAddingPhotoToOrder(o);
+                            setPhotoFile(null);
+                            setPhotoTitle("");
+                            setPhotoAmount("");
+                          }}
+                          className="border border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-2.5 text-center cursor-pointer hover:border-purple-400 transition-colors"
+                        >
+                          <div className="text-xs text-slate-400 flex items-center justify-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5" />
+                            Dizayn rasmini biriktirish
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
 
                   {/* Itemized details */}
                   {textLines.length > 0 && (
@@ -586,6 +680,71 @@ export default function HisobKitobPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Add Photo Modal */}
+      <Modal
+        open={Boolean(addingPhotoToOrder)}
+        onClose={() => setAddingPhotoToOrder(null)}
+        title={`${addingPhotoToOrder?.clientName || "Mijoz"} hisobiga dizayn qo'shish`}
+      >
+        <form onSubmit={handleAddPhotoSubmit} className="space-y-3.5">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Dizayn rasmi
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              required
+              onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+              className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-slate-900 dark:text-slate-100 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Dizayn nomi
+            </label>
+            <input
+              value={photoTitle}
+              onChange={(e) => setPhotoTitle(e.target.value)}
+              placeholder="Masalan: Banner varianti 2"
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Qo'shimcha narxi (so'm)
+            </label>
+            <input
+              value={photoAmount}
+              onChange={(e) => setPhotoAmount(e.target.value)}
+              inputMode="decimal"
+              placeholder="Masalan: 150000"
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setAddingPhotoToOrder(null)}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full"
+            >
+              Bekor qilish
+            </button>
+            <button
+              type="submit"
+              disabled={isUploading || !photoFile}
+              className="px-5 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-md shadow-purple-500/20 disabled:opacity-50"
+            >
+              {isUploading ? "Yuklanmoqda..." : "Rasmni qo'shish"}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
+

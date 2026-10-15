@@ -34,7 +34,6 @@ type Order = {
 };
 const STAGES = [
   { id: "new", label: "Yangi", color: "bg-[#8e8e93]" },
-  { id: "hisob_kitob", label: "Hisob-kitob", color: "bg-[#bf5af2]" },
   { id: "in_progress", label: "Jarayonda", color: "bg-[#0a84ff]" },
   { id: "review", label: "Tekshiruvda", color: "bg-[#ff9f0a]" },
   { id: "confirmed", label: "Tasdiqlandi", color: "bg-[#34c759]" },
@@ -231,11 +230,14 @@ export default function OrdersPage() {
         collisionDetection={closestCorners}
         onDragEnd={onDragEnd}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {STAGES.map((stage) => {
-            const stageOrders = visibleOrders.filter(
-              (o) => o.stage === stage.id
-            );
+            const stageOrders = visibleOrders.filter((o) => {
+              if (stage.id === "review") {
+                return o.stage === "review" || o.stage === "hisob_kitob";
+              }
+              return o.stage === stage.id;
+            });
             const total = stageOrders.reduce(
               (s, o) => s + parseMoneyInput(o.amount),
               0
@@ -434,8 +436,15 @@ function OrderCard({
         </button>
       </div>
       <div className="px-1">
-        <div className="font-medium text-sm text-slate-900 dark:text-slate-100 mb-1">
-          {order.title}
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <div className="font-medium text-sm text-slate-900 dark:text-slate-100">
+            {order.title}
+          </div>
+          {order.stage === "hisob_kitob" && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+              Hisob-kitobda
+            </span>
+          )}
         </div>
         {order.clientName && (
           <div className="text-xs text-slate-500 mb-2">
