@@ -15,6 +15,7 @@ import {
   Clock,
   Layers,
   ArrowUpRight,
+  ArrowRight,
   TrendingUp,
   Camera,
   Send,
@@ -377,15 +378,27 @@ export default function ProfillarPage() {
                 <div>
                   {/* Top Bar */}
                   <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3">
+                    <Link
+                      href={`/profillar/${p.id}`}
+                      className="flex items-center gap-3 group/title"
+                    >
                       <div
-                        className={`w-12 h-12 rounded-2xl ${pl.bg} ${pl.color} flex items-center justify-center border ${pl.border} shadow-sm shrink-0`}
+                        className={`w-12 h-12 rounded-2xl ${pl.bg} ${pl.color} flex items-center justify-center border ${pl.border} shadow-sm shrink-0 group-hover/title:scale-105 transition-transform`}
                       >
-                        <Icon className="w-6 h-6" />
+                        {p.avatarUrl ? (
+                          <img
+                            src={p.avatarUrl}
+                            alt={p.name}
+                            className="w-full h-full object-cover rounded-2xl"
+                          />
+                        ) : (
+                          <Icon className="w-6 h-6" />
+                        )}
                       </div>
                       <div>
-                        <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 leading-tight">
+                        <h3 className="font-bold text-base text-slate-900 dark:text-slate-100 leading-tight group-hover/title:text-accent transition-colors flex items-center gap-1.5">
                           {p.name}
+                          <ArrowRight className="w-3.5 h-3.5 opacity-0 -translate-x-1 group-hover/title:opacity-100 group-hover/title:translate-x-0 transition-all text-accent" />
                         </h3>
                         {p.handle && (
                           <div className="text-xs text-slate-400 font-mono mt-0.5">
@@ -393,7 +406,7 @@ export default function ProfillarPage() {
                           </div>
                         )}
                       </div>
-                    </div>
+                    </Link>
 
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -454,25 +467,33 @@ export default function ProfillarPage() {
 
                 {/* Card Actions */}
                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 mt-2">
-                  {p.url ? (
-                    <a
-                      href={p.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-accent transition-colors"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" /> Profilga o'tish
-                    </a>
-                  ) : (
-                    <div />
-                  )}
-
                   <Link
-                    href={`/kontent?profileId=${p.id}`}
-                    className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full text-xs font-bold bg-accent-soft text-accent hover:bg-accent hover:text-white transition-all shadow-sm"
+                    href={`/profillar/${p.id}`}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition-all shadow-sm"
                   >
-                    <Sparkles className="w-3.5 h-3.5" /> Kontent rejasi
+                    Profilni ochish <ArrowRight className="w-3.5 h-3.5" />
                   </Link>
+
+                  <div className="flex items-center gap-2">
+                    {p.url && (
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Tashqi profil havolasi"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                    <Link
+                      href={`/kontent?profileId=${p.id}`}
+                      className="p-2 rounded-full text-slate-400 hover:text-accent hover:bg-accent/10 transition-colors"
+                      title="Umumiy kontent doskasiga o'tish"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
                 </div>
               </div>
             );

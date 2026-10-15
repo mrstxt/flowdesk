@@ -311,6 +311,20 @@ CREATE TABLE IF NOT EXISTS content_items (
   created_at TIMESTAMP DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+-- 18. profile_assets (feys rasmlari, oylik kontentlar)
+CREATE TABLE IF NOT EXISTS profile_assets (
+  id SERIAL PRIMARY KEY,
+  profile_id INTEGER NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  type VARCHAR(50) NOT NULL DEFAULT 'face',
+  month VARCHAR(20),
+  file_url TEXT NOT NULL,
+  file_type VARCHAR(50) DEFAULT 'image',
+  caption TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
 `;
 
 async function main() {

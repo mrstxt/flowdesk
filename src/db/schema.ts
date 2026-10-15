@@ -310,3 +310,19 @@ export const contentItems = pgTable("content_items", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/* ── Media: Profil resurslari (feys rasmlari, oylik kontentlar, grid preview) ── */
+
+export const profileAssets = pgTable("profile_assets", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  type: varchar("type", { length: 50 }).notNull().default("face"), // 'face' | 'monthly' | 'grid' | 'highlight'
+  month: varchar("month", { length: 20 }), // e.g. '2026-10'
+  fileUrl: text("file_url").notNull(),
+  fileType: varchar("file_type", { length: 50 }).default("image"), // image, video, file
+  caption: text("caption"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
