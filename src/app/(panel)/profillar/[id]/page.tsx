@@ -1301,6 +1301,66 @@ export default function ProfileDetailPage() {
             </div>
           </div>
 
+          {/* Quick AI Modellar Launcher */}
+          <div className="bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-blue-500/10 border border-purple-500/20 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                <Bot className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <span>AI Modellar & Vositalar</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-400 font-semibold">
+                    1-Click Ochiq
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Feys rasmingizdan nusxa olib, to'g'ridan-to'g'ri AI modelida yangi kadr yarating.
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <a
+                href="https://discord.com/channels/@me"
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 shadow-sm transition-all"
+              >
+                Midjourney ↗
+              </a>
+              <a
+                href="https://fal.ai"
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-[11px] font-semibold inline-flex items-center gap-1 shadow-sm transition-all"
+              >
+                Flux.1 ↗
+              </a>
+              <a
+                href="https://klingai.com"
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 shadow-sm transition-all"
+              >
+                Kling AI ↗
+              </a>
+              <a
+                href="https://chatgpt.com"
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 shadow-sm transition-all"
+              >
+                ChatGPT ↗
+              </a>
+              <Link
+                href="/ai-modellar"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-semibold inline-flex items-center gap-1 transition-all"
+              >
+                Barcha AI modellar →
+              </Link>
+            </div>
+          </div>
+
           {/* Feys Rasmlari Gallery */}
           <div className="glass rounded-3xl p-6 sm:p-8 border border-black/[0.04] dark:border-white/[0.06] shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

@@ -341,6 +341,20 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
   data TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
+
+-- 20. ai_models (foydalanuvchi ishlatadigan AI vositalari)
+CREATE TABLE IF NOT EXISTS ai_models (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  url TEXT NOT NULL,
+  category VARCHAR(100) NOT NULL DEFAULT 'image',
+  description TEXT,
+  prompt_template TEXT,
+  notes TEXT,
+  favorite BOOLEAN DEFAULT TRUE,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
 `;
 
 async function main() {

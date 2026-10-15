@@ -15,6 +15,7 @@ import {
   Receipt,
   Sparkles,
   Globe,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +36,7 @@ const groups = [
     items: [
       { href: "/kontent", label: "Kontent", icon: Sparkles },
       { href: "/profillar", label: "Profillar", icon: Globe },
+      { href: "/ai-modellar", label: "AI Modellar", icon: Bot },
     ],
   },
   {

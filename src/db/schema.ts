@@ -340,5 +340,21 @@ export const uploadedFiles = pgTable("uploaded_files", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/* ── Media: AI Modellar va vositalar ── */
+
+export const aiModels = pgTable("ai_models", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  url: text("url").notNull(),
+  category: varchar("category", { length: 100 }).notNull().default("image"), // image, video, text, voice, face_swap, 3d, other
+  description: text("description"),
+  promptTemplate: text("prompt_template"), // sevimli prompt yoki ko'rsatmalar
+  notes: text("notes"),
+  favorite: boolean("favorite").default(true),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
 
 
