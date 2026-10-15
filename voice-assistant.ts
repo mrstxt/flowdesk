@@ -837,12 +837,27 @@ async function runWorker() {
   console.log("👂 Sizdan xabar va ovozlar kutilmoqda...\n");
 
   const entity = await client.getInputEntity(target);
+  const targetEntity: any = await client.getEntity(target);
+  const targetIdStr = targetEntity?.id ? targetEntity.id.toString() : "";
+  console.log(`🔒 Yordamchi qat'iy ravishda faqat Sohibjon (@${targetEntity?.username || target}, ID: ${targetIdStr}) bilan ishlaydi.`);
 
   // 1. INCOMING MESSAGES (Ovozli va matnli xabarlarni eshitish va javob berish)
   client.addEventHandler(async (event) => {
     try {
       const msg = event.message;
       if (!msg || msg.out) return;
+
+      // QAT'IY FILTR: Kanallar va guruhlardagi postlar mutlaqo e'tiborga olinmaydi!
+      if (msg.isChannel || msg.isGroup) return;
+
+      // QAT'IY FILTR: Faqat Sohibjon (@sulaymonovss) dan kelgan shaxsiy chat xabarlarigina olinadi!
+      const senderId = msg.senderId ? msg.senderId.toString() : "";
+      const chatId = msg.chatId ? msg.chatId.toString() : "";
+      const peerUserId = msg.peerId && "userId" in msg.peerId ? (msg.peerId as any).userId.toString() : "";
+
+      if (targetIdStr && senderId !== targetIdStr && chatId !== targetIdStr && peerUserId !== targetIdStr) {
+        return; // Boshqa profillar, kanallar yoki begona chatlar mutlaqo o'tkazib yuboriladi!
+      }
 
       let receivedText = msg.text || msg.message || "";
       let isVoice = false;
@@ -1785,7 +1800,7 @@ async function runWorker() {
         await client.sendMessage(entity, { message: "⚠️ Kechirasiz Sohibjon, kichik xatolik bo'ldi. Iltimos, qaytadan yozib yuboring." });
       } catch {}
     }
-  }, new NewMessage({ incoming: true }));
+  }, new NewMessage({ incoming: true, chats: [entity] }));
 
   // 2. BACKGROUND ALARM & REMINDER LOOP (Har 30 soniyada tekshirish)
   console.log("⏰ Ogohlantirish va uyg'otish vaqtlari tekshiruvi ishga tushdi...");
