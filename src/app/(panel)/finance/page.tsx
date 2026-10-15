@@ -319,10 +319,10 @@ export default function FinancePage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-            Hisob-kitob
+            Moliya
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1.5">
-            Tugatilgan buyurtmalar daromadi, xarajatlar va hisobot
+            Karta hisoblari, daromadlar, xarajatlar va hisobot
           </p>
         </div>
         <div className="flex gap-2">

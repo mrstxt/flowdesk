@@ -12,6 +12,7 @@ import {
   Clapperboard,
   BarChart3,
   Calendar,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,8 @@ const groups = [
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
       { href: "/orders", label: "Buyurtmalar", icon: Kanban },
-      { href: "/finance", label: "Hisob-kitob", icon: Wallet },
+      { href: "/hisob-kitob", label: "Hisob-kitob", icon: Receipt },
+      { href: "/finance", label: "Moliya", icon: Wallet },
       { href: "/goals", label: "Maqsadlar", icon: Target },
       { href: "/subscriptions", label: "Obunalar", icon: Calendar },
     ],
